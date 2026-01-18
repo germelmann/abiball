@@ -101,6 +101,9 @@ class Main < Sinatra::Base
         participants = data[:participants]
         event_id = data[:event_id]
         tier_id = data[:tier_id]
+
+        puts "Creating ticket order: user_email=#{user_email}, ticket_count=#{ticket_count}, event_id=#{event_id}, tier_id=#{tier_id}"
+        puts "Participants: #{participants.inspect}"
         
         # Verify event exists and is accessible
         event = neo4j_query(<<~END_OF_QUERY, {event_id: event_id}).map { |e| e['e'] }
@@ -110,8 +113,6 @@ class Main < Sinatra::Base
         END_OF_QUERY
 
         event = event.first
-
-        puts event
         
         if event.empty?
             respond(success: false, error: "Event nicht gefunden.")
