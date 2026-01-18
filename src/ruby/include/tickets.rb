@@ -92,7 +92,9 @@ class Main < Sinatra::Base
         require_user_with_permission!("buy_tickets")
         data = parse_request_data(required_keys: [:ticket_count, :participants, :event_id],
                                   optional_keys: [:tier_id],
-                                  types: {ticket_count: Integer, participants: Array})
+                                  types: {ticket_count: Integer, participants: Array},
+                                  max_body_length: 2048,
+                                  max_string_length: 2048)
         
         user_email = @session_user[:email]
         ticket_count = data[:ticket_count]
