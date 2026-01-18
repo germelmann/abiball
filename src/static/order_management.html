@@ -1,0 +1,840 @@
+#{site_for_user_with_permission!("view_users")}
+<div class='container'>
+    <h1>Bestellungsmanagement</h1>
+    
+    <!-- Event Filter Dropdown -->
+    <div class='row mb-3'>
+        <div class='col-md-6'>
+            <label for="event_filter_select" class="form-label"><i class="bi bi-calendar-event"></i> Event-Filter:</label>
+            <select class="form-select" id="event_filter_select">
+                <option value="">Alle Events</option>
+            </select>
+        </div>
+    </div>
+    
+    <!-- Statistics Dashboard -->
+    <div class='row mb-4'>
+        <div class='col-md-12'>
+            <h3><i class="bi bi-bar-chart"></i> Statistiken</h3>
+            <div class="row" id="statistics_cards">
+                <div class="col-md-3">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title" id="total_tickets_sold">-</h4>
+                                    <p class="card-text">Tickets (gesamt)</p>
+                                    <small id="tickets_breakdown" class="opacity-75"></small>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="bi bi-ticket-detailed" style="font-size: 2rem;"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-success text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title" id="tickets_available">-</h4>
+                                    <p class="card-text">Tickets verfügbar</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="bi bi-check-circle" style="font-size: 2rem;"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-warning text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title" id="revenue_total">-</h4>
+                                    <p class="card-text">Gesamtumsatz</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="bi bi-currency-euro" style="font-size: 2rem;"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-info text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title" id="total_participants">-</h4>
+                                    <p class="card-text">Teilnehmer</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="bi bi-people" style="font-size: 2rem;"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Payment Status Breakdown -->
+            <div class="row mt-3">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title">Ticket-Status</h6>
+                            <div class="row">
+                                <div class="col-4">
+                                    <div class="text-success">
+                                        <strong id="tickets_paid">-</strong> bezahlt
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="text-warning">
+                                        <strong id="tickets_reserved">-</strong> reserviert
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="text-secondary">
+                                        <strong id="paid_orders">-</strong> / <strong id="pending_orders">-</strong> Bestellungen
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title">Aktionen</h6>
+                            <button class="btn btn-primary btn-sm" onclick="generateOrderSummaryPDF()">
+                                <i class="bi bi-file-pdf"></i> Bestellübersicht PDF
+                            </button>
+                            <button class="btn btn-secondary btn-sm ms-2" onclick="refreshStatistics()">
+                                <i class="bi bi-arrow-clockwise"></i> Aktualisieren
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Orders Table -->
+    <div class='row'>
+        <div class='col-md-12'>
+            <h3><i class="bi bi-list"></i> Bestellungen</h3>
+            
+            <!-- Payment Request Actions -->
+            <div class="mb-3 d-flex gap-2 align-items-center">
+                <button class="btn btn-success btn-sm" id="bulk_send_payment_requests_btn" onclick="showBulkPaymentRequestModal()">
+                    <i class="bi bi-envelope-paper"></i> Zahlungsaufforderungen senden
+                </button>
+                <span class="text-muted small">
+                    <i class="bi bi-info-circle"></i> Sende Zahlungsaufforderungen an alle Bestellungen ohne Zahlungsanfrage
+                </span>
+            </div>
+            
+            <div class="table-responsive">
+                <table class='table table-striped table-hover table-sm'>
+                    <thead>
+                        <tr>
+                            <th class="text-nowrap">Benutzer</th>
+                            <th class="text-nowrap">E-Mail</th>
+                            <th class="text-nowrap">Tickets</th>
+                            <th class="text-nowrap">Einzelpreis</th>
+                            <th class="text-nowrap">Gesamtpreis</th>
+                            <th class="text-nowrap">Referenz</th>
+                            <th class="text-nowrap">Status</th>
+                            <th class="text-nowrap">Zahlung</th>
+                            <th class="text-nowrap">Bestellt am</th>
+                            <th class="text-nowrap">Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody id='ticket_orders_list'>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Payment Request Modal -->
+<div class="modal fade" id="bulkPaymentRequestModal" tabindex="-1" aria-labelledby="bulkPaymentRequestModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkPaymentRequestModalLabel"><i class="bi bi-envelope-paper"></i> Zahlungsaufforderungen senden</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <p>Diese Aktion sendet Zahlungsaufforderungen an alle ausstehenden Bestellungen ohne bisherige Zahlungsanfrage.</p>
+                <div class="mb-3">
+                    <label for="bulk_event_select" class="form-label">Event auswählen</label>
+                    <select class="form-select" id="bulk_event_select" required>
+                        <option value="">Event auswählen...</option>
+                    </select>
+                </div>
+                <div id="bulk_preview" class="alert alert-info" style="display: none;">
+                    <span id="bulk_preview_count"></span> Bestellungen werden eine Zahlungsaufforderung erhalten.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-success" id="confirm_bulk_send_btn" onclick="sendBulkPaymentRequests()">
+                    <i class="bi bi-send"></i> Zahlungsaufforderungen senden
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Send Payment Request Modal -->
+<div class="modal fade" id="sendPaymentRequestModal" tabindex="-1" aria-labelledby="sendPaymentRequestModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="sendPaymentRequestModalLabel"><i class="bi bi-credit-card"></i> Zahlungsaufforderung senden</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <p>Zahlungsaufforderung für Bestellung <strong id="pr_order_ref"></strong> senden.</p>
+                <input type="hidden" id="pr_order_id">
+                <input type="hidden" id="pr_event_id">
+                <div class="mb-3">
+                    <label for="bank_account_select" class="form-label">Bankkonto auswählen</label>
+                    <select class="form-select" id="bank_account_select" required>
+                        <option value="">Bankkonto auswählen...</option>
+                    </select>
+                </div>
+                <div id="bank_account_details" style="display: none;" class="alert alert-secondary">
+                    <strong>Bankverbindung:</strong><br>
+                    <span id="bank_details_display"></span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-success" onclick="confirmSendPaymentRequest()">
+                    <i class="bi bi-send"></i> Zahlungsaufforderung senden
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Order Details Modal -->
+<div class="modal fade" id="orderDetailsModal" tabindex="-1" aria-labelledby="orderDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title fs-5" id="orderDetailsModalLabel">Bestellung #<span id="order_id_display"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <form id="order_form">
+                    <input type="hidden" id="order_id_input">
+                    
+                    <!-- User Information -->
+                    <h6 class="mb-3"><i class="bi bi-person"></i> Benutzerinformationen</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="user_name_input" class="form-label">Name</label>
+                            <input type="text" class="form-control" id="user_name_input" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="user_email_input" class="form-label">E-Mail</label>
+                            <input type="email" class="form-control" id="user_email_input" readonly>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Benutzerprofil</label>
+                            <div>
+                                <a href="#" id="user_profile_link_modal" class="btn btn-sm btn-outline-primary" target="_blank">
+                                    <i class="bi bi-person"></i> Benutzerprofil anzeigen
+                                </a>
+                                <br><small class="text-muted">Adresse und weitere Details im Benutzerprofil</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="user_phone_input" class="form-label">Telefon</label>
+                            <input type="text" class="form-control" id="user_phone_input" readonly>
+                        </div>
+                    </div>
+
+                    <!-- Order Information -->
+                    <h6 class="mb-3"><i class="bi bi-ticket"></i> Bestellinformationen</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label for="ticket_count_input" class="form-label">Anzahl Tickets</label>
+                            <input type="number" class="form-control" id="ticket_count_input" min="1">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="total_price_input" class="form-label">Gesamtpreis</label>
+                            <input type="number" class="form-control" id="total_price_input" min="0" step="0.01">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="payment_reference_input" class="form-label">Referenz</label>
+                            <input type="text" class="form-control" id="payment_reference_input">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="status_input" class="form-label">Status</label>
+                            <select class="form-control" id="status_input">
+                                <option value="pending">Ausstehend</option>
+                                <option value="paid">Bezahlt</option>
+                                <option value="cancelled">Storniert</option>
+                                <option value="cancelled_by_user">Storniert durch Käufer</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="created_at_input" class="form-label">Bestellt am</label>
+                            <input disabled type="text" class="form-control" id="created_at_input" readonly>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="paid_at_input" class="form-label">Bezahlt am</label>
+                            <input disabled type="text" class="form-control" id="paid_at_input">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">PDF & Tickets</label>
+                            <div>
+                                <button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="generateOrderPDF()">
+                                    <i class="bi bi-file-pdf"></i> Bestellbestätigung
+                                </button>
+                                <button type="button" class="btn btn-outline-success btn-sm" id="generate_tickets_btn" onclick="generateTickets()" style="display:none;">
+                                    <i class="bi bi-ticket-detailed"></i> Tickets generieren
+                                </button>
+                                <div class="mt-2" id="tickets_status" style="display:none;">
+                                    <small class="text-success">
+                                        <i class="bi bi-check-circle"></i> Tickets generiert
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger me-auto" id="delete_order_modal_btn" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                    <i class="bi bi-trash"></i> Bestellung löschen
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+                <button type="button" class="btn btn-primary" id="save_order_btn" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>Speichern</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentOrder = null;
+    let currentBankAccounts = [];
+    
+    // Format price for display
+    function formatPrice(price) {
+        const priceNum = parseFloat(price) || 0;
+        if (priceNum === 0) {
+            return 'Kostenlos';
+        }
+        return priceNum.toFixed(2) + '€';
+    }
+    
+    // Get payment request status badge
+    function getPaymentRequestStatusBadge(paymentRequest) {
+        if (!paymentRequest || !paymentRequest.id) {
+            return '<span class="badge bg-secondary">Nicht gesendet</span>';
+        }
+        if (paymentRequest.status === 'paid') {
+            return '<span class="badge bg-success">Bezahlt</span>';
+        }
+        if (paymentRequest.status === 'sent') {
+            return '<span class="badge bg-info">Gesendet</span>';
+        }
+        return '<span class="badge bg-secondary">Nicht gesendet</span>';
+    }
+    
+    function refresh_ticket_orders() {
+        api_call('/api/all_ticket_orders', {}, function(data) {
+            if (data.success) {
+                $('#ticket_orders_list').empty();
+                for (let order of data.orders) {
+                    let row = $('<tr>');
+                    
+                    // Add row class for error status
+                    if (order.status === 'error') {
+                        row.addClass('table-danger');
+                    }
+                    
+                    row.css('cursor','pointer').off('click').on('click', function(e) {
+                        // Only trigger if not clicking a button or inside a button
+                        if (!$(e.target).closest('button').length) {
+                            editOrder(order);
+                        }
+                    });
+                    row.append($('<td>').text(order.user_name || '-'));
+                    row.append($('<td>').text(order.user_email || '-'));
+                    row.append($('<td>').text(order.ticket_count || 0));
+                    row.append($('<td>').text(formatPrice(order.individual_ticket_price)));
+                    row.append($('<td>').text(formatPrice(order.total_price)));
+                    row.append($('<td>').text(order.payment_reference || '-'));
+                    
+                    let statusClass, statusText;
+                    if (['paid', 'pending', 'pending_payment', 'cancelled', 'cancelled_by_user'].includes(order.status)) {
+                        statusText = getOrderStatusText(order.status);
+                        statusClass = order.status === 'paid' ? 'text-success' : 'text-warning';
+                    } else if (order.status === 'error') {
+                        statusClass = 'text-danger';
+                        statusText = 'Fehler';
+                    } else {
+                        statusClass = 'text-warning';
+                        statusText = 'Ausstehend';
+                    }
+                    row.append($('<td>').html(`<span class="${statusClass}"><strong>${statusText}</strong></span>`));
+                    
+                    // Payment request status column
+                    row.append($('<td>').html(getPaymentRequestStatusBadge(order.latest_payment_request)));
+                    
+                    let createdDate = order.created_at ? new Date(order.created_at).toLocaleDateString('de-DE') : '-';
+                    row.append($('<td>').text(createdDate));
+                    
+                    // Actions column
+                    let actions = $('<div class="d-flex flex-nowrap gap-1">');
+
+                    // Mark as paid/unpaid buttons
+                    if (`#{user_has_permission?("manage_orders")}` ? "true" : "false") {
+                        // Send payment request button (only if no request sent yet and not paid)
+                        if (order.status !== 'paid' && (!order.latest_payment_request || !order.latest_payment_request.id)) {
+                            let sendPrButton = $('<button>')
+                                .addClass('btn btn-sm btn-info me-1')
+                                .html('<i class="bi bi-envelope-paper"></i>')
+                                .attr('title', 'Zahlungsaufforderung senden')
+                                .click((e) => { e.stopPropagation(); showSendPaymentRequestModal(order); });
+                            actions.append(sendPrButton);
+                        }
+                        
+                        if (order.status !== 'paid') {
+                            let paidButton = $('<button>')
+                                .addClass('btn btn-sm btn-success me-1')
+                                .html('<i class="bi bi-check"></i>')
+                                .attr('title', 'Als bezahlt markieren')
+                                .click((e) => { e.stopPropagation(); markOrderPaid(order.order_id); });
+                            actions.append(paidButton);
+                        } else {
+                            let unpaidButton = $('<button>')
+                                .addClass('btn btn-sm btn-warning me-1')
+                                .html('<i class="bi bi-x"></i>')
+                                .attr('title', 'Als unbezahlt markieren')
+                                .click((e) => { e.stopPropagation(); markOrderUnpaid(order.order_id); });
+                            actions.append(unpaidButton);
+                        }
+                        
+                        // Delete order button
+                        let deleteButton = $('<button>')
+                            .addClass('btn btn-sm btn-danger me-1')
+                            .html('<i class="bi bi-trash"></i>')
+                            .attr('title', 'Bestellung löschen')
+                            .click((e) => { e.stopPropagation(); deleteOrder(order.order_id, order.payment_reference); });
+                        actions.append(deleteButton);
+                    }
+                    
+                    row.append($('<td>').append(actions));
+                    $('#ticket_orders_list').append(row);
+                }
+            } else {
+                showTemplateModal('Fehler', 'Fehler beim Laden der Bestellungen: ' + (data.error || 'Unbekannter Fehler'), 'OK', 'btn-primary', null, null, function() {});
+            }
+        });
+    }
+    
+    
+    function refreshStatistics() {
+        let eventId = $('#event_filter_select').val();
+        let params = {};
+        if (eventId) {
+            params.event_id = eventId;
+        }
+        
+        api_call('/api/get_order_statistics', params, function(data) {
+            if (data.success) {
+                $('#total_tickets_sold').text(data.statistics.total_tickets_sold);
+                $('#tickets_available').text(data.statistics.tickets_available);
+                $('#revenue_total').text(data.statistics.revenue_total + '€');
+                $('#total_participants').text(data.statistics.total_participants);
+                $('#paid_orders').text(data.statistics.paid_orders);
+                $('#pending_orders').text(data.statistics.pending_orders);
+                // Display ticket breakdown (paid vs reserved)
+                const ticketsPaid = data.statistics.tickets_paid || 0;
+                const ticketsReserved = data.statistics.tickets_reserved || 0;
+                $('#tickets_paid').text(ticketsPaid);
+                $('#tickets_reserved').text(ticketsReserved);
+                $('#tickets_breakdown').text(`${ticketsPaid} bezahlt, ${ticketsReserved} reserviert`);
+            } else {
+                console.error('Fehler beim Laden der Statistiken:', data.error);
+            }
+        });
+    }
+    
+    function showParticipants(participants) {
+        let html = '<table class="table table-sm"><thead><tr><th>Ticket #</th><th>Name</th><th>Telefon</th><th>E-Mail</th></tr></thead><tbody>';
+        for (let participant of participants) {
+            if (participant.name) { // Only show non-empty participants
+                html += `<tr><td>${participant.ticket_number}</td><td>${participant.name}</td><td>${participant.phone || '-'}</td><td>${participant.email || '-'}</td></tr>`;
+            }
+        }
+        html += '</tbody></table>';
+        
+        $('#participants_details').html(html);
+        $('#participantsModal').modal('show');
+    }
+    
+    function editOrder(order) {
+        // Redirect to dedicated order detail page
+        window.location.href = `/order_detail/${order.order_id}`;
+    }
+    
+    
+    function saveOrderChanges() {
+        if (!currentOrder) return;
+        
+        // Collect form data
+        const orderData = {
+            order_id: currentOrder.order_id,
+            ticket_count: parseInt($('#ticket_count_input').val()),
+            total_price: $('#total_price_input').val(),
+            payment_reference: $('#payment_reference_input').val(),
+            status: $('#status_input').val(),
+            paid_at: $('#paid_at_input').val() || null,
+            // Include user information for updating
+            user_name: $('#user_name_input').val(),
+            user_email: $('#user_email_input').val(),
+            user_phone: $('#user_phone_input').val()
+        };
+        
+        // Send update request
+        api_call('/api/update_ticket_order', orderData, function(data) {
+            if (data.success) {
+                $('#orderDetailsModal').modal('hide');
+                refresh_ticket_orders();
+                refreshStatistics();
+                showTemplateModal('Erfolg', 'Bestellung wurde erfolgreich aktualisiert.', 'OK', 'btn-success', null, null, function() {});
+            } else {
+                showTemplateModal('Fehler', data.error || 'Fehler beim Speichern der Änderungen', 'OK', 'btn-primary', null, null, function() {});
+            }
+        });
+    }
+    
+    function markOrderPaid(orderId) {
+        api_call('/api/mark_order_paid', {order_id: orderId}, function(data) {
+            if (data.success) {
+                refresh_ticket_orders();
+                refreshStatistics();
+            }
+        });
+    }
+    
+    function markOrderUnpaid(orderId) {
+        api_call('/api/mark_order_unpaid', {order_id: orderId}, function(data) {
+            if (data.success) {
+                refresh_ticket_orders();
+                refreshStatistics();
+            }
+        });
+    }
+    
+    function deleteOrder(orderId, paymentReference) {
+        // Show confirmation dialog
+        showTemplateModal(
+            'Bestellung löschen', 
+            `Möchtest du die Bestellung ${paymentReference} wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.`,
+            'Ja, löschen',
+            'btn-danger',
+            'Abbrechen',
+            'btn-secondary',
+            function() {
+                // User confirmed deletion
+                api_call('/api/delete_ticket_order', {order_id: orderId}, function(data) {
+                    if (data.success) {
+                        refresh_ticket_orders();
+                        refreshStatistics();
+                        showTemplateModal('Erfolg', 'Bestellung wurde erfolgreich gelöscht.', 'OK', 'btn-success', null, null, function() {});
+                    } else {
+                        showTemplateModal('Fehler', data.error || 'Fehler beim Löschen der Bestellung', 'OK', 'btn-primary', null, null, function() {});
+                    }
+                });
+            }
+        );
+    }
+    
+    function generateOrderSummaryPDF() {
+        // Open PDF in new window
+        window.open('/api/generate_order_summary_pdf', '_blank');
+    }
+    
+    function generateOrderPDF() {
+        if (!currentOrder) return;
+        // Open order-specific PDF in new window
+        window.open(`/api/generate_order_pdf/${currentOrder.order_id}`, '_blank');
+    }
+    
+    function checkTicketGenerationStatus(orderId, status) {
+        if (status === 'paid') {
+            api_call(`/api/check_ticket_generation/${orderId}`, {}, function(data) {
+                if (data.success) {
+                    if (data.can_generate_tickets) {
+                        $('#generate_tickets_btn').show();
+                        $('#tickets_status').hide();
+                    } else if (data.tickets_generated) {
+                        $('#generate_tickets_btn').hide();
+                        $('#tickets_status').show();
+                    } else {
+                        $('#generate_tickets_btn').hide();
+                        $('#tickets_status').hide();
+                    }
+                } else {
+                    $('#generate_tickets_btn').hide();
+                    $('#tickets_status').hide();
+                }
+            });
+        } else {
+            $('#generate_tickets_btn').hide();
+            $('#tickets_status').hide();
+        }
+    }
+
+    function generateTickets() {
+        if (!currentOrder) return;
+        
+        // Show confirmation dialog
+        showTemplateModal(
+            'Tickets generieren', 
+            `Möchtest du die Tickets für Bestellung ${currentOrder.payment_reference} generieren und freigeben? Nach der Freigabe können die Tickets von den Kunden heruntergeladen werden.`,
+            'Ja, Tickets generieren',
+            'btn-success',
+            'Abbrechen',
+            'btn-secondary',
+            function() {
+                // User confirmed ticket generation
+                api_call('/api/generate_tickets', {order_id: currentOrder.order_id}, function(data) {
+                    if (data.success) {
+                        $('#generate_tickets_btn').hide();
+                        $('#tickets_status').show();
+                        showTemplateModal('Erfolg', 'Tickets wurden erfolgreich generiert und freigegeben.', 'OK', 'btn-success', null, null, function() {});
+                    } else {
+                        showTemplateModal('Fehler', data.error || 'Fehler beim Generieren der Tickets', 'OK', 'btn-primary', null, null, function() {});
+                    }
+                });
+            }
+        );
+    }
+    
+    // ===========================================
+    // Payment Request Functions
+    // ===========================================
+    
+    // Show modal to send individual payment request
+    function showSendPaymentRequestModal(order) {
+        $('#pr_order_id').val(order.order_id);
+        $('#pr_order_ref').text(order.payment_reference);
+        $('#pr_event_id').val(order.event_id);
+        
+        // Load bank accounts for this event
+        api_call('/api/get_bank_accounts', {event_id: order.event_id}, function(data) {
+            if (data.success) {
+                currentBankAccounts = data.accounts;
+                $('#bank_account_select').empty().append('<option value="">Bankkonto auswählen...</option>');
+                for (let account of data.accounts) {
+                    $('#bank_account_select').append(`<option value="${account.id}">${account.account_name} (${account.percentage}%)</option>`);
+                }
+                $('#bank_account_details').hide();
+                $('#sendPaymentRequestModal').modal('show');
+            } else {
+                showTemplateModal('Fehler', 'Keine Bankkonten für dieses Event konfiguriert. Bitte zuerst Bankkonten in den Event-Einstellungen hinterlegen.', 'OK', 'btn-primary', null, null, function() {});
+            }
+        });
+    }
+    
+    // Update bank account details display when selection changes
+    $('#bank_account_select').change(function() {
+        const selectedId = $(this).val();
+        if (selectedId) {
+            const account = currentBankAccounts.find(a => a.id === selectedId);
+            if (account) {
+                $('#bank_details_display').html(`
+                    <strong>${account.account_name}</strong><br>
+                    ${account.bank_name}<br>
+                    IBAN: ${account.iban}<br>
+                    BIC: ${account.bic || '-'}
+                `);
+                $('#bank_account_details').show();
+            }
+        } else {
+            $('#bank_account_details').hide();
+        }
+    });
+    
+    // Confirm and send payment request
+    function confirmSendPaymentRequest() {
+        const orderId = $('#pr_order_id').val();
+        const bankAccountId = $('#bank_account_select').val();
+        
+        if (!bankAccountId) {
+            showTemplateModal('Fehler', 'Bitte wähle ein Bankkonto aus.', 'OK', 'btn-primary', null, null, function() {});
+            return;
+        }
+        
+        api_call('/api/send_payment_request', {
+            order_id: orderId,
+            bank_account_id: bankAccountId
+        }, function(data) {
+            if (data.success) {
+                $('#sendPaymentRequestModal').modal('hide');
+                showTemplateModal('Erfolg', 'Zahlungsaufforderung erfolgreich gesendet.', 'OK', 'btn-success', null, null, function() {
+                    refresh_ticket_orders();
+                    refreshStatistics();
+                });
+            } else {
+                showTemplateModal('Fehler', data.error || 'Fehler beim Senden der Zahlungsaufforderung', 'OK', 'btn-primary', null, null, function() {});
+            }
+        });
+    }
+    
+    // Show bulk payment request modal
+    function showBulkPaymentRequestModal() {
+        // Load events for selection
+        api_call('/api/get_events', {}, function(data) {
+            if (data.success) {
+                $('#bulk_event_select').empty().append('<option value="">Event auswählen...</option>');
+                for (let event of data.events) {
+                    $('#bulk_event_select').append(`<option value="${event.id}">${event.name} ${event.year}</option>`);
+                }
+                $('#bulk_preview').hide();
+                $('#bulkPaymentRequestModal').modal('show');
+            }
+        });
+    }
+    
+    // Update preview when event is selected
+    $('#bulk_event_select').change(function() {
+        const eventId = $(this).val();
+        if (eventId) {
+            api_call('/api/get_orders_by_payment_status', {
+                event_id: eventId,
+                payment_status: 'no_request'
+            }, function(data) {
+                if (data.success) {
+                    const count = data.orders.length;
+                    $('#bulk_preview_count').text(count);
+                    $('#bulk_preview').show();
+                    $('#confirm_bulk_send_btn').prop('disabled', count === 0);
+                }
+            });
+        } else {
+            $('#bulk_preview').hide();
+        }
+    });
+    
+    // Send bulk payment requests
+    function sendBulkPaymentRequests() {
+        const eventId = $('#bulk_event_select').val();
+        
+        if (!eventId) {
+            showTemplateModal('Fehler', 'Bitte wähle ein Event aus.', 'OK', 'btn-primary', null, null, function() {});
+            return;
+        }
+        
+        api_call('/api/send_bulk_payment_requests', {
+            event_id: eventId
+        }, function(data) {
+            if (data.success) {
+                $('#bulkPaymentRequestModal').modal('hide');
+                let message = `${data.sent_count} Zahlungsaufforderungen erfolgreich gesendet.`;
+                if (data.errors && data.errors.length > 0) {
+                    message += `\n\n${data.errors.length} Fehler aufgetreten.`;
+                }
+                showTemplateModal('Ergebnis', message, 'OK', 'btn-success', null, null, function() {
+                    refresh_ticket_orders();
+                    refreshStatistics();
+                });
+            } else {
+                showTemplateModal('Fehler', data.error || 'Fehler beim Senden der Zahlungsaufforderungen', 'OK', 'btn-primary', null, null, function() {});
+            }
+        });
+    }
+    
+    $(document).ready(function() {
+        loadEventFilter();
+        refresh_ticket_orders();
+        refreshStatistics();
+        
+        // Event filter change handler
+        $('#event_filter_select').change(function() {
+            refreshStatistics();
+        });
+        
+        // Save button handler
+        $('#save_order_btn').click(saveOrderChanges);
+        
+        // Delete button handler in modal
+        $('#delete_order_modal_btn').click(function() {
+            if (currentOrder) {
+                deleteOrder(currentOrder.order_id, currentOrder.payment_reference);
+                $('#orderDetailsModal').modal('hide');
+            }
+        });
+        
+        // Refresh every 30 seconds
+        setInterval(function() {
+            refresh_ticket_orders();
+            refreshStatistics();
+        }, 30000);
+    });
+    
+    function loadEventFilter() {
+        api_call('/api/get_events', {}, function(data) {
+            if (data.success) {
+                $('#event_filter_select').empty().append('<option value="">Alle Events</option>');
+                for (let event of data.events) {
+                    $('#event_filter_select').append(`<option value="${event.id}">${event.name} ${event.year}</option>`);
+                }
+            }
+        });
+    }
+</script>
+
+<style>
+    .card {
+        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+        border: 1px solid rgba(0, 0, 0, 0.125);
+    }
+    
+    .card-body h4 {
+        font-size: 1.5rem;
+        font-weight: bold;
+        margin-bottom: 0.25rem;
+    }
+    
+    .participant-name, .participant-contact {
+        margin-bottom: 0.5rem;
+    }
+    
+    .table th {
+        border-top: none;
+        font-weight: 600;
+    }
+    
+    .btn-sm {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+    }
+    
+    .statistics-card {
+        transition: transform 0.2s;
+    }
+    
+    .statistics-card:hover {
+        transform: translateY(-2px);
+    }
+</style>

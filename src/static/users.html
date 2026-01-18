@@ -1,0 +1,243 @@
+#{site_for_user_with_permission!("view_users")}
+<div class='container'>
+    <h1>Benutzer</h1>
+    <div class='row'>
+        <div class='col-md-12'>
+            <button class='btn btn-primary' id="open_new_user_modal" data-bs-toggle="modal" data-bs-target="#userModal" #{user_has_permission?("manage_users") ? "" : "style='display:none'"}>
+                <i class="bi bi-plus-lg"></i>&nbsp;&nbsp;Neuer Benutzer
+            </button>
+        </div>
+    </div>
+    <div class='row'>
+        <div class="table-responsive">
+            <table class='table table-sm table-striped'>
+                <thead>
+                    <tr>
+                        <th class="text-nowrap">Name</th>
+                        <th class="text-nowrap">Nutzer-ID</th>
+                        <th class="text-nowrap">E-Mail</th>
+                        <th class="text-nowrap">Telefon</th>
+                        <th class="text-nowrap">E-Mail Status</th>
+                    </tr>
+                </thead>
+                <tbody id='user_list'>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="userModal" tabindex="-1" aria-labelledby="userModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fs-5" id="userModalLabel">Neuer Benutzer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+      </div>
+      <div class="modal-body">
+        <form id="user_form">
+            <input type="hidden" id="user_id_input">
+            <div class="mb-3">
+                <label for="name_input" class="form-label">Name</label>
+                <input type="text" class="form-control" id="name_input" placeholder="Vollständiger Name" required>
+            </div>
+            <div class="mb-3">
+                <label for="username_input" class="form-label">Nutzer-ID</label>
+                <input type="text" class="form-control" id="username_input" placeholder="Nutzer-ID eingeben" required>
+                <div class="form-text">Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche erlaubt.</div>
+            </div>
+            <div class="mb-3">
+                <label for="email_input" class="form-label">E-Mail-Adresse</label>
+                <input type="email" class="form-control" id="email_input" placeholder="E-Mail-Adresse eingeben" required>
+            </div>
+            <div class="mb-3">
+                <label for="address_input" class="form-label">Adresse</label>
+                <textarea class="form-control" id="address_input" placeholder="Vollständige Adresse" rows="2"></textarea>
+            </div>
+            <div class="mb-3">
+                <label for="phone_input" class="form-label">Telefonnummer</label>
+                <input type="tel" class="form-control" id="phone_input" placeholder="Telefonnummer">
+            </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-danger d-none" id="delete_user_btn" #{user_has_permission?("manage_users") ? "" : "style='display:none'"}>Löschen</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+        <button type="button" class="btn btn-primary" id="save_user_btn" #{user_has_permission?("manage_users") ? "" : "style='display:none'"}>Speichern</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<script>
+    const PERMISSIONS = #{print_permissions_table()}
+    let assignablePermissions = [];
+
+    let editingUser = null;
+
+    // Validate username format (URL-safe characters only)
+    function validateUsername(username) {
+        // Allow only lowercase letters, numbers, hyphens, and underscores
+        return /^[a-z0-9_-]+$/i.test(username);
+    }
+
+    function fillUserForm(user) {
+        $('#name_input').val(user ? user.name : '');
+        $('#username_input').val(user ? user.username : '');
+        $('#email_input').val(user ? user.email : '');
+        $('#address_input').val(user ? user.address : '');
+        $('#phone_input').val(user ? user.phone : '');
+        $('#scanner_only_input').prop('checked', user ? (user.scanner_only || false) : false);
+        
+        
+        // Disable ALL permission buttons for new users (they must be created first)
+        if (!user || !user.username) {
+            $('.perm-toggle-btn').prop('disabled', true);
+            $('.perm-toggle-btn').attr('title', 'Bitte speichern Sie zuerst den Benutzer, bevor Sie Berechtigungen zuweisen');
+        }
+
+        if (user) {
+            $('#username_input').prop('disabled', true);
+            $('#delete_user_btn').removeClass('d-none');
+        } else {
+            $('#username_input').prop('disabled', false);
+            $('#delete_user_btn').addClass('d-none');
+        }
+    }
+
+    function getUserFormData() {
+        // Permissions are managed separately via toggle buttons
+        // They should NOT be included here anymore
+        
+        let formData = {
+            name: $('#name_input').val(),
+            username: $('#username_input').val(),
+            email: $('#email_input').val(),
+            address: $('#address_input').val(),
+            phone: $('#phone_input').val(),
+            permissions: [], // Empty - permissions managed separately
+            scanner_only: $('#scanner_only_input').is(':checked')
+        };
+        
+        // Preserve existing permissions if editing user
+        if (editingUser && editingUser.permissions) {
+            formData.permissions = editingUser.permissions;
+        }
+        
+        return formData;
+    }
+
+    function refresh_mitarbeiter() {
+        api_call('/api/get_user_permissions', {}, function(data) {
+            if (data.success) {
+                $('#user_list').empty();
+                for (let user of data.permissions) {
+                    let row = $('<tr>');
+                    row.append($('<td>').text(user.name));
+                    row.append($('<td>').text(user.username || ''));
+                    row.append($('<td>').text(user.email));
+                    row.append($('<td>').text(user.phone || ''));
+                    
+                    // Email verification status
+                    let emailStatusHtml = '';
+                    if (user.email_verified) {
+                        emailStatusHtml = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Bestätigt</span>';
+                    } else {
+                        emailStatusHtml = `<span class="badge bg-warning mb-1"><i class="bi bi-exclamation-triangle"></i> Ausstehend</span><br>`;
+                    }
+                    row.append($('<td>').html(emailStatusHtml));
+                    row.hover(
+                        function() {
+                            $(this).addClass('table-active').css('cursor', 'pointer');
+                        },
+                        function() {
+                            $(this).removeClass('table-active').css('cursor', 'default');
+                        }
+                    );
+                    row.click(function() {
+                        // Navigate to user detail page
+                        window.location.href = '/user/' + user.username;
+                    });
+
+                    $('#user_list').append(row);
+                }
+            }
+        });
+    }
+
+
+
+
+    $(document).ready(function() {
+        refresh_mitarbeiter();
+
+        // Real-time username validation for admin form
+        $('#username_input').on('input', function() {
+            let username = $(this).val().trim();
+            let feedbackDiv = $('#username_feedback');
+            
+            if (!feedbackDiv.length) {
+                feedbackDiv = $('<div id="username_feedback" class="form-text"></div>');
+                $(this).parent().append(feedbackDiv);
+            }
+            
+            if (username.length === 0) {
+                feedbackDiv.html('').removeClass('text-danger text-success');
+                $(this).removeClass('is-invalid is-valid');
+            } else if (!validateUsername(username)) {
+                feedbackDiv.html('<i class="bi bi-x-circle"></i> Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche erlaubt.').addClass('text-danger').removeClass('text-success');
+                $(this).addClass('is-invalid').removeClass('is-valid');
+            } else {
+                feedbackDiv.html('<i class="bi bi-check-circle"></i> Gültige Nutzer-ID').addClass('text-success').removeClass('text-danger');
+                $(this).addClass('is-valid').removeClass('is-invalid');
+            }
+        });
+
+        $('#open_new_user_modal').click(function() {
+            editingUser = null;
+            fillUserForm(null);
+            $('#userModalLabel').text('Neuer Benutzer');
+        });
+
+        $('#save_user_btn').click(function() {
+            let formData = getUserFormData();
+            if (!formData.name || !formData.email || !formData.username) {
+                showTemplateModal('Fehler', 'Bitte Name, Nutzer-ID und E-Mail-Adresse angeben.', 'OK', 'btn-primary', null, null, function() {});
+                return;
+            }
+            
+            // Validate username format
+            if (!validateUsername(formData.username)) {
+                showTemplateModal('Fehler', 'Nutzer-ID ist ungültig. Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche sind erlaubt.', 'OK', 'btn-primary', null, null, function() {});
+                return;
+            }
+            
+            api_call('/api/edit_user', formData, function(data) {
+                if (data.success) {
+                    $('#userModal').modal('hide');
+                    refresh_mitarbeiter();
+                } else {
+                    showTemplateModal('Fehler', data.error, 'OK', 'btn-primary', null, null, function() {});
+                }
+            });
+        });
+
+        $('#delete_user_btn').click(function() {
+            if (!editingUser) return;
+            showTemplateModal('Mitarbeiter löschen', 
+                `Möchtest du den Mitarbeiter "${editingUser.name}" wirklich löschen?`,
+                'Ja, löschen', 'btn-danger', 'Abbrechen', 'btn-secondary', function() {
+                    api_call('/api/delete_user', { username: editingUser.username }, function(data) {
+                        if (data.success) {
+                            $('#userModal').modal('hide');
+                            refresh_mitarbeiter();
+                        } else {
+                            showTemplateModal('Fehler', data.error, 'OK', 'btn-primary', null, null, function() {});
+                        }
+                    });
+                });
+        });
+    });
+    
+</script>

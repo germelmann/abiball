@@ -1,0 +1,743 @@
+#{site_for_scanner_or_permission!("manage_orders")}
+<style>
+    /* Scanner-only mode styles */
+    body.scanner-only-mode .header {
+        display: none;
+    }
+    
+    body.scanner-only-mode .container {
+        max-width: 100%;
+        padding: 0.5rem;
+    }
+    
+    /* Mobile optimization for scanner */
+    @media (max-width: 768px) {
+        #scanner-container {
+            max-width: 100%;
+        }
+        
+        .card {
+            margin-bottom: 0.5rem;
+        }
+        
+        .card-body {
+            padding: 0.75rem;
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .btn {
+            font-size: 1rem;
+            padding: 0.5rem 1rem;
+        }
+        
+        .btn-lg {
+            font-size: 1.1rem;
+            padding: 0.75rem 1.5rem;
+        }
+        
+        /* Ensure ticket info is visible without scrolling */
+        .ticket-info-card {
+            font-size: 0.9rem;
+        }
+        
+        .ticket-info-card .row {
+            margin-bottom: 0.25rem;
+        }
+        
+        /* Make scanner video responsive */
+        body.scanner-only-mode #scanner-video {
+            max-height: 40vh;
+        }
+    }
+    
+    #scanner-container {
+        position: relative;
+        width: 100%;
+        max-width: 600px;
+        margin: 0 auto;
+    }
+    #scanner-video {
+        width: 100%;
+        border-radius: 8px;
+        background: #000;
+    }
+    .scanner-overlay {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 80%;
+        height: 80%;
+        border: 3px solid #00ff00;
+        border-radius: 8px;
+        pointer-events: none;
+    }
+    .ticket-info-card {
+        animation: fadeIn 0.3s;
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .status-badge {
+        font-size: 1.2rem;
+        padding: 0.5rem 1rem;
+    }
+</style>
+
+<script>
+// Check if user is scanner-only and apply mode
+$(document).ready(function() {
+    api_call('/api/get_profile_data', {}, function(data) {
+        if (data.success && data.profile && data.profile.scanner_only) {
+            $('body').addClass('scanner-only-mode');
+        }
+    });
+});
+</script>
+
+<script>
+let codeReader = null;
+let scannerActive = false;
+let autoRedeemMode = true;
+let lastScannedTicket = null;
+
+$(document).ready(function() {
+    loadScannerMode();
+    updateModeDisplay();
+    
+    // Initialize scanner button
+    $('#start-scanner-btn').click(function() {
+        if (scannerActive) {
+            stopScanner();
+        } else {
+            startScanner();
+        }
+    });
+    
+    // Mode toggle
+    $('#mode-toggle-btn').click(function() {
+        autoRedeemMode = !autoRedeemMode;
+        saveScannerMode();
+        updateModeDisplay();
+    });
+    
+    // Redeem button (for info-only mode)
+    $(document).on('click', '#redeem-ticket-btn', function() {
+        redeemTicket();
+    });
+    
+    // Undo button
+    $('#undo-redemption-btn').click(function() {
+        undoLastRedemption();
+    });
+    
+    // Age correction button (delegated event handler)
+    $(document).on('click', '#correct-age-btn', function() {
+        showAgeCorrectionDialog();
+    });
+});
+
+function loadScannerMode() {
+    const savedMode = localStorage.getItem('scannerAutoRedeemMode');
+    if (savedMode !== null) {
+        autoRedeemMode = savedMode === 'true';
+    }
+}
+
+function saveScannerMode() {
+    localStorage.setItem('scannerAutoRedeemMode', autoRedeemMode.toString());
+}
+
+function updateModeDisplay() {
+    const modeText = autoRedeemMode ? 'Auto-Einlösung' : 'Nur-Info';
+    const modeIcon = autoRedeemMode ? 'bi-check-circle-fill' : 'bi-info-circle-fill';
+    const modeClass = autoRedeemMode ? 'btn-success' : 'btn-info';
+    
+    $('#mode-toggle-btn')
+        .removeClass('btn-success btn-info')
+        .addClass(modeClass)
+        .html(`<i class="bi ${modeIcon}"></i> Modus: ${modeText}`);
+    
+    $('#mode-description').text(
+        autoRedeemMode 
+            ? 'Tickets werden automatisch beim Scannen eingelöst' 
+            : 'Tickets werden gescannt und angezeigt, aber nicht automatisch eingelöst'
+    );
+}
+
+function startScanner() {
+    // $('#scanner-status').html('<span class="text-warning"><i class="bi bi-hourglass-split"></i> Scanner wird gestartet...</span>');
+    
+    codeReader = new ZXing.BrowserQRCodeReader();
+    
+    codeReader.decodeFromVideoDevice(undefined, 'scanner-video', (result, err) => {
+        if (result) {
+            handleQRCodeScanned(result.text);
+        }
+        if (err && !(err instanceof ZXing.NotFoundException)) {
+            console.error(err);
+        }
+    }).then(() => {
+        scannerActive = true;
+        $('#start-scanner-btn')
+            .removeClass('btn-primary')
+            .addClass('btn-danger')
+            .html('<i class="bi bi-stop-circle"></i> Scanner stoppen');
+        // $('#scanner-status').html('<span class="text-success"><i class="bi bi-camera-video"></i> Scanner aktiv</span>');
+    }).catch(err => {
+        console.error(err);
+        // $('#scanner-status').html('<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Fehler beim Starten des Scanners</span>');
+        showTemplateModal('Fehler', 'Kamera konnte nicht gestartet werden. Bitte überprüfe die Kamera-Berechtigungen.', 'OK', 'btn-danger', null, null, function() {});
+    });
+}
+
+function stopScanner() {
+    if (codeReader) {
+        codeReader.reset();
+        codeReader = null;
+    }
+    scannerActive = false;
+    $('#start-scanner-btn')
+        .removeClass('btn-danger')
+        .addClass('btn-primary')
+        .html('<i class="bi bi-camera"></i> Scanner starten');
+    // $('#scanner-status').html('<span class="text-muted"><i class="bi bi-camera-video-off"></i> Scanner gestoppt</span>');
+}
+
+function handleQRCodeScanned(qrData) {
+    // Temporarily stop scanning to prevent multiple scans
+    if (codeReader) {
+        codeReader.reset();
+        scannerActive = false;
+    }
+    
+    // $('#scanner-status').html('<span class="text-info"><i class="bi bi-hourglass-split"></i> Ticket wird überprüft...</span>');
+    
+    // Parse QR data to get order_id and ticket_number for later use
+    let qrDataParsed = null;
+    try {
+        qrDataParsed = JSON.parse(qrData);
+    } catch (e) {
+        // Will be handled by server
+    }
+    
+    api_call('/api/scan_ticket', {
+        qr_data: qrData,
+        auto_redeem: autoRedeemMode
+    }, function(data) {
+        if (data.success) {
+            // Store order_id and ticket_number from QR data
+            if (qrDataParsed) {
+                data.ticket.order_id = qrDataParsed.order_id;
+                data.ticket.ticket_number = qrDataParsed.ticket_number;
+            }
+            lastScannedTicket = data.ticket;
+            displayTicketInfo(data);
+        } else {
+            displayError(data.error || 'Unbekannter Fehler');
+        }
+        
+        // Restart scanner after 2 seconds in auto-redeem mode, or immediately in info mode
+        const restartDelay = (autoRedeemMode && data.success && data.status === 'redeemed') ? 2000 : 500;
+        setTimeout(() => {
+            if (!scannerActive) {
+                startScanner();
+            }
+        }, restartDelay);
+    });
+}
+
+function displayTicketInfo(data) {
+    const ticket = data.ticket;
+    const status = data.status;
+    
+    let statusBadgeClass = '';
+    let statusIcon = '';
+    let statusText = '';
+    let cardClass = '';
+    
+    switch(status) {
+        case 'redeemed':
+            statusBadgeClass = 'bg-success';
+            statusIcon = 'bi-check-circle-fill';
+            statusText = 'Eingelöst';
+            cardClass = 'border-success';
+            break;
+        case 'valid':
+            statusBadgeClass = 'bg-primary';
+            statusIcon = 'bi-check-circle';
+            statusText = 'Gültig';
+            cardClass = 'border-primary';
+            break;
+        case 'already_redeemed':
+            statusBadgeClass = 'bg-warning text-dark';
+            statusIcon = 'bi-exclamation-triangle-fill';
+            statusText = 'Bereits eingelöst';
+            cardClass = 'border-warning';
+            break;
+        default:
+            statusBadgeClass = 'bg-danger';
+            statusIcon = 'bi-x-circle-fill';
+            statusText = 'Fehler';
+            cardClass = 'border-danger';
+    }
+    
+    let redeemButton = '';
+    if (status === 'valid' && !autoRedeemMode) {
+        redeemButton = `
+            <button class="btn btn-success btn-lg w-100 mt-3" id="redeem-ticket-btn">
+                <i class="bi bi-check-circle"></i> Ticket einlösen
+            </button>
+        `;
+    }
+    
+    let redemptionInfo = '';
+    if (status === 'already_redeemed') {
+        redemptionInfo = `
+            <div class="alert alert-warning mt-3">
+                <strong>Eingelöst am:</strong> ${formatDateTime(data.redeemed_at)}<br>
+                <strong>Eingelöst von:</strong> ${data.redeemed_by || 'Unbekannt'}
+            </div>
+        `;
+    }
+    
+    // Display age status if available
+    let ageStatusHtml = '';
+    if (ticket.age_status) {
+        const ageStatus = ticket.age_status;
+        let ageBadgeColor = 'bg-success';
+        let ageIcon = 'bi-check-circle-fill';
+        
+        switch(ageStatus.color) {
+            case 'danger':
+                ageBadgeColor = 'bg-danger';
+                ageIcon = 'bi-exclamation-triangle-fill';
+                break;
+            case 'warning':
+                ageBadgeColor = 'bg-warning text-dark';
+                ageIcon = 'bi-exclamation-circle-fill';
+                break;
+            case 'info':
+                ageBadgeColor = 'bg-info text-dark';
+                ageIcon = 'bi-info-circle-fill';
+                break;
+            case 'success':
+                ageBadgeColor = 'bg-success';
+                ageIcon = 'bi-check-circle-fill';
+                break;
+        }
+        
+        ageStatusHtml = `
+            <div class="alert alert-${ageStatus.color} mt-3 d-flex align-items-center justify-content-between" role="alert">
+                <div>
+                    <span class="badge ${ageBadgeColor} me-2">
+                        <i class="bi ${ageIcon}"></i> ${ageStatus.category}
+                    </span>
+                    <strong>${ageStatus.text}</strong>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" id="correct-age-btn">
+                    <i class="bi bi-pencil"></i> Alter ist falsch
+                </button>
+            </div>
+        `;
+    }
+    
+    const html = `
+        <div class="card ticket-info-card ${cardClass}">
+            <div class="card-header text-center">
+                <span class="badge status-badge ${statusBadgeClass}">
+                    <i class="bi ${statusIcon}"></i> ${statusText}
+                </span>
+            </div>
+            <div class="card-body">
+                ${ageStatusHtml}
+                <div class="row mb-2">
+                    <div class="col-md-4"><strong>Name:</strong></div>
+                    <div class="col-md-8">${ticket.name || '-'}</div>
+                </div>
+                <div class="row mb-2">
+                    <div class="col-md-4"><strong>Telefon:</strong></div>
+                    <div class="col-md-8">${ticket.phone || '-'}</div>
+                </div>
+                <div class="row mb-2">
+                    <div class="col-md-4"><strong>E-Mail (Teilnehmer):</strong></div>
+                    <div class="col-md-8">${ticket.email || '-'}</div>
+                </div>
+                <div class="row mb-2">
+                    <div class="col-md-4"><strong>Besteller:</strong></div>
+                    <div class="col-md-8">${ticket.user_name || '-'}</div>
+                </div>
+                <div class="row mb-2">
+                    <div class="col-md-4"><strong>E-Mail (Besteller):</strong></div>
+                    <div class="col-md-8">${ticket.user_email || '-'}</div>
+                </div>
+                <div class="row mb-2">
+                    <div class="col-md-4"><strong>Referenz:</strong></div>
+                    <div class="col-md-8"><code>${ticket.payment_reference || '-'}</code></div>
+                </div>
+                ${redemptionInfo}
+                ${redeemButton}
+            </div>
+        </div>
+    `;
+    
+    $('#ticket-info').html(html);
+    
+    // Play success sound if ticket was redeemed
+    if (status === 'redeemed') {
+        playSuccessSound();
+    } else if (status === 'already_redeemed') {
+        playWarningSound();
+    }
+}
+
+function displayError(errorMessage) {
+    const html = `
+        <div class="card ticket-info-card border-danger">
+            <div class="card-header text-center bg-danger">
+                <span class="badge status-badge bg-danger">
+                    <i class="bi bi-x-circle-fill"></i> Ungültig
+                </span>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-danger mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> ${errorMessage}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    $('#ticket-info').html(html);
+    playErrorSound();
+}
+
+function redeemTicket() {
+    if (!lastScannedTicket) return;
+    
+    const orderIdMatch = $('#ticket-info').text().match(/Referenz:\s*([A-Z0-9]+)/);
+    if (!orderIdMatch) return;
+    
+    // Find order_id from the scanned data (we need to store it)
+    // For now, we'll use the API with the payment reference
+    // Better approach: store order_id in lastScannedTicket
+    
+    showTemplateModal(
+        'Ticket einlösen',
+        `Möchtest du das Ticket für "${lastScannedTicket.name}" wirklich einlösen?`,
+        'Einlösen',
+        'btn-success',
+        'Abbrechen',
+        'btn-secondary',
+        function() {
+            // We need the order_id and ticket_number
+            // Since we have the ticket info, we need to extract these
+            api_call('/api/redeem_ticket', {
+                order_id: lastScannedTicket.order_id,
+                ticket_number: lastScannedTicket.ticket_number
+            }, function(data) {
+                if (data.success) {
+                    showTemplateModal('Erfolg', 'Ticket erfolgreich eingelöst!', 'OK', 'btn-success', null, null, function() {});
+                    // Update display to show as redeemed
+                    displayTicketInfo({
+                        success: true,
+                        status: 'redeemed',
+                        ticket: lastScannedTicket
+                    });
+                } else {
+                    showTemplateModal('Fehler', data.error || 'Fehler beim Einlösen', 'OK', 'btn-danger', null, null, function() {});
+                }
+            });
+        }
+    );
+}
+
+function undoLastRedemption() {
+    showTemplateModal(
+        'Einlösung rückgängig machen',
+        'Möchtest du die letzte Einlösung wirklich rückgängig machen?',
+        'Ja, rückgängig machen',
+        'btn-warning',
+        'Abbrechen',
+        'btn-secondary',
+        function() {
+            api_call('/api/undo_last_redemption', {}, function(data) {
+                if (data.success) {
+                    const message = `Einlösung für Ticket #${data.ticket.ticket_number} (${data.ticket.name}) wurde rückgängig gemacht.`;
+                    showTemplateModal('Erfolg', message, 'OK', 'btn-success', null, null, function() {});
+                    
+                    // Clear ticket info display
+                    $('#ticket-info').html(`
+                        <div class="alert alert-success">
+                            <i class="bi bi-check-circle"></i> ${message}
+                        </div>
+                    `);
+                } else {
+                    showTemplateModal('Fehler', data.error || 'Fehler beim Rückgängigmachen', 'OK', 'btn-danger', null, null, function() {});
+                }
+            });
+        }
+    );
+}
+
+function showAgeCorrectionDialog() {
+    if (!lastScannedTicket) {
+        showTemplateModal('Fehler', 'Kein Ticket ausgewählt', 'OK', 'btn-danger', null, null, function() {});
+        return;
+    }
+    
+    // Create a custom modal for birthdate correction
+    const modalHtml = `
+        <div class="modal fade" id="ageCorrectionModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Geburtsdatum korrigieren</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info">
+                            <strong>Hinweis:</strong> Die Korrektur wird protokolliert.
+                        </div>
+                        <div class="mb-3">
+                            <label for="new_birthdate" class="form-label">Neues Geburtsdatum *</label>
+                            <input type="date" class="form-control" id="new_birthdate" required min="1900-01-01">
+                        </div>
+                        <div class="mb-3">
+                            <label for="correction_reason" class="form-label">Begründung *</label>
+                            <textarea class="form-control" id="correction_reason" rows="3" required placeholder="Bitte gib an, warum das Geburtsdatum korrigiert wird"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                        <button type="button" class="btn btn-primary" id="submit-correction-btn">Speichern</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    $('#ageCorrectionModal').remove();
+    
+    // Add modal to body
+    $('body').append(modalHtml);
+    
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('ageCorrectionModal'));
+    modal.show();
+    
+    // Handle submit
+    $('#submit-correction-btn').off('click').on('click', function() {
+        const newBirthdate = $('#new_birthdate').val();
+        const reason = $('#correction_reason').val()?.trim();
+        
+        if (!newBirthdate) {
+            showTemplateModal('Fehler', 'Bitte gib ein Geburtsdatum ein', 'OK', 'btn-danger', null, null, function() {});
+            return;
+        }
+        
+        if (!reason || reason.length < 5) {
+            showTemplateModal('Fehler', 'Bitte gib eine aussagekräftige Begründung ein (mindestens 5 Zeichen)', 'OK', 'btn-danger', null, null, function() {});
+            return;
+        }
+        
+        // Validate birthdate is not in the future
+        const birthdateObj = new Date(newBirthdate);
+        const today = new Date();
+        if (birthdateObj > today) {
+            showTemplateModal('Fehler', 'Das Geburtsdatum darf nicht in der Zukunft liegen', 'OK', 'btn-danger', null, null, function() {});
+            return;
+        }
+        
+        // Submit correction
+        api_call('/api/correct_birthdate', {
+            order_id: lastScannedTicket.order_id,
+            ticket_number: lastScannedTicket.ticket_number,
+            new_birthdate: newBirthdate,
+            reason: reason
+        }, function(data) {
+            modal.hide();
+            
+            if (data.success) {
+                showTemplateModal('Erfolg', 'Geburtsdatum wurde erfolgreich korrigiert', 'OK', 'btn-success', null, null, function() {});
+                
+                // Update the ticket display with new age status
+                if (data.age_status) {
+                    lastScannedTicket.age_status = data.age_status;
+                    displayTicketInfo({
+                        success: true,
+                        status: 'valid',
+                        ticket: lastScannedTicket
+                    });
+                }
+            } else {
+                showTemplateModal('Fehler', data.error || 'Fehler beim Korrigieren des Geburtsdatums', 'OK', 'btn-danger', null, null, function() {});
+            }
+        });
+    });
+    
+    // Clean up modal when hidden
+    $('#ageCorrectionModal').on('hidden.bs.modal', function () {
+        $(this).remove();
+    });
+}
+
+function formatDateTime(dateTimeStr) {
+    if (!dateTimeStr) return '-';
+    try {
+        const date = new Date(dateTimeStr);
+        return date.toLocaleString('de-DE');
+    } catch (e) {
+        return dateTimeStr;
+    }
+}
+
+function playSuccessSound() {
+    // Simple beep using Web Audio API
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        oscillator.frequency.value = 800;
+        oscillator.type = 'sine';
+        
+        gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+        
+        oscillator.start(audioCtx.currentTime);
+        oscillator.stop(audioCtx.currentTime + 0.15);
+    } catch (e) {
+        console.log('Audio playback not supported');
+    }
+}
+
+function playWarningSound() {
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        oscillator.frequency.value = 400;
+        oscillator.type = 'square';
+        
+        gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        
+        oscillator.start(audioCtx.currentTime);
+        oscillator.stop(audioCtx.currentTime + 0.3);
+    } catch (e) {
+        console.log('Audio playback not supported');
+    }
+}
+
+function playErrorSound() {
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Double beep for error
+        for (let i = 0; i < 2; i++) {
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            oscillator.frequency.value = 300;
+            oscillator.type = 'sawtooth';
+            
+            const startTime = audioCtx.currentTime + (i * 0.2);
+            gainNode.gain.setValueAtTime(0.2, startTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.15);
+            
+            oscillator.start(startTime);
+            oscillator.stop(startTime + 0.15);
+        }
+    } catch (e) {
+        console.log('Audio playback not supported');
+    }
+}
+</script>
+
+<div class='container'>
+    <div class='row'>
+        <div class='col-md-12'>           
+            <div class="row mt-4">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-camera-video"></i> Scanner</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <button id="mode-toggle-btn" class="btn btn-success w-100">
+                                    <i class="bi bi-check-circle-fill"></i> Modus: Auto-Einlösung
+                                </button>
+                                <!-- <small class="text-muted d-block mt-2" id="mode-description">
+                                    Tickets werden automatisch beim Scannen eingelöst
+                                </small> -->
+                            </div>
+                            <div id="scanner-container">
+                                <video id="scanner-video" style="display: block;"></video>
+                                <div class="scanner-overlay"></div>
+                            </div>
+                            
+                            <div class="mt-3 text-center">
+                                <button id="start-scanner-btn" class="btn btn-primary btn-lg">
+                                    <i class="bi bi-camera"></i> Scanner starten
+                                </button>
+                            </div>
+                            
+                            <!-- <div class="mt-3 text-center" id="scanner-status">
+                                <span class="text-muted"><i class="bi bi-camera-video-off"></i> Scanner gestoppt</span>
+                            </div> -->
+                        </div>
+                    </div>
+                    
+                    <!-- <div class="card mt-3">
+                        <div class="card-body">
+                            <button id="undo-redemption-btn" class="btn btn-warning w-100">
+                                <i class="bi bi-arrow-counterclockwise"></i> Letzte Einlösung rückgängig machen
+                            </button>
+                            <small class="text-muted d-block mt-2">
+                                Macht die zuletzt von dir eingelöste Ticket-Einlösung rückgängig
+                            </small>
+                        </div>
+                    </div> -->
+                </div>
+                
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-info-circle"></i> Ticket-Informationen</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="ticket-info">
+                                <div class="text-center text-muted py-5">
+                                    <i class="bi bi-qr-code" style="font-size: 3rem;"></i>
+                                    <p class="mt-3">Scanne ein Ticket, um Details anzuzeigen</p>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <button id="undo-redemption-btn" class="btn btn-warning w-100">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Letzte Einlösung rückgängig machen
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

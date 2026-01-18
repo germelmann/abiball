@@ -1,0 +1,257 @@
+#{site_for_user_with_permission!("manage_orders")}
+<div class='container'>
+    <h1>Quick Payment</h1>
+    <div class='row mb-4'>
+        <div class='col-md-8'>
+            <div class='card'>
+                <div class='card-header'>
+                    <h5 class='card-title mb-0'>Zahlung bearbeiten</h5>
+                </div>
+                <div class='card-body'>
+                    <div class='mb-3'>
+                        <label for="payment_reference_input" class="form-label">Verwendungszweck</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="payment_reference_input" 
+                                   placeholder="Verwendungszweck eingeben..." 
+                                   onkeypress="handleEnterKey(event)">
+                            <button class="btn btn-primary" type="button" onclick="searchPayment()">
+                                <i class="bi bi-search"></i> Suchen
+                            </button>
+                        </div>
+                        <div class="form-text">Verwendungszweck eingeben und Enter drücken oder auf Suchen klicken</div>
+                    </div>
+                    
+                    <div id="search_result" style="display: none;">
+                        <hr>
+                        <div id="order_details"></div>
+                        <div class="mt-3">
+                            <button class="btn btn-success me-2" onclick="markAsPaid()" id="mark_paid_btn">
+                                <i class="bi bi-check-circle"></i> Als bezahlt markieren
+                            </button>
+                            <button class="btn btn-secondary" onclick="clearSearch()">
+                                <i class="bi bi-x-circle"></i> Zurücksetzen
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="no_result" style="display: none;">
+                        <hr>
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            <strong>Keine Bestellung gefunden</strong><br>
+                            Für den eingegebenen Verwendungszweck wurde keine Bestellung gefunden.
+                        </div>
+                        <div class="mt-3">
+                            <button class="btn btn-danger me-2" onclick="markAsError()" id="mark_error_btn">
+                                <i class="bi bi-exclamation-triangle"></i> Als Fehler markieren
+                            </button>
+                            <button class="btn btn-secondary" onclick="clearSearch()">
+                                <i class="bi bi-x-circle"></i> Zurücksetzen
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class='col-md-4'>
+            <div class='card'>
+                <div class='card-body'>
+                    <h6 class='card-title'>Anleitung</h6>
+                    <ol class='mb-0'>
+                        <li>Verwendungszweck in das Eingabefeld eingeben</li>
+                        <li>Enter drücken oder auf "Suchen" klicken</li>
+                        <li>Bei gefundener Bestellung: Details prüfen und "Als bezahlt markieren" klicken</li>
+                        <li>Bei nicht gefundener Bestellung: "Als Fehler markieren" klicken</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentPaymentReference = '';
+
+$(document).ready(function() {
+    $('#payment_reference_input').focus();
+});
+
+function handleEnterKey(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        
+        // If search result is already shown, mark as paid
+        if ($('#search_result').is(':visible')) {
+            markAsPaid();
+        } else if ($('#no_result').is(':visible')) {
+            markAsError();
+        } else {
+            searchPayment();
+        }
+    }
+}
+
+function searchPayment() {
+    const paymentRef = $('#payment_reference_input').val().trim().toUpperCase();
+    
+    if (!paymentRef) {
+        showTemplateModal('Fehler', 'Bitte geben Sie einen Verwendungszweck ein.', 'OK', 'btn-secondary', '', '', function() {});
+        return;
+    }
+    
+    currentPaymentReference = paymentRef;
+    
+    // Hide previous results
+    $('#search_result').hide();
+    $('#no_result').hide();
+    
+    api_call('/api/search_payment_reference', {payment_reference: paymentRef}, function(response) {
+        if (response.success && response.order) {
+            showOrderFound(response.order);
+        } else {
+            showOrderNotFound();
+        }
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Suchen der Bestellung', 'OK', 'btn-secondary', '', '', function() {});
+    });
+}
+
+function showOrderFound(order) {
+    let statusClass = '';
+    let statusText = '';
+    
+    // Use common function for known statuses
+    if (['paid', 'pending', 'cancelled', 'cancelled_by_user'].includes(order.status)) {
+        statusText = getOrderStatusText(order.status);
+        statusClass = order.status === 'paid' ? 'text-success' : 'text-warning';
+    } else if (order.status === 'error') {
+        statusClass = 'text-danger';
+        statusText = 'Fehler';
+    } else {
+        statusClass = 'text-muted';
+        statusText = order.status || 'Unbekannt';
+    }
+    
+    const createdAt = order.created_at ? new Date(order.created_at).toLocaleDateString('de-DE') : '-';
+    const paidAt = order.paid_at ? new Date(order.paid_at).toLocaleDateString('de-DE') : '-';
+    
+    const details = `
+        <div class="alert alert-success">
+            <i class="bi bi-check-circle"></i>
+            <strong>Bestellung gefunden!</strong>
+        </div>
+        <div class="row">
+            <div class="col-sm-3"><strong>Kunde:</strong></div>
+            <div class="col-sm-9">${order.user_name} (${order.user_email})</div>
+        </div>
+        <div class="row">
+            <div class="col-sm-3"><strong>Tickets:</strong></div>
+            <div class="col-sm-9">${order.ticket_count} Stück</div>
+        </div>
+        <div class="row">
+            <div class="col-sm-3"><strong>Einzelpreis:</strong></div>
+            <div class="col-sm-9">${Number(order.individual_ticket_price || 0).toFixed(2)}€</div>
+        </div>
+        <div class="row">
+            <div class="col-sm-3"><strong>Gesamtpreis:</strong></div>
+            <div class="col-sm-9"><strong>${Number(order.total_price || 0).toFixed(2)}€</strong></div>
+        </div>
+        <div class="row">
+            <div class="col-sm-3"><strong>Status:</strong></div>
+            <div class="col-sm-9"><span class="${statusClass}"><strong>${statusText}</strong></span></div>
+        </div>
+        <div class="row">
+            <div class="col-sm-3"><strong>Bestellt am:</strong></div>
+            <div class="col-sm-9">${createdAt}</div>
+        </div>
+        <div class="row">
+            <div class="col-sm-3"><strong>Bezahlt am:</strong></div>
+            <div class="col-sm-9">${paidAt}</div>
+        </div>
+    `;
+    
+    $('#order_details').html(details);
+    
+    // Disable mark as paid button if already paid
+    if (order.status === 'paid') {
+        $('#mark_paid_btn').prop('disabled', true).text('Bereits bezahlt');
+    } else {
+        $('#mark_paid_btn').prop('disabled', false).html('<i class="bi bi-check-circle"></i> Als bezahlt markieren');
+    }
+    
+    $('#search_result').show();
+}
+
+function showOrderNotFound() {
+    $('#no_result').show();
+}
+
+function markAsPaid() {
+    if (!currentPaymentReference) {
+        return;
+    }
+    
+    showTemplateModal(
+        'Zahlung bestätigen',
+        `Soll die Bestellung mit Verwendungszweck "${currentPaymentReference}" als bezahlt markiert werden?`,
+        'Ja, als bezahlt markieren',
+        'btn-success',
+        'Abbrechen',
+        'btn-secondary',
+        function() {
+            api_call('/api/quick_mark_paid', {payment_reference: currentPaymentReference}, function(response) {
+                if (response.success) {
+                    showTemplateModal('Erfolg', 'Bestellung wurde als bezahlt markiert.', '', '', '', '', function() {});
+                    setTimeout(function() {
+                        $('#__template_modal').modal('hide');
+                        clearSearch();
+                        $('#payment_reference_input').focus();
+                    }, 1000);
+                } else {
+                    showTemplateModal('Fehler', 'Bestellung konnte nicht als bezahlt markiert werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+                }
+            }, function() {
+                showTemplateModal('Fehler', 'Netzwerkfehler beim Markieren der Zahlung', 'OK', 'btn-secondary', '', '', function() {});
+            });
+        }
+    );
+}
+
+function markAsError() {
+    if (!currentPaymentReference) {
+        return;
+    }
+    
+    showTemplateModal(
+        'Als Fehler markieren',
+        `Soll der Verwendungszweck "${currentPaymentReference}" als Fehler markiert werden? Dies erstellt einen Fehlereintrag für weitere Untersuchungen.`,
+        'Ja, als Fehler markieren',
+        'btn-danger',
+        'Abbrechen',
+        'btn-secondary',
+        function() {
+            api_call('/api/mark_payment_error', {payment_reference: currentPaymentReference}, function(response) {
+                if (response.success) {
+                    showTemplateModal('Erfolg', 'Verwendungszweck wurde als Fehler markiert.', 'OK', 'btn-success', '', '', function() {
+                        clearSearch();
+                        $('#payment_reference_input').focus();
+                    });
+                } else {
+                    showTemplateModal('Fehler', 'Verwendungszweck konnte nicht als Fehler markiert werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+                }
+            }, function() {
+                showTemplateModal('Fehler', 'Netzwerkfehler beim Markieren des Fehlers', 'OK', 'btn-secondary', '', '', function() {});
+            });
+        }
+    );
+}
+
+function clearSearch() {
+    $('#payment_reference_input').val('');
+    $('#search_result').hide();
+    $('#no_result').hide();
+    $('#order_details').empty();
+    currentPaymentReference = '';
+    $('#payment_reference_input').focus();
+}
+</script>

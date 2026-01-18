@@ -1,0 +1,16 @@
+env.rb
+data
+logs
+docker-compose.yaml
+docker/nginx/default.conf
+docker/ruby/Gemfile
+src/ruby/credentials.rb
+src/ruby/import
+src/static/images
+.DS_Store
+*~
+*.tmp
+tmp/
+node_modules/
+.env
+.env.local

@@ -1,0 +1,57 @@
+#{site_for_user_with_permission!("admin")}
+<div class='container'>
+    <div class='row'>
+        <div class='col-md-12'>
+            <h1>Abiball Administration</h1>
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="bi bi-people"></i>&nbsp;&nbsp;Benutzer verwalten</h5>
+                            <p class="card-text">Benutzer ansehen, bearbeiten und Ticket-Limits setzen</p>
+                            <a href="/users" class="btn btn-primary">Zur Benutzerverwaltung</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="bi bi-list-check"></i>&nbsp;&nbsp;Bestellungsmanagement</h5>
+                            <p class="card-text">Bestellungen verwalten, Statistiken einsehen und PDFs generieren</p>
+                            <a href="/order_management" class="btn btn-primary">Zum Bestellungsmanagement</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="bi bi-calendar-plus"></i>&nbsp;&nbsp;Events verwalten</h5>
+                            <p class="card-text">Events erstellen, bearbeiten und Gästelisten exportieren</p>
+                            <a href="/events" class="btn btn-primary">Zur Event-Verwaltung</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row mt-4">
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="bi bi-qr-code-scan"></i>&nbsp;&nbsp;Ticket Scanner</h5>
+                            <p class="card-text">Tickets scannen und einlösen am Veranstaltungseingang</p>
+                            <a href="/ticket_scanner" class="btn btn-primary">Zum Ticket Scanner</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="bi bi-gear"></i>&nbsp;&nbsp;Konfiguration</h5>
+                            <p class="card-text">Maximale Ticket-Anzahl: #{MAX_TICKETS_GLOBAL}<br>Standard-Preis: #{TICKET_PRICE_DEFAULT}€</p>
+                            <small class="text-muted">Änderung in env.rb</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

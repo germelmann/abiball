@@ -1,0 +1,126 @@
+#{site_for_users!}
+<div class='container'>
+    <h1>Mein Profil</h1>
+    <div class='row'>
+        <div class='col-md-8'>
+            <div class='card'>
+                <div class='card-header'>
+                    <h5 class='card-title mb-0'>Persönliche Daten</h5>
+                </div>
+                <div class='card-body'>
+                    <div class='row mb-3'>
+                        <div class='col-sm-3'><strong>Name:</strong></div>
+                        <div class='col-sm-9' id='profile_name'>-</div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-3'><strong>Nutzer-ID:</strong></div>
+                        <div class='col-sm-9' id='profile_username'>-</div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-3'><strong>E-Mail:</strong></div>
+                        <div class='col-sm-9' id='profile_email'>-</div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-3'><strong>Adresse:</strong></div>
+                        <div class='col-sm-9' id='profile_address'>-</div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-3'><strong>Telefon:</strong></div>
+                        <div class='col-sm-9' id='profile_phone'>-</div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-3'><strong>E-Mail Status:</strong></div>
+                        <div class='col-sm-9'>
+                            <span id='profile_email_status' class='badge'>-</span>
+                        </div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-3'><strong>Tags:</strong></div>
+                        <div class='col-sm-9' id='profile_tags'>-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class='col-md-4'>
+            <div class='card mb-3'>
+                <div class='card-body'>
+                    <h6 class='card-title'>Hinweis</h6>
+                    <p class='card-text text-muted'>
+                        Deine Daten können nur vom Abikomitee geändert werden.
+                        Falls du Änderungen benötigst, wende dich bitte an jemanden aus dem Abikomitee.
+                    </p>
+                    <div class="d-grid">
+                        <a href="#{get_support_mailto('data_change')}" class="btn btn-primary">
+                            <i class="bi bi-headset"></i> Kontakt
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    loadProfileData();
+});
+
+function loadProfileData() {
+    api_call('/api/get_profile_data', {}, function(response) {
+        if (response.success) {
+            const profile = response.profile;
+            $('#profile_name').text(profile.name || '-');
+            $('#profile_username').text(profile.username || '-');
+            $('#profile_email').text(profile.email || '-');
+            $('#profile_address').text(profile.address || '-');
+            $('#profile_phone').text(profile.phone || '-');
+            displayTags(profile.tags);
+            
+            // E-Mail Status
+            const emailStatus = $('#profile_email_status');
+            if (profile.email_verified) {
+                emailStatus.text('Bestätigt').removeClass('bg-danger').addClass('bg-success');
+            } else {
+                emailStatus.text('Nicht bestätigt').removeClass('bg-success').addClass('bg-danger');
+            }
+        } else {
+            showTemplateModal('Fehler', 'Profildaten konnten nicht geladen werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+        }
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Laden der Profildaten', 'OK', 'btn-secondary', '', '', function() {});
+    });
+}
+
+function displayTags(tags) {
+    if (!tags || tags.length === 0) {
+        $('#profile_tags_container').html('<span class="text-muted">Keine Tags zugewiesen</span>');
+        return;
+    }
+    
+    const container = $('#profile_tags');
+    container.empty();
+    console.log(tags);
+    
+    tags.forEach(function(tag) {
+        const textColor = getTextColor(tag.color);
+        console.log(`Tag: ${tag.name}, Color: ${tag.color}, Text Color: ${textColor}`);
+        const badge = $('<span>')
+            .addClass('badge me-1 mb-1')
+            .css({
+                'background-color': tag.color,
+                'color': textColor
+            })
+            .text(tag.name);
+        container.append(badge);
+    });
+}
+
+function getTextColor(bgColor) {
+    const hex = bgColor.replace('#', '');
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.5 ? '#000000' : '#ffffff';
+}
+</script>

@@ -1,0 +1,181 @@
+<style>
+    h1 {
+        margin-top: 0;
+    }
+    form input {
+        text-align: left;
+    }
+</style>
+<script>
+    var invite_token = '#{@invite_token}';
+    var inviteValid = false;
+
+    function validateInviteToken() {
+        if (!invite_token) {
+            showTemplateModal('Fehler', 'Kein Einladungstoken gefunden. Bitte verwende den vollständigen Registrierungslink.', 'OK', 'btn-primary', null, null, function() {
+                window.location.href = '/';
+            });
+            return;
+        }
+
+        api_call('/api/validate_invite/' + invite_token, {}, function(data) {
+            if (data.success) {
+                inviteValid = data.valid;
+                if (!inviteValid) {
+                    $('#invite_info').html(`
+                        <div class="alert alert-danger">
+                            <i class="bi bi-exclamation-triangle"></i> Einladung ungültig: ${data.error || 'Der Einladungslink ist ungültig oder abgelaufen.'}
+                        </div>
+                    `);
+                    showTemplateModal('Einladung ungültig', data.error || 'Der Einladungslink ist ungültig oder abgelaufen.', 'Zur Startseite', 'btn-primary', null, null, function() {
+                        window.location.href = '/';
+                    });
+                } else {                
+                    const expiryText = data.expires_at ? new Date(data.expires_at).toLocaleDateString('de-DE') : 'Unbegrenzt';
+                    $('#invite_info').html(`
+                        <div class="alert alert-success">
+                            <i class="bi bi-check-circle"></i> Einladung gültig bis: ${expiryText}
+                        </div>
+                    `);
+                }
+            };
+        });
+    }
+
+    // Validate username format (URL-safe characters only)
+    function validateUsername(username) {
+        // Allow only lowercase letters, numbers, hyphens, and underscores
+        return /^[a-z0-9_-]+$/i.test(username);
+    }
+
+    window.addEventListener('load', function() {
+        validateInviteToken();
+        
+        // Real-time username validation
+        $('#username_input').on('input', function() {
+            let username = $(this).val().trim();
+            let feedbackDiv = $('#username_feedback');
+            
+            if (!feedbackDiv.length) {
+                feedbackDiv = $('<div id="username_feedback" class="form-text"></div>');
+                $(this).parent().append(feedbackDiv);
+            }
+            
+            if (username.length === 0) {
+                feedbackDiv.html('').removeClass('text-danger text-success');
+                $(this).removeClass('is-invalid is-valid');
+            } else if (!validateUsername(username)) {
+                feedbackDiv.html('<i class="bi bi-x-circle"></i> Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche erlaubt.').addClass('text-danger').removeClass('text-success');
+                $(this).addClass('is-invalid').removeClass('is-valid');
+            } else {
+                feedbackDiv.html('<i class="bi bi-check-circle"></i> Gültiger Nutzer-ID').addClass('text-success').removeClass('text-danger');
+                $(this).addClass('is-valid').removeClass('is-invalid');
+            }
+        });
+        
+        $('#register_form').on('submit', function(e) {
+            e.preventDefault();
+            
+            if (!inviteValid) {
+                showTemplateModal('Fehler', 'Einladung ist nicht gültig.', 'OK', 'btn-primary', null, null, function() {});
+                return;
+            }
+            
+            let name = $('#name_input').val().trim();
+            let username = $('#username_input').val().trim();
+            let email = $('#email_input').val().trim();
+            let address = $('#address_input').val().trim();
+            let phone = $('#phone_input').val().trim();
+            
+            // Phone is optional, so only validate required fields
+            if (!name || !username || !email || !address) {
+                showTemplateModal('Fehler', 'Bitte alle Pflichtfelder ausfüllen.', 'OK', 'btn-primary', null, null, function() {});
+                return;
+            }
+            
+            if (!validateUsername(username)) {
+                showTemplateModal('Fehler', 'Nutzer-ID ist ungültig. Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche sind erlaubt.', 'OK', 'btn-primary', null, null, function() {});
+                return;
+            }
+            
+            if (!email.includes('@')) {
+                showTemplateModal('Fehler', 'Bitte eine gültige E-Mail-Adresse eingeben.', 'OK', 'btn-primary', null, null, function() {});
+                return;
+            }
+            
+            api_call('/api/register', {
+                invite_token: invite_token,
+                name: name,
+                username: username,
+                email: email,
+                address: address,
+                phone: phone
+            }, function(data) {
+                if (data.success) {
+                    showTemplateModal('Registrierung erfolgreich!', 
+                        data.message + ' Bitte prüfe dein E-Mail-Postfach für die Bestätigungsmail.',
+                        'Zur Anmeldung', 'btn-success', null, null, function() {
+                            window.location.href = '/login';
+                        });
+                } else {
+                    showTemplateModal('Registrierung fehlgeschlagen', data.error, 'OK', 'btn-primary', null, null, function() {});
+                }
+            });
+        });
+    });
+</script>
+
+<div class='container'>
+    <div class='row'>
+        <div class='col-md-12'>
+            <div class="row">
+                <div class="col-md-8 offset-md-2">
+                    <h1>Registrierung</h1>
+                    <p class="text-muted">Du wurdest eingeladen, dich zu registrieren. Bitte fülle das folgende Formular aus:</p>
+                    
+                    <div id="invite_info"></div>
+                    
+                    <form id='register_form'>
+                        <div class="mb-3">
+                            <label for="name_input" class="form-label">Vollständiger Name</label>
+                            <input type="text" id='name_input' class="form-control" placeholder="Dein vollständiger Name" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="username_input" class="form-label">Nutzer-ID</label>
+                            <input type="text" id='username_input' class="form-control" placeholder="Wähle eine Nutzer-ID" required>
+                            <div class="form-text">Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche erlaubt.</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="email_input" class="form-label">E-Mail-Adresse</label>
+                            <input type="email" id='email_input' class="form-control" placeholder="deine@email.de" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="address_input" class="form-label">Adresse</label>
+                            <textarea id='address_input' class="form-control" rows="3" placeholder="Straße, PLZ Ort" required></textarea>
+                            <div class="form-text"><i class="bi bi-info-circle"></i> Deine Adresse wird für Ticketbestellungen verwendet. Bitte stelle sicher, dass alle Angaben korrekt und vollständig sind.</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="phone_input" class="form-label">Telefonnummer <span class="text-muted">(optional)</span></label>
+                            <input type="tel" id='phone_input' class="form-control" placeholder="Deine Telefonnummer">
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-person-plus"></i>&nbsp;&nbsp;Registrieren
+                        </button>
+                        
+                        <div class='api_messages' style='display: none; margin-top: 15px;'></div>
+                    </form>
+                    
+                    <hr>
+                    <p class="text-muted">
+                        <small>Bereits registriert? <a href="/login">Hier anmelden</a></small>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

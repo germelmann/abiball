@@ -1,0 +1,959 @@
+#{site_for_user_with_permission!("view_users")}
+<div class='container'>
+    <div class='d-flex justify-content-between align-items-center mb-3'>
+        <h1><i class="bi bi-person-circle"></i> Benutzerprofil</h1>
+        <div>
+            <button class='btn btn-primary me-2' id='edit_user_btn' #{user_has_permission?("edit_users") ? "" : "style='display:none'"}>
+                <i class='bi bi-pencil'></i> Bearbeiten
+            </button>
+            <button class='btn btn-success me-2' id='save_user_btn' style='display:none;'>
+                <i class='bi bi-check'></i> Speichern
+            </button>
+            <button class='btn btn-secondary me-2' id='cancel_edit_btn' style='display:none;'>
+                <i class='bi bi-x'></i> Abbrechen
+            </button>
+            <button class='btn btn-warning me-2' id='impersonate_user_btn' #{admin_logged_in? ? "" : "style='display:none'"}>
+                <i class='bi bi-person-badge'></i> Anmelden
+            </button>
+            <button class='btn btn-danger me-2' id='delete_user_btn' #{user_has_permission?("manage_users") ? "" : "style='display:none'"}>
+                <i class='bi bi-trash'></i> Löschen
+            </button>
+            <a href='/users' class='btn btn-secondary'>
+                <i class='bi bi-arrow-left'></i> Zurück zur Übersicht
+            </a>
+        </div>
+    </div>
+
+    <!-- Basic Information Card -->
+    <div class='row mb-4'>
+        <div class='col-md-6'>
+            <div class='card'>
+                <div class='card-header'>
+                    <h5 class='card-title mb-0'><i class='bi bi-person'></i> Persönliche Daten</h5>
+                </div>
+                <div class='card-body'>
+                    <div class='row mb-3'>
+                        <div class='col-sm-4'><strong>Name:</strong></div>
+                        <div class='col-sm-8'>
+                            <span id='user_name' class='view-mode'>-</span>
+                            <input type='text' class='form-control form-control-sm edit-mode' id='user_name_input' style='display:none;'>
+                        </div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-4'><strong>Nutzer-ID:</strong></div>
+                        <div class='col-sm-8'>
+                            <span id='user_username' class='view-mode'>-</span>
+                            <input type='text' class='form-control form-control-sm edit-mode' id='user_username_input' style='display:none;' disabled>
+                        </div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-4'><strong>E-Mail:</strong></div>
+                        <div class='col-sm-8'>
+                            <span id='user_email' class='view-mode'>-</span>
+                            <input type='email' class='form-control form-control-sm edit-mode' id='user_email_input' style='display:none;'>
+                        </div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-4'><strong>Telefon:</strong></div>
+                        <div class='col-sm-8'>
+                            <span id='user_phone' class='view-mode'>-</span>
+                            <input type='tel' class='form-control form-control-sm edit-mode' id='user_phone_input' style='display:none;'>
+                        </div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-4'><strong>E-Mail Status:</strong></div>
+                        <div class='col-sm-8'>
+                            <span id='user_email_status' class='badge'>-</span>
+                        </div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-4'><strong>Adresse:</strong></div>
+                        <div class='col-sm-8'>
+                            <div id='address_hidden'>
+                                <button class='btn btn-sm btn-primary' id='show_address_btn'>
+                                    <i class='bi bi-eye'></i> Adresse anzeigen
+                                </button>
+                                <div class='text-muted mt-2'>
+                                    <small><i class='bi bi-info-circle'></i> Zugriff wird protokolliert</small>
+                                </div>
+                            </div>
+                            <div id='address_shown' style='display: none;'>
+                                <div id='user_address' class='alert alert-info mb-0 view-mode'>-</div>
+                                <textarea class='form-control form-control-sm edit-mode' id='user_address_input' rows='3' style='display:none;'></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <br>
+            <div class='card'>
+                <div class='card-header'>
+                    <h5 class='card-title mb-0'><i class='bi bi-tags'></i> Tags</h5>
+                </div>
+                <div class='card-body'>
+                    <p class='text-muted'>
+                        <i class='bi bi-info-circle'></i> Tags kategorisieren Benutzer für Umfragen, Filter und andere Funktionen.
+                    </p>
+                    <div id='user_tags_container' class='mb-3'>
+                        <div class='d-flex flex-wrap gap-2' id='user_tags_list'>
+                            <span class='text-muted'><em>Lade Tags...</em></span>
+                        </div>
+                    </div>
+                    <div #{user_has_permission?("edit_users") ? "" : "style='display:none'"}>
+                        <div class='input-group'>
+                            <select class='form-select' id='add_tag_select'>
+                                <option value=''>Tag hinzufügen...</option>
+                            </select>
+                            <button class='btn btn-primary' id='add_tag_btn' type='button'>
+                                <i class='bi bi-plus'></i> Hinzufügen
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings and Permissions Card -->
+        <div class='col-md-6'>
+            <div class='card'>
+                <div class='card-header'>
+                    <h5 class='card-title mb-0'><i class='bi bi-gear'></i> Einstellungen & Berechtigungen</h5>
+                </div>
+                <div class='card-body'>
+                    <div class='row mb-3'>
+                        <div class='col-sm-5'><strong>Scanner-Modus:</strong></div>
+                        <div class='col-sm-7'>
+                            <span id='user_scanner_only' class='badge view-mode'>-</span>
+                            <div class='form-check form-switch edit-mode' style='display:none;'>
+                                <input class='form-check-input' type='checkbox' id='user_scanner_only_input'>
+                                <label class='form-check-label' for='user_scanner_only_input'>Scanner-Only Modus</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-5'><strong>Admin:</strong></div>
+                        <div class='col-sm-7'>
+                            <span id='user_admin' class='badge'>-</span>
+                        </div>
+                    </div>
+                    <div class='row mb-3'>
+                        <div class='col-sm-12'>
+                            <strong>Berechtigungen:</strong>
+                            <div id='user_permissions_edit'>
+                                <div id='permission_checkboxes' class='mt-2'>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Order History Card -->
+    <div class='row mb-4'>
+        <div class='col-md-12'>
+            <div class='card'>
+                <div class='card-header'>
+                    <h5 class='card-title mb-0'><i class='bi bi-cart'></i> Bestellhistorie</h5>
+                </div>
+                <div class='card-body'>
+                    <div class='table-responsive'>
+                        <table class='table table-striped table-hover table-sm' id='orders_table'>
+                            <thead>
+                                <tr>
+                                    <th>Bestell-ID</th>
+                                    <th>Event</th>
+                                    <th>Tickets</th>
+                                    <th>Einzelpreis</th>
+                                    <th>Gesamtpreis</th>
+                                    <th>Status</th>
+                                    <th>Datum</th>
+                                </tr>
+                            </thead>
+                            <tbody id='orders_tbody'>
+                                <tr>
+                                    <td colspan='7' class='text-center text-muted'><em>Keine Bestellungen vorhanden</em></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Event-Specific Settings Card -->
+    <div class='row mb-4' id='event_settings_section' #{user_has_permission?("edit_users") ? "" : "style='display:none'"}>
+        <div class='col-md-12'>
+            <div class='card'>
+                <div class='card-header'>
+                    <h5 class='card-title mb-0'><i class='bi bi-calendar-event'></i> Event-spezifische Einstellungen</h5>
+                </div>
+                <div class='card-body'>
+                    <p class='text-muted'>
+                        <i class='bi bi-info-circle'></i> Hier können individuelle Ticket-Preise und -Limits für einzelne Events festgelegt werden.
+                        Diese überschreiben die Event-Standard-Einstellungen für diesen Benutzer.
+                    </p>
+                    <div class='table-responsive'>
+                        <table class='table table-striped table-hover table-sm' id='event_settings_table'>
+                            <thead>
+                                <tr>
+                                    <th>Event</th>
+                                    <th>Standard-Preis</th>
+                                    <th>Individueller Preis</th>
+                                    <th>Standard-Limit</th>
+                                    <th>Individuelles Limit</th>
+                                    <th>Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody id='event_settings_tbody'>
+                                <tr>
+                                    <td colspan='6' class='text-center text-muted'><em>Lade Event-Einstellungen...</em></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for editing event-specific settings -->
+<div class="modal fade" id="editEventSettingsModal" tabindex="-1" aria-labelledby="editEventSettingsModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editEventSettingsModalLabel">Event-Einstellungen bearbeiten</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit_settings_event_id">
+                <div class="mb-3">
+                    <label class="form-label"><strong>Event:</strong> <span id="edit_settings_event_name"></span></label>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Standard-Preis: <span id="edit_settings_default_price"></span></label>
+                </div>
+                <div class="mb-3">
+                    <label for="edit_settings_custom_price" class="form-label">Individueller Preis (€)</label>
+                    <input type="number" class="form-control" id="edit_settings_custom_price" step="0.01" min="0" placeholder="Leer lassen für Standard">
+                    <div class="form-text">Bei 0€ wird "Kostenlos" angezeigt. Leer lassen für Standard-Preis.</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Standard-Limit: <span id="edit_settings_default_limit"></span></label>
+                </div>
+                <div class="mb-3">
+                    <label for="edit_settings_custom_limit" class="form-label">Individuelles Limit</label>
+                    <input type="number" class="form-control" id="edit_settings_custom_limit" min="0" placeholder="Leer lassen für Standard">
+                    <div class="form-text">Bei 0 wird der Benutzer vom Ticketkauf ausgeschlossen. Leer lassen für Standard-Limit.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger" id="remove_settings_btn">
+                    <i class="bi bi-trash"></i> Entfernen
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="save_settings_btn">
+                    <i class="bi bi-check"></i> Speichern
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentUsername = null;
+
+$(document).ready(function() {
+    // Get username from URL path (/user/username)
+    const pathParts = window.location.pathname.split('/');
+    currentUsername = pathParts[pathParts.length - 1];
+    
+    if (!currentUsername) {
+        showTemplateModal('Fehler', 'Kein Benutzername angegeben', 'OK', 'btn-secondary', '', '', function() {
+            window.location.href = '/users';
+        });
+        return;
+    }
+    
+    loadUserDetails();
+    loadUserOrders();
+    loadAvailableTags();
+    
+    // Set up address reveal button
+    $('#show_address_btn').on('click', function() {
+        loadUserAddress();
+    });
+});
+
+function loadUserDetails() {
+    api_call('/api/get_user_details', { username: currentUsername }, function(response) {
+        if (response.success) {
+            const user = response.user;
+            currentUserData = user; // Store for edit mode
+            
+            // Basic information
+            $('#user_name').text(user.name || '-');
+            $('#user_username').text(user.username || '-');
+            $('#user_email').text(user.email || '-');
+            $('#user_phone').text(user.phone || '-');
+            
+            // Email verification status
+            const emailStatus = $('#user_email_status');
+            if (user.email_verified) {
+                emailStatus.text('Bestätigt').removeClass('bg-danger').addClass('bg-success');
+                $('.verify-email-btn').remove();
+            } else {
+                emailStatus.text('Nicht bestätigt').removeClass('bg-success').addClass('bg-danger');
+                $('.verify-email-btn').remove();
+                const verifyBtn = $('<button>')
+                    .addClass('btn btn-sm btn-outline-success verify-email-btn ms-2')
+                    .attr('data-email', user.email)
+                    .html('<i class="bi bi-check"></i> Bestätigen');
+                verifyBtn.on('click', function() {
+                    const email = $(this).data('email');
+                    const button = $(this);
+                    
+                    showTemplateModal('E-Mail bestätigen', 
+                        `Möchtest du die E-Mail-Adresse "${email}" als bestätigt markieren?`,
+                        'Ja, bestätigen', 'btn-success', 'Abbrechen', 'btn-secondary', function() {
+                            button.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> Bestätige...');
+                            
+                            api_call('/api/admin_verify_email', { email: email }, function(data) {
+                                if (data.success) {
+                                    showTemplateModal('Erfolgreich', data.message, 'OK', 'btn-success', null, null, function() {
+                                        loadUserDetails();
+                                    });
+                                } else {
+                                    showTemplateModal('Fehler', data.error, 'OK', 'btn-primary', null, null, function() {});
+                                    button.prop('disabled', false).html('<i class="bi bi-check"></i> Bestätigen');
+                                }
+                            });
+                        });
+                });
+                emailStatus.after(verifyBtn);
+            }
+            
+            // Scanner-only mode
+            const scannerBadge = $('#user_scanner_only');
+            if (user.scanner_only) {
+                scannerBadge.text('Ja').removeClass('bg-secondary').addClass('bg-warning');
+            } else {
+                scannerBadge.text('Nein').removeClass('bg-warning').addClass('bg-secondary');
+            }
+            
+            // Admin status
+            const adminBadge = $('#user_admin');
+            if (user.admin) {
+                adminBadge.text('Ja').removeClass('bg-secondary').addClass('bg-danger');
+            } else {
+                adminBadge.text('Nein').removeClass('bg-danger').addClass('bg-secondary');
+            }
+            
+            // Permissions
+            if (currentUserData && currentUserData.permissions) {
+                createPermissionCheckboxes(currentUserData.permissions);
+            }
+
+            // Tags
+            displayUserTags(user.tags);
+        } else {
+            showTemplateModal('Fehler', 'Benutzerdaten konnten nicht geladen werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {
+                window.location.href = '/users';
+            });
+        }
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Laden der Benutzerdaten', 'OK', 'btn-secondary', '', '', function() {
+            window.location.href = '/users';
+        });
+    });
+}
+
+function loadUserAddress() {
+    api_call('/api/get_user_address', { username: currentUsername }, function(response) {
+        if (response.success) {
+            $('#user_address').text(response.address || 'Keine Adresse hinterlegt');
+            $('#address_hidden').hide();
+            $('#address_shown').show();
+        } else {
+            showTemplateModal('Fehler', 'Adresse konnte nicht geladen werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+        }
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Laden der Adresse', 'OK', 'btn-secondary', '', '', function() {});
+    });
+}
+
+function loadUserOrders() {
+    api_call('/api/get_user_orders', { username: currentUsername }, function(response) {
+        if (response.success) {
+            const tbody = $('#orders_tbody');
+            tbody.empty();
+            
+            if (response.orders && response.orders.length > 0) {
+                response.orders.forEach(function(order) {
+                    const row = $('<tr>');
+                    row.css('cursor', 'pointer');
+                    
+                    // Make row clickable to open order in new tab
+                    row.on('click', function() {
+                        window.open('/order_detail/' + order.order_id, '_blank');
+                    });
+                    
+                    row.append($('<td>').text(order.order_id || '-'));
+                    row.append($('<td>').text(order.event_name || 'N/A'));
+                    row.append($('<td>').text(order.ticket_count || '0'));
+                    row.append($('<td>').text(formatPrice(order.individual_ticket_price)));
+                    row.append($('<td>').text(formatPrice(order.total_price)));
+                    
+                    // Status badge
+                    const statusCell = $('<td>');
+                    const statusBadge = $('<span class="badge">');
+                    if (order.status === 'paid') {
+                        statusBadge.addClass('bg-success').text('Bezahlt');
+                    } else if (order.status === 'pending') {
+                        statusBadge.addClass('bg-warning').text('Ausstehend');
+                    } else if (order.status === 'cancelled' || order.status === 'cancelled_by_user') {
+                        statusBadge.addClass('bg-danger').text('Storniert');
+                    } else {
+                        statusBadge.addClass('bg-secondary').text(order.status || '-');
+                    }
+                    statusCell.append(statusBadge);
+                    row.append(statusCell);
+                    
+                    // Format date
+                    const dateCell = $('<td>');
+                    if (order.created_at) {
+                        try {
+                            const date = new Date(order.created_at);
+                            dateCell.text(date.toLocaleDateString('de-DE') + ' ' + date.toLocaleTimeString('de-DE'));
+                        } catch (e) {
+                            dateCell.text(order.created_at);
+                        }
+                    } else {
+                        dateCell.text('-');
+                    }
+                    row.append(dateCell);
+                    
+                    tbody.append(row);
+                });
+            } else {
+                tbody.append('<tr><td colspan="7" class="text-center text-muted"><em>Keine Bestellungen vorhanden</em></td></tr>');
+            }
+        } else {
+            showTemplateModal('Fehler', 'Bestellungen konnten nicht geladen werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+        }
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Laden der Bestellungen', 'OK', 'btn-secondary', '', '', function() {});
+    });
+}
+
+let currentUserData = null;
+let editMode = false;
+
+// Edit mode functions
+$('#edit_user_btn').on('click', function() {
+    enterEditMode();
+});
+
+$('#cancel_edit_btn').on('click', function() {
+    exitEditMode();
+});
+
+$('#save_user_btn').on('click', function() {
+    saveUserChanges();
+});
+
+function enterEditMode() {
+    editMode = true;
+    
+    // Hide view mode, show edit mode
+    $('.view-mode').hide();
+    $('.edit-mode').show();
+    
+    // Update buttons
+    $('#edit_user_btn').hide();
+    $('#save_user_btn').show();
+    $('#cancel_edit_btn').show();
+    
+    // Populate edit fields with current values
+    $('#user_name_input').val($('#user_name').text());
+    $('#user_email_input').val($('#user_email').text());
+    $('#user_phone_input').val($('#user_phone').text());
+    
+    // Scanner-only mode
+    const scannerOnly = $('#user_scanner_only').text() === 'Ja';
+    $('#user_scanner_only_input').prop('checked', scannerOnly);
+    
+    // Address (if already revealed)
+    if ($('#address_shown').is(':visible')) {
+        $('#user_address_input').val($('#user_address').text());
+    }
+}
+
+function exitEditMode() {
+    editMode = false;
+    
+    // Show view mode, hide edit mode
+    $('.view-mode').show();
+    $('.edit-mode').hide();
+    
+    // Update buttons
+    $('#edit_user_btn').show();
+    $('#save_user_btn').hide();
+    $('#cancel_edit_btn').hide();
+}
+
+function createPermissionCheckboxes(userPermissions) {
+    const container = $('#permission_checkboxes');
+    container.empty();
+    
+    // Define available permissions (matching users.html pattern)
+    const availablePermissions = #{print_permissions_table()};
+    
+    // Create a table for better layout
+    const table = $('<table class="table table-bordered table-sm align-middle">');
+    const thead = $('<thead><tr><th style="width: 70%;">Berechtigung</th><th class="text-center" style="width: 30%;">Status</th></tr></thead>');
+    const tbody = $('<tbody>');
+    
+    availablePermissions.forEach(function(perm) {
+        const isEnabled = userPermissions.includes(perm.key);
+        const row = $('<tr>');
+        
+        const labelCell = $('<td>').html(`<i class="${perm.icon}"></i> ${perm.label}`);
+        row.append(labelCell);
+        
+        const buttonCell = $('<td class="text-center">');
+        const button = $('<button type="button" class="btn btn-sm perm-toggle-btn-single">')
+            .attr('data-perm', perm.key)
+            .attr('data-enabled', isEnabled);
+        
+        if (isEnabled) {
+            button.addClass('btn-success').html('<i class="bi bi-check-circle-fill"></i> Aktiviert');
+        } else {
+            button.addClass('btn-danger').html('<i class="bi bi-x-circle-fill"></i> Deaktiviert');
+        }
+        
+        buttonCell.append(button);
+        row.append(buttonCell);
+        tbody.append(row);
+    });
+    
+    table.append(thead).append(tbody);
+    container.append(table);
+}
+
+// Handle single permission toggle with API call
+$(document).on('click', '.perm-toggle-btn-single', function() {
+    const button = $(this);
+    const permission = button.data('perm');
+    const currentState = button.data('enabled') === 'true' || button.data('enabled') === true;
+    const newState = !currentState;
+    
+    // Disable button during API call
+    button.prop('disabled', true);
+    
+    // Call API to toggle permission
+    api_call('/api/toggle_user_permission', {
+        target_username: currentUsername,
+        permission: permission,
+        enabled: newState
+    }, function(response) {
+        if (response.success) {
+            // Update button state
+            button.data('enabled', newState);
+            if (newState) {
+                button.removeClass('btn-danger').addClass('btn-success');
+                button.html('<i class="bi bi-check-circle-fill"></i> Aktiviert');
+            } else {
+                button.removeClass('btn-success').addClass('btn-danger');
+                button.html('<i class="bi bi-x-circle-fill"></i> Deaktiviert');
+            }
+            button.prop('disabled', false);
+            
+            // Reload user details to refresh permission list
+            loadUserDetails();
+        } else {
+            showTemplateModal('Fehler', response.error || 'Fehler beim Aktualisieren der Berechtigung', 'OK', 'btn-secondary', '', '', function() {});
+            button.prop('disabled', false);
+        }
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Aktualisieren der Berechtigung', 'OK', 'btn-secondary', '', '', function() {});
+        button.prop('disabled', false);
+    });
+});
+
+function saveUserChanges() {
+    // Gather form data (excluding permissions - those are saved via toggle buttons)
+    const formData = {
+        username: currentUsername,
+        name: $('#user_name_input').val(),
+        email: $('#user_email_input').val(),
+        phone: $('#user_phone_input').val(),
+        scanner_only: $('#user_scanner_only_input').is(':checked') ? 1 : 0
+    };
+    
+    // Address (if revealed and edited)
+    if ($('#address_shown').is(':visible')) {
+        formData.address = $('#user_address_input').val();
+    }
+    
+    // Validate
+    if (!formData.name || !formData.email) {
+        showTemplateModal('Fehler', 'Name und E-Mail sind erforderlich', 'OK', 'btn-secondary', '', '', function() {});
+        return;
+    }
+    
+    // Save via API
+    api_call('/api/edit_user', formData, function(response) {
+        if (response.success) {
+            showTemplateModal('Erfolg', 'Benutzerdaten wurden erfolgreich gespeichert', 'OK', 'btn-success', '', '', function() {
+                exitEditMode();
+                loadUserDetails();
+            });
+        } else {
+            showTemplateModal('Fehler', 'Fehler beim Speichern: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+        }
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Speichern', 'OK', 'btn-secondary', '', '', function() {});
+    });
+}
+
+// Delete user button handler
+$('#delete_user_btn').on('click', function() {
+    if (!currentUsername) return;
+    
+    showTemplateModal('Benutzer löschen', 
+        `Möchtest du den Benutzer "${currentUserData ? currentUserData.name : currentUsername}" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.`,
+        'Ja, löschen', 'btn-danger', 'Abbrechen', 'btn-secondary', function() {
+            api_call('/api/delete_user', { username: currentUsername }, function(response) {
+                if (response.success) {
+                    showTemplateModal('Erfolg', 'Benutzer wurde erfolgreich gelöscht', 'OK', 'btn-success', '', '', function() {
+                        window.location.href = '/users';
+                    });
+                } else {
+                    showTemplateModal('Fehler', 'Fehler beim Löschen: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+                }
+            }, function() {
+                showTemplateModal('Fehler', 'Netzwerkfehler beim Löschen', 'OK', 'btn-secondary', '', '', function() {});
+            });
+        });
+});
+
+// Impersonate user button handler
+$('#impersonate_user_btn').on('click', function() {
+    if (!currentUsername) return;
+    
+    showTemplateModal('Als Benutzer anmelden', 
+        `Möchtest du dich als "${currentUserData ? currentUserData.name : currentUsername}" anmelden? Du wirst abgemeldet und als dieser Benutzer angemeldet.`,
+        'Fortfahren', 'btn-warning', 'Abbrechen', 'btn-secondary', function() {
+            api_call('/api/impersonate_user', { username: currentUsername }, function(response) {
+                if (response.success) {
+                    showTemplateModal('Erfolg', 'Du wurdest als Benutzer angemeldet', 'OK', 'btn-success', '', '', function() {
+                        window.location.href = '/';
+                    });
+                } else {
+                    showTemplateModal('Fehler', 'Fehler beim Anmelden als ' + (currentUserData ? currentUserData.name : currentUsername) + ': ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+                }
+            }, function() {
+                showTemplateModal('Fehler', 'Netzwerkfehler beim Anmelden', 'OK', 'btn-secondary', '', '', function() {});
+            });
+        });
+});
+
+// Event-specific settings management
+function loadEventSettings() {
+    if (!currentUsername) return;
+    
+    api_call('/api/get_user_all_event_settings', { username: currentUsername }, function(response) {
+        if (response.success) {
+            displayEventSettings(response.settings);
+        } else {
+            $('#event_settings_tbody').html('<tr><td colspan="6" class="text-center text-danger"><em>Fehler beim Laden: ' + (response.error || 'Unbekannter Fehler') + '</em></td></tr>');
+        }
+    }, function() {
+        $('#event_settings_tbody').html('<tr><td colspan="6" class="text-center text-danger"><em>Netzwerkfehler beim Laden</em></td></tr>');
+    });
+}
+
+function displayEventSettings(settings) {
+    const tbody = $('#event_settings_tbody');
+    tbody.empty();
+    
+    if (settings.length === 0) {
+        tbody.append('<tr><td colspan="6" class="text-center text-muted"><em>Keine Events gefunden</em></td></tr>');
+        return;
+    }
+    
+    settings.forEach(function(setting) {
+        const row = $('<tr>');
+        
+        // Event name
+        row.append($('<td>').text(setting.event_name || '-'));
+        
+        // Default price
+        const defaultPrice = parseFloat(setting.default_price) || 0;
+        row.append($('<td>').text(formatPrice(defaultPrice)));
+        
+        // Custom price
+        const customPrice = setting.custom_price !== null ? parseFloat(setting.custom_price) : null;
+        const customPriceCell = $('<td>');
+        if (customPrice !== null) {
+            customPriceCell.html('<strong>' + formatPrice(customPrice) + '</strong>');
+        } else {
+            customPriceCell.html('<span class="text-muted">-</span>');
+        }
+        row.append(customPriceCell);
+        
+        // Default limit
+        const defaultLimit = setting.default_limit || '-';
+        row.append($('<td>').text(defaultLimit));
+        
+        // Custom limit
+        const customLimit = setting.custom_limit !== null ? setting.custom_limit : null;
+        const customLimitCell = $('<td>');
+        if (customLimit !== null) {
+            if (customLimit === 0) {
+                customLimitCell.html('<strong class="text-danger">' + customLimit + ' (Gesperrt)</strong>');
+            } else {
+                customLimitCell.html('<strong>' + customLimit + '</strong>');
+            }
+        } else {
+            customLimitCell.html('<span class="text-muted">-</span>');
+        }
+        row.append(customLimitCell);
+        
+        // Actions
+        const actionsCell = $('<td>');
+        const editBtn = $('<button>')
+            .addClass('btn btn-sm btn-outline-primary')
+            .html('<i class="bi bi-pencil"></i>')
+            .attr('title', 'Bearbeiten')
+            .on('click', function() {
+                openEditSettingsModal(setting);
+            });
+        actionsCell.append(editBtn);
+        row.append(actionsCell);
+        
+        tbody.append(row);
+    });
+}
+
+function formatPrice(price) {
+    const priceNum = parseFloat(price) || 0;
+    if (priceNum === 0) {
+        return 'Kostenlos';
+    }
+    return priceNum.toFixed(2) + '€';
+}
+
+function openEditSettingsModal(setting) {
+    $('#edit_settings_event_id').val(setting.event_id);
+    $('#edit_settings_event_name').text(setting.event_name);
+    $('#edit_settings_default_price').text(formatPrice(parseFloat(setting.default_price) || 0));
+    $('#edit_settings_default_limit').text(setting.default_limit || '-');
+    
+    // Set custom values if they exist
+    if (setting.custom_price !== null) {
+        $('#edit_settings_custom_price').val(setting.custom_price);
+    } else {
+        $('#edit_settings_custom_price').val('');
+    }
+    
+    if (setting.custom_limit !== null) {
+        $('#edit_settings_custom_limit').val(setting.custom_limit);
+    } else {
+        $('#edit_settings_custom_limit').val('');
+    }
+    
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('editEventSettingsModal'));
+    modal.show();
+}
+
+$('#save_settings_btn').on('click', function() {
+    const eventId = $('#edit_settings_event_id').val();
+    const customPrice = $('#edit_settings_custom_price').val();
+    const customLimit = $('#edit_settings_custom_limit').val();
+    
+    const data = {
+        username: currentUsername,
+        event_id: eventId
+    };
+    
+    // Only include values if they are set
+    if (customPrice !== '') {
+        data.custom_price = parseFloat(customPrice);
+    }
+    
+    if (customLimit !== '') {
+        data.custom_limit = parseInt(customLimit);
+    }
+    
+    // If both are empty, we're removing the settings
+    if (customPrice === '' && customLimit === '') {
+        showTemplateModal('Info', 'Beide Felder sind leer. Möchtest du die individuellen Einstellungen entfernen?', 'Ja, entfernen', 'btn-warning', 'Abbrechen', 'btn-secondary', function() {
+            removeEventSettings(eventId);
+        });
+        return;
+    }
+    
+    const button = $(this);
+    button.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> Speichere...');
+    
+    api_call('/api/set_user_event_settings', data, function(response) {
+        if (response.success) {
+            showTemplateModal('Erfolg', 'Event-Einstellungen wurden erfolgreich gespeichert', 'OK', 'btn-success', '', '', function() {
+                bootstrap.Modal.getInstance(document.getElementById('editEventSettingsModal')).hide();
+                loadEventSettings();
+            });
+        } else {
+            showTemplateModal('Fehler', 'Fehler beim Speichern: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+        }
+        button.prop('disabled', false).html('<i class="bi bi-check"></i> Speichern');
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Speichern', 'OK', 'btn-secondary', '', '', function() {});
+        button.prop('disabled', false).html('<i class="bi bi-check"></i> Speichern');
+    });
+});
+
+$('#remove_settings_btn').on('click', function() {
+    const eventId = $('#edit_settings_event_id').val();
+    const eventName = $('#edit_settings_event_name').text();
+    
+    showTemplateModal('Einstellungen entfernen', 
+        `Möchtest du die individuellen Einstellungen für "${eventName}" wirklich entfernen? Der Benutzer wird dann die Standard-Einstellungen des Events verwenden.`,
+        'Ja, entfernen', 'btn-danger', 'Abbrechen', 'btn-secondary', function() {
+            removeEventSettings(eventId);
+        });
+});
+
+function removeEventSettings(eventId) {
+    api_call('/api/remove_user_event_settings', { username: currentUsername, event_id: eventId }, function(response) {
+        if (response.success) {
+            showTemplateModal('Erfolg', 'Event-Einstellungen wurden erfolgreich entfernt', 'OK', 'btn-success', '', '', function() {
+                const modalEl = document.getElementById('editEventSettingsModal');
+                const modal = bootstrap.Modal.getInstance(modalEl);
+                if (modal) {
+                    modal.hide();
+                }
+                loadEventSettings();
+            });
+        } else {
+            showTemplateModal('Fehler', 'Fehler beim Entfernen: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+        }
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Entfernen', 'OK', 'btn-secondary', '', '', function() {});
+    });
+}
+
+// Load event settings on page load (only if user has edit_users permission)
+$(document).ready(function() {
+    if ($('#event_settings_section').is(':visible')) {
+        loadEventSettings();
+    }
+});
+
+
+function displayUserTags(tags) {
+    const container = $('#user_tags_list');
+    container.empty();
+
+    if (!tags || tags.length === 0) {
+        container.html('<span class="text-muted"><em>Keine Tags zugewiesen</em></span>');
+        return;
+    }
+    
+    // Load all tags to get their colors
+    api_call('/api/tags', {}, function(response) {
+        if (response.success) {
+            tags.forEach(function(tag) {
+                if (!tag.name) return;
+                const color = tag.color || '#6c757d';
+                const badge = $('<span class="badge me-2 mb-2">')
+                    .css('background-color', color)
+                    .css('color', isLightColor(color) ? '#000' : '#fff')
+                    .text(tag.name);
+                
+                // Add remove button if user has edit permission
+                if ($('#add_tag_btn').is(':visible')) {
+                    const tagNameForRemove = tag.name;
+                    const removeBtn = $('<i class="bi bi-x-circle ms-1" style="cursor:pointer;"></i>')
+                        .on('click', function() {
+                            removeTagFromUser(tagNameForRemove);
+                        });
+                    badge.append(removeBtn);
+                }
+                
+                container.append(badge);
+            }); 
+        }
+    });
+}
+
+function loadAvailableTags() {
+    api_call('/api/tags', {}, function(response) {
+        if (response.success) {
+            const select = $('#add_tag_select');
+            select.find('option:not(:first)').remove();
+            
+            response.tags.forEach(function(tag) {
+                select.append($('<option>').val(tag.name).text(tag.name));
+            });
+        }
+    });
+}
+
+function removeTagFromUser(tagName) {
+    showTemplateModal('Tag entfernen', 
+        `Möchtest du den Tag "${tagName}" von diesem Benutzer entfernen?`,
+        'Ja, entfernen', 'btn-danger', 'Abbrechen', 'btn-secondary', function() {
+            api_call('/api/edit_user_tags', {username: currentUsername, tag: tagName, action: 'remove'}, function(response) {
+                if (response.success) {
+                    loadUserDetails();
+                    loadAvailableTags();
+                } else {
+                    showTemplateModal('Fehler', response.error || 'Fehler beim Entfernen des Tags', 'OK', 'btn-secondary', '', '', function() {});
+                }
+            }, function() {
+                showTemplateModal('Fehler', 'Netzwerkfehler beim Entfernen des Tags', 'OK', 'btn-secondary', '', '', function() {});
+            });
+        });
+}
+
+$('#add_tag_btn').on('click', function() {
+    const tagName = $('#add_tag_select').val();
+    
+    if (!tagName) {
+        showTemplateModal('Hinweis', 'Bitte wähle einen Tag aus', 'OK', 'btn-secondary', '', '', function() {});
+        return;
+    }
+    
+    api_call('/api/edit_user_tags', {username: currentUsername, tag: tagName, action: 'add'}, function(response) {
+        if (response.success) {
+            $('#add_tag_select').val('');
+            loadUserDetails();
+            loadAvailableTags();
+        } else {
+            showTemplateModal('Fehler', response.error || 'Fehler beim Hinzufügen des Tags', 'OK', 'btn-secondary', '', '', function() {});
+        }
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Hinzufügen des Tags', 'OK', 'btn-secondary', '', '', function() {});
+    });
+});
+
+// Helper function to determine if a color is light
+function isLightColor(color) {
+    // Convert hex to RGB
+    const hex = color.replace('#', '');
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    
+    // Calculate relative luminance
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.5;
+}
+
+</script>

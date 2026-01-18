@@ -1,0 +1,437 @@
+#{site_for_user_with_permission!("view_users")}
+<div class='container'>
+    <h1>Tags verwalten</h1>
+    
+    <div class='row mb-4'>
+        <div class='col-md-12'>
+            <button class='btn btn-primary' id="create_tag_btn" data-bs-toggle="modal" data-bs-target="#tagModal" #{user_has_permission?("edit_users") ? "" : "style='display:none'"}>
+                <i class="bi bi-plus-lg"></i>&nbsp;&nbsp;Neues Tag
+            </button>
+        </div>
+    </div>
+    
+    <div class='row'>
+        <div class='col-md-12'>
+            <div id="tags_container" class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+                <!-- Tags will be loaded here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tag Create/Edit Modal -->
+<div class="modal fade" id="tagModal" tabindex="-1" aria-labelledby="tagModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tagModalLabel">Neues Tag</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <form id="tag_form">
+                    <input type="hidden" id="tag_old_name">
+                    <div class="mb-3">
+                        <label for="tag_name_input" class="form-label">Tag-Name</label>
+                        <input type="text" class="form-control" id="tag_name_input" placeholder="z.B. Student, Teacher, Q2" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="tag_color_input" class="form-label">Farbe</label>
+                        <div class="d-flex align-items-center gap-2">
+                            <input type="color" class="form-control form-control-color" id="tag_color_input" value="#6c757d">
+                            <input type="text" class="form-control" id="tag_color_text" value="#6c757d" pattern="^#[0-9A-Fa-f]{6}$" style="max-width: 100px;">
+                        </div>
+                        <div class="form-text">Wählen Sie eine Farbe für die Anzeige des Tags</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="save_tag_btn">Speichern</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tag Users Modal -->
+<div class="modal fade" id="tagUsersModal" tabindex="-1" aria-labelledby="tagUsersModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tagUsersModalLabel">Benutzer mit Tag: <span id="modal_tag_name"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3" #{user_has_permission?("edit_users") ? "" : "style='display:none'"}>
+                    <label for="add_user_select" class="form-label">Benutzer hinzufügen</label>
+                    <div class="input-group">
+                        <select class="form-select" id="add_user_select">
+                            <option value="">Benutzer auswählen...</option>
+                        </select>
+                        <button class="btn btn-primary" type="button" id="add_user_to_tag_btn">
+                            <i class="bi bi-plus-lg"></i>&nbsp;Hinzufügen
+                        </button>
+                    </div>
+                </div>
+                <hr>
+                <h6>Zugewiesene Benutzer</h6>
+                <div id="tag_users_list" class="list-group">
+                    <!-- Users will be loaded here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let allTags = [];
+let allUsers = [];
+let currentTag = null;
+
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Load all tags
+function loadTags() {
+    api_call('/api/tags', {}, function(data) {
+        if (data.success) {
+            allTags = data.tags;
+            renderTags();
+        } else {
+            showAlert('Fehler beim Laden der Tags', 'danger');
+        }
+    }, function() {
+        showAlert('Fehler beim Laden der Tags', 'danger');
+    });
+}
+
+// Render tags as cards
+function renderTags() {
+    const container = document.getElementById('tags_container');
+    
+    if (allTags.length === 0) {
+        container.innerHTML = '<div class="col-12"><p class="text-muted">Noch keine Tags erstellt</p></div>';
+        return;
+    }
+    
+    const canEditUsers = #{user_has_permission?("edit_users")};
+    const availablePermissions = #{print_permissions_table()};
+    
+    container.innerHTML = allTags.map(tag => `
+        <div class="col">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h5 class="card-title">
+                            <span class="badge" style="background-color: ${escapeHtml(tag.color)}; color: ${getTextColor(tag.color)}">
+                                ${escapeHtml(tag.name)}
+                            </span>
+                        </h5>
+                        <div class="btn-group" ${canEditUsers ? '' : 'style="display:none"'}>
+                            <button class="btn btn-sm btn-outline-primary" onclick="editTag('${escapeHtml(tag.name)}')">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteTag('${escapeHtml(tag.name)}')">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <p class="card-text">
+                        <i class="bi bi-people"></i>&nbsp;
+                        <strong>${tag.user_count}</strong> Benutzer
+                    </p>
+                    <button class="btn btn-sm btn-outline-secondary w-100 mb-2" onclick="showTagUsers('${escapeHtml(tag.name)}')">
+                        <i class="bi bi-list"></i>&nbsp;Benutzer anzeigen
+                    </button>
+                    ${canEditUsers ? `
+                    <hr class="my-2">
+                    <div class="small text-muted mb-2">Massen-Aktionen:</div>
+                    <div class="mb-2">
+                        <select class="form-select form-select-sm" id="bulk_perm_${escapeHtml(tag.name.replace(/[^a-zA-Z0-9]/g, '_'))}">
+                            <option value="">Berechtigung wählen...</option>
+                            ${availablePermissions.map(perm => `<option value="${escapeHtml(perm.key)}">${escapeHtml(perm.label)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="btn-group w-100" role="group">
+                        <button class="btn btn-sm btn-outline-success" onclick="bulkGrantPermission('${escapeHtml(tag.name)}', ${tag.user_count})">
+                            <i class="bi bi-check-circle"></i> Erteilen
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="bulkRemovePermission('${escapeHtml(tag.name)}', ${tag.user_count})">
+                            <i class="bi bi-x-circle"></i> Entfernen
+                        </button>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// Get text color based on background luminance
+function getTextColor(bgColor) {
+    const hex = bgColor.replace('#', '');
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.5 ? '#000000' : '#ffffff';
+}
+
+// Show create tag modal
+document.getElementById('create_tag_btn').addEventListener('click', () => {
+    document.getElementById('tagModalLabel').textContent = 'Neues Tag';
+    document.getElementById('tag_form').reset();
+    document.getElementById('tag_old_name').value = '';
+    document.getElementById('tag_color_input').value = '#6c757d';
+    document.getElementById('tag_color_text').value = '#6c757d';
+});
+
+// Sync color inputs
+document.getElementById('tag_color_input').addEventListener('input', (e) => {
+    document.getElementById('tag_color_text').value = e.target.value;
+});
+
+document.getElementById('tag_color_text').addEventListener('input', (e) => {
+    const value = e.target.value;
+    if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
+        document.getElementById('tag_color_input').value = value;
+    }
+});
+
+// Save tag
+document.getElementById('save_tag_btn').addEventListener('click', function() {
+    const oldName = document.getElementById('tag_old_name').value;
+    const name = document.getElementById('tag_name_input').value.trim();
+    const color = document.getElementById('tag_color_input').value;
+    
+    if (!name) {
+        showAlert('Bitte geben Sie einen Tag-Namen ein', 'warning');
+        return;
+    }
+    
+    const body = oldName ? {old_name: oldName, name: name, color: color} : {name: name, color: color};
+    
+    api_call('/api/edit_tag', body, function(data) {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('tagModal')).hide();
+            loadTags();
+        } else {
+            showAlert(data.error || 'Fehler beim Speichern', 'danger');
+        }
+    }, function() {
+        showAlert('Fehler beim Speichern', 'danger');
+    });
+});
+
+// Edit tag
+function editTag(tagName) {
+    const tag = allTags.find(t => t.name === tagName);
+    if (!tag) return;
+    
+    document.getElementById('tagModalLabel').textContent = 'Tag bearbeiten';
+    document.getElementById('tag_old_name').value = tag.name;
+    document.getElementById('tag_name_input').value = tag.name;
+    document.getElementById('tag_color_input').value = tag.color;
+    document.getElementById('tag_color_text').value = tag.color;
+    
+    new bootstrap.Modal(document.getElementById('tagModal')).show();
+}
+
+// Delete tag
+function deleteTag(tagName) {
+    if (!confirm(`Möchten Sie den Tag "${tagName}" wirklich löschen? Dies entfernt den Tag von allen Benutzern.`)) {
+        return;
+    }
+    
+    api_call('/api/delete_tag', {name: tagName}, function(data) {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            loadTags();
+        } else {
+            showAlert(data.error || 'Fehler beim Löschen', 'danger');
+        }
+    }, function() {
+        showAlert('Fehler beim Löschen', 'danger');
+    });
+}
+
+// Show tag users
+function showTagUsers(tagName) {
+    currentTag = tagName;
+    document.getElementById('modal_tag_name').textContent = tagName;
+    
+    api_call('/api/tag', {tag: tagName}, function(data) {
+        if (data.success) {
+            renderTagUsers(data.users);
+            loadAllUsers();
+            new bootstrap.Modal(document.getElementById('tagUsersModal')).show();
+        } else {
+            showAlert('Fehler beim Laden der Benutzer', 'danger');
+        }
+    }, function() {
+        showAlert('Fehler beim Laden der Benutzer', 'danger');
+    });
+}
+
+// Render tag users
+function renderTagUsers(users) {
+    const list = document.getElementById('tag_users_list');
+    
+    if (users.length === 0) {
+        list.innerHTML = '<p class="text-muted">Keine Benutzer mit diesem Tag</p>';
+        return;
+    }
+    
+    list.innerHTML = users.map(user => `
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+            <div>
+                <strong>${escapeHtml(user.name)}</strong>
+                <br>
+                <small class="text-muted">${escapeHtml(user.username)} • ${escapeHtml(user.email)}</small>
+            </div>
+            <button class="btn btn-sm btn-outline-danger" onclick="removeUserFromTag('${escapeHtml(user.username)}')" 
+                    #{user_has_permission?("edit_users") ? "" : "style='display:none'"}>
+                <i class="bi bi-x-lg"></i>&nbsp;Entfernen
+            </button>
+        </div>
+    `).join('');
+}
+
+// Load all users for dropdown
+function loadAllUsers() {
+    api_call('/api/get_user_permissions', {}, function(data) {
+        if (data.success) {
+            allUsers = data.permissions;
+            updateUserSelect();
+        }
+    });
+}
+
+// Update user select dropdown
+function updateUserSelect() {
+    const select = document.getElementById('add_user_select');
+    const tag = allTags.find(t => t.name === currentTag);
+    const tagUsers = tag ? tag.usernames : [];
+    
+    const availableUsers = allUsers.filter(u => !tagUsers.includes(u.username));
+    
+    select.innerHTML = '<option value="">Benutzer auswählen...</option>' +
+        availableUsers.map(u => `<option value="${escapeHtml(u.username)}">${escapeHtml(u.name)} (${escapeHtml(u.username)})</option>`).join('');
+}
+
+// Add user to tag
+document.getElementById('add_user_to_tag_btn').addEventListener('click', function() {
+    const username = document.getElementById('add_user_select').value;
+    
+    if (!username) {
+        showAlert('Bitte wählen Sie einen Benutzer aus', 'warning');
+        return;
+    }
+    
+    api_call('/api/edit_user_tags', {username: username, tag: currentTag, action: 'add'}, function(data) {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            loadTags();
+            showTagUsers(currentTag);
+        } else {
+            showAlert(data.error || 'Fehler beim Hinzufügen', 'danger');
+        }
+    }, function() {
+        showAlert('Fehler beim Hinzufügen', 'danger');
+    });
+});
+
+// Remove user from tag
+function removeUserFromTag(username) {
+    api_call('/api/edit_user_tags', {username: username, tag: currentTag, action: 'remove'}, function(data) {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            loadTags();
+            showTagUsers(currentTag);
+        } else {
+            showAlert(data.error || 'Fehler beim Entfernen', 'danger');
+        }
+    }, function() {
+        showAlert('Fehler beim Entfernen', 'danger');
+    });
+}
+
+// Show alert
+function showAlert(message, type) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3`;
+    alertDiv.style.zIndex = '9999';
+    alertDiv.innerHTML = `
+        ${escapeHtml(message)}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+    document.body.appendChild(alertDiv);
+    
+    setTimeout(() => {
+        alertDiv.remove();
+    }, 5000);
+}
+
+// Bulk grant permission
+function bulkGrantPermission(tagName, userCount) {
+    const selectId = 'bulk_perm_' + tagName.replace(/[^a-zA-Z0-9]/g, '_');
+    const permission = document.getElementById(selectId).value;
+    
+    if (!permission) {
+        showAlert('Bitte wählen Sie eine Berechtigung', 'warning');
+        return;
+    }
+    
+    if (!confirm(`Möchten Sie wirklich die Berechtigung "${permission}" an alle ${userCount} Benutzer mit dem Tag "${tagName}" erteilen?`)) {
+        return;
+    }
+    
+    api_call('/api/tag/bulk_permission', {tag: tagName, permission: permission, action: 'grant'}, function(data) {
+        if (data.success) {
+            showAlert(data.message || `Berechtigung wurde an ${userCount} Benutzer erteilt`, 'success');
+        } else {
+            showAlert(data.error || 'Fehler beim Erteilen der Berechtigung', 'danger');
+        }
+    }, function() {
+        showAlert('Fehler beim Erteilen der Berechtigung', 'danger');
+    });
+}
+
+// Bulk remove permission
+function bulkRemovePermission(tagName, userCount) {
+    const selectId = 'bulk_perm_' + tagName.replace(/[^a-zA-Z0-9]/g, '_');
+    const permission = document.getElementById(selectId).value;
+    
+    if (!permission) {
+        showAlert('Bitte wählen Sie eine Berechtigung', 'warning');
+        return;
+    }
+    
+    if (!confirm(`Möchten Sie wirklich die Berechtigung "${permission}" von allen ${userCount} Benutzern mit dem Tag "${tagName}" entfernen?`)) {
+        return;
+    }
+    
+    api_call('/api/tag/bulk_permission', {tag: tagName, permission: permission, action: 'remove'}, function(data) {
+        if (data.success) {
+            showAlert(data.message || `Berechtigung wurde von ${userCount} Benutzern entfernt`, 'success');
+        } else {
+            showAlert(data.error || 'Fehler beim Entfernen der Berechtigung', 'danger');
+        }
+    }, function() {
+        showAlert('Fehler beim Entfernen der Berechtigung', 'danger');
+    });
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadTags();
+});
+</script>

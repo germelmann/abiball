@@ -1,0 +1,899 @@
+#{site_for_user_with_permission!("buy_tickets")}
+<div class="container">
+    <h1>Ticket-Bestellung</h1>
+    
+    <!-- Previous Orders Section -->
+    <div id="previous_orders_section" style="display: none;">
+        <h2 class="mt-4 mb-3">Meine Bestellungen</h2>
+        <div id="previous_orders_list">
+            <!-- Previous orders will be loaded here -->
+        </div>
+        <hr class="my-4">
+    </div>
+    
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="mb-0">Neue Tickets bestellen</h2>
+    </div>
+    
+    <div id="loading" class="text-center">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Lade Events...</span>
+        </div>
+        <p class="mt-2">Lade verfügbare Events...</p>
+    </div>
+    
+    <div id="no_events" style="display: none;">
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i> 
+            <strong>Keine Events verfügbar</strong><br>
+            Aktuell sind keine Events zum Ticketkauf verfügbar.
+        </div>
+    </div>
+    
+    <div id="events_container" style="display: none;">
+        <div class="row" id="events_list">
+        </div>
+    </div>
+    
+    <div class="modal fade" id="passwordModal" tabindex="-1" aria-labelledby="passwordModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="passwordModalLabel">Event-Passwort eingeben</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="password_event_name"></p>
+                    <div class="mb-3">
+                        <label for="event_password" class="form-label">Passwort</label>
+                        <input type="password" class="form-control" id="event_password" placeholder="Event-Passwort eingeben" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                    <button type="button" class="btn btn-primary" id="verify_password_btn">Bestätigen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal fade" id="orderModal" tabindex="-1" aria-labelledby="orderModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="orderModalLabel">Tickets bestellen</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-12">
+                            <form id="ticket_form">
+                                <input type="hidden" id="selected_event_id">
+                                
+                                <div class="mb-3">
+                                    <h6 id="order_event_name"></h6>
+                                    <p class="text-muted mb-3" id="order_event_details"></p>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="ticket_count" class="form-label">Anzahl Tickets</label>
+                                    <input type="number" class="form-control" id="ticket_count" min="1" placeholder="Anzahl eingeben" required>
+                                    <div class="form-text" id="ticket_info"></div>
+                                </div>
+                                
+                                <!-- Escrow Agreements Section -->
+                                <div id="escrow_agreements_section" style="display: none;">
+                                    <h6>Treuhand-Verträge</h6>
+                                    <div class="alert alert-info small">
+                                        <p class="mb-2"><strong>Sichere Zahlung durch Treuhand:</strong></p>
+                                        <p class="mb-0">Die folgenden Treuhand-Verträge stellen sicher, dass deine Überweisung sicher verwahrt und nur für den vorgesehenen Zweck verwendet wird:</p>
+                                    </div>
+                                    <div id="escrow_agreements_list" class="mb-3">
+                                        <!-- Escrow agreements will be loaded here -->
+                                    </div>
+                                </div>
+                                
+                                <div id="participants_section" style="display: none;">
+                                    <h6>Teilnehmer-Daten</h6>
+                                    <div id="participants_list">
+
+                                    </div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <div class="alert alert-info">
+                                        <strong>Gesamtpreis:</strong> <span id="total_price">0.00</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Withdrawal Policy Section -->
+                                <div class="mb-3">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="show_withdrawal_btn">
+                                        <i class="bi bi-info-circle"></i> Widerrufsbelehrung anzeigen
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                        
+                        <!-- <div class="col-md-4">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6>Wichtige Hinweise</h6>
+                                </div>
+                                <div class="card-body">
+                                    <p class="small">
+                                        Nach erfolgreicher Bestellung erhältst du eine E-Mail mit allen Zahlungsdetails.
+                                    </p>
+                                    <div class="alert alert-warning small">
+                                        <strong>Wichtig:</strong> Bitte verwende die in der E-Mail angegebene Referenz als Verwendungszweck!
+                                    </div>
+                                </div>
+                            </div>
+                        </div> -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                    <button type="button" class="btn btn-primary" id="submit_order_btn">Tickets reservieren</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Withdrawal Policy Modal -->
+    <div class="modal fade" id="withdrawalModal" tabindex="-1" aria-labelledby="withdrawalModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="withdrawalModalLabel">Widerrufsbelehrung</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+                </div>
+                <div class="modal-body" id="withdrawal_content">
+                    <h5>Widerrufsbelehrung</h5>
+                    <p>Sie haben das Recht, binnen vierzehn Tagen ohne Angabe von Gründen diesen Vertrag zu widerrufen.
+                    Die Widerrufsfrist beträgt 14 Tage ab dem Tag des Vertragsschlusses.</p>
+
+                    <p>Um Ihr Widerrufsrecht auszuüben, müssen Sie uns mittels einer eindeutigen Erklärung
+                    (z. B. per E-Mail) über Ihren Entschluss, diesen Vertrag zu widerrufen, informieren.
+                    Zur Wahrung der Frist genügt die rechtzeitige Absendung der Widerrufserklärung.</p>
+
+                    <h6>Folgen des Widerrufs:</h6>
+                    <p>Im Falle eines wirksamen Widerrufs werden alle Zahlungen unverzüglich und spätestens
+                    binnen vierzehn Tagen nach Eingang Ihrer Widerrufserklärung erstattet.
+                    Für die Rückzahlung wird dasselbe Zahlungsmittel verwendet, das bei der ursprünglichen
+                    Transaktion eingesetzt wurde, sofern nichts anderes vereinbart wurde.</p>
+
+                    <hr>
+
+                    <h5>Muster-Widerrufsformular</h5>
+                    <p><em>(Wenn Sie den Vertrag widerrufen wollen, dann füllen Sie bitte dieses Formular aus
+                    und senden Sie es zurück.)</em></p>
+
+                    <div class="border rounded p-3">
+                        <p><strong>An:</strong><br>
+                        <span>#{SUPPORT_EMAIL}</span></p>
+
+                        <p>Hiermit widerrufe ich den von mir abgeschlossenen Vertrag über den Kauf der folgenden Tickets:</p>
+
+                        <p><strong>Bestellt am / erhalten am:</strong> ______________________</p>
+                        <p><strong>Name des Verbrauchers:</strong> ______________________</p>
+                        <p><strong>E-Mail-Adresse des Verbrauchers:</strong> ______________________</p>
+                        <p><strong>Datum:</strong> ______________________</p>
+                        <p><strong>Unterschrift (nur bei Mitteilung auf Papier):</strong> ______________________</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentEvents = [];
+let currentEventId = null;
+let currentEventData = null;
+let currentTicketLimits = null;
+
+
+// Format date/time for display
+function formatDateTime(dateTimeString) {
+    if (!dateTimeString) return 'Noch nicht festgelegt';
+    const date = new Date(dateTimeString);
+    return date.toLocaleDateString('de-DE', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+// Format date for countdown display
+function formatDateShort(dateTimeString) {
+    if (!dateTimeString) return '';
+    const date = new Date(dateTimeString);
+    return date.toLocaleDateString('de-DE', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+// Format price for display
+function formatPrice(price) {
+    const priceNum = parseFloat(price) || 0;
+    if (priceNum === 0) {
+        return 'Kostenlos';
+    }
+    return priceNum.toFixed(2) + '€';
+}
+
+// Update countdown timer
+function updateCountdown(targetDate, elementId) {
+    const now = new Date().getTime();
+    const target = new Date(targetDate).getTime();
+    const distance = target - now;
+    
+    if (distance < 0) {
+        document.getElementById(elementId).innerHTML = "Abgelaufen";
+        return false;
+    }
+    
+    const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+    
+    let countdownText = "";
+    if (days > 0) countdownText += days + "d ";
+    if (hours > 0) countdownText += hours + "h ";
+    if (minutes > 0) countdownText += minutes + "m ";
+    countdownText += seconds + "s";
+    
+    document.getElementById(elementId).innerHTML = countdownText;
+    return true;
+}
+
+// Check if ticket sales are currently open for an event
+function isTicketSalesOpen(event) {
+    if (!event.ticket_generation_enabled) return false;
+    
+    const now = new Date();
+    
+    // Check if sales have started
+    if (event.ticket_sale_start_datetime) {
+        const startDate = new Date(event.ticket_sale_start_datetime);
+        if (now < startDate) return false;
+    }
+    
+    // Check if sales have ended
+    if (event.ticket_sale_end_datetime) {
+        const endDate = new Date(event.ticket_sale_end_datetime);
+        if (now > endDate) return false;
+    }
+    
+    return true;
+}
+
+// Get sales status for an event
+function getSalesStatus(event) {
+    if (!event.ticket_generation_enabled) {
+        return { status: 'disabled', message: 'Ticket-Verkauf deaktiviert' };
+    }
+    
+    const now = new Date();
+    
+    // Check if sales haven't started yet
+    if (event.ticket_sale_start_datetime) {
+        const startDate = new Date(event.ticket_sale_start_datetime);
+        if (now < startDate) {
+            return { 
+                status: 'not_started', 
+                message: 'Verkauf startet am ' + formatDateShort(event.ticket_sale_start_datetime),
+                targetDate: event.ticket_sale_start_datetime
+            };
+        }
+    }
+    
+    // Check if sales have ended
+    if (event.ticket_sale_end_datetime) {
+        const endDate = new Date(event.ticket_sale_end_datetime);
+        if (now > endDate) {
+            return { 
+                status: 'ended', 
+                message: 'Verkauf endete am ' + formatDateShort(event.ticket_sale_end_datetime)
+            };
+        }
+    }
+    
+    // Check if sales are ending soon
+    if (event.ticket_sale_end_datetime) {
+        const endDate = new Date(event.ticket_sale_end_datetime);
+        const timeUntilEnd = endDate.getTime() - now.getTime();
+        if (timeUntilEnd <= 24 * 60 * 60 * 1000) { // Less than 24 hours
+            return {
+                status: 'ending_soon',
+                message: 'Verkauf endet am ' + formatDateShort(event.ticket_sale_end_datetime),
+                targetDate: event.ticket_sale_end_datetime
+            };
+        }
+    }
+    
+    return { status: 'open', message: 'Tickets verfügbar' };
+}
+
+// Load events from API
+function loadEvents() {
+    api_call('/api/get_events', {}, function(data) {
+        if (data.success) {
+            currentEvents = data.events;
+            displayEvents();
+        } else {
+            console.error('Error loading events:', data.error);
+            $('#loading').hide();
+            $('#no_events').show();
+        }
+    });
+}
+
+// Load previous orders
+function loadPreviousOrders() {
+    api_call('/api/my_tickets', {}, function(data) {
+        if (data.success && data.orders && data.orders.length > 0) {
+            displayPreviousOrders(data.orders);
+        }
+    });
+}
+
+// Display previous orders
+function displayPreviousOrders(orders) {
+    const container = $('#previous_orders_list');
+    container.empty();
+    
+    if (orders.length === 0) {
+        return;
+    }
+    
+    orders.forEach(function(order) {
+        const orderDate = new Date(order.created_at).toLocaleDateString('de-DE', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+        
+        // Status badge
+        let statusBadge = getOrderStatusText(order.status);
+        let statusClass = getOrderStatusBadgeClass(order.status);
+        
+        // Payment request status
+        let paymentStatusHtml = '';
+        if (order.status !== 'paid') {
+            if (order.latest_payment_request && order.latest_payment_request.status === 'sent') {
+                paymentStatusHtml = `
+                    <div class="alert alert-info mt-3 mb-0">
+                        <strong><i class="bi bi-envelope-check"></i> Zahlungsaufforderung erhalten</strong>
+                        <p class="mb-1">Bitte überweise auf folgendes Konto:</p>
+                        <ul class="mb-0">
+                            <li><strong>Empfänger:</strong> ${order.latest_payment_request.bank_account_name || '-'}</li>
+                            <li><strong>Bank:</strong> ${order.latest_payment_request.bank_name || '-'}</li>
+                            <li><strong>IBAN:</strong> ${order.latest_payment_request.iban || '-'}</li>
+                            <li><strong>BIC:</strong> ${order.latest_payment_request.bic || '-'}</li>
+                            <li><strong>Betrag:</strong> ${order.total_price}€</li>
+                            <li><strong>Verwendungszweck:</strong> <code>${order.payment_reference}</code></li>
+                        </ul>
+                    </div>`;
+            } else if (order.latest_payment_request && order.latest_payment_request.status === 'paid') {
+                // Payment request marked as paid but order status not yet updated
+                paymentStatusHtml = `
+                    <div class="alert alert-success mt-3 mb-0">
+                        <i class="bi bi-check-circle"></i> <strong>Zahlung eingegangen</strong>
+                        <p class="mb-0">Deine Zahlung wurde verarbeitet.</p>
+                    </div>`;
+            } else {
+                paymentStatusHtml = `
+                    <div class="alert alert-secondary mt-3 mb-0">
+                        <i class="bi bi-clock"></i> <strong>Tickets reserviert</strong>
+                        <p class="mb-0">Du erhältst in Kürze eine Zahlungsaufforderung per E-Mail.</p>
+                    </div>`;
+            }
+        }
+        
+        const card = $('<div>').addClass('card mb-3').append(
+            $('<div>').addClass('card-header d-flex justify-content-between align-items-center').append(
+                $('<div>').append(
+                    $('<strong>').text(order.event_name),
+                    order.event_year ? $('<span>').addClass('text-muted ms-2').text(`(${order.event_year})`) : ''
+                ),
+                $('<span>').addClass('badge ' + statusClass).text(statusBadge)
+            ),
+            $('<div>').addClass('card-body').append(
+                $('<div>').addClass('row mb-2').append(
+                    $('<div>').addClass('col-md-6').append(
+                        $('<strong>').text('Bestelldatum: '),
+                        orderDate
+                    ),
+                    $('<div>').addClass('col-md-6').append(
+                        $('<strong>').text('Referenz: '),
+                        $('<code>').text(order.payment_reference)
+                    )
+                ),
+                $('<div>').addClass('row mb-2').append(
+                    $('<div>').addClass('col-md-6').append(
+                        $('<strong>').text('Anzahl Tickets: '),
+                        order.ticket_count
+                    ),
+                    $('<div>').addClass('col-md-6').append(
+                        $('<strong>').text('Gesamtpreis: '),
+                        `${order.total_price}€`
+                    )
+                ),
+                order.participants && order.participants.length > 0 ? 
+                    $('<div>').addClass('mt-3').append(
+                        $('<strong>').text('Teilnehmer:'),
+                        $('<ul>').addClass('list-unstyled ms-3 mt-2').append(
+                            order.participants.map(function(p) {
+                                const contactInfo = [p.phone, p.email].filter(x => x && x.length > 0).join(', ');
+                                return $('<li>').append(
+                                    $('<i>').addClass('bi bi-person-fill me-2'),
+                                    p.name,
+                                    contactInfo ? $('<span>').addClass('text-muted ms-2').text(`(${contactInfo})`) : ''
+                                );
+                            })
+                        )
+                    ) : '',
+                paymentStatusHtml
+            )
+        );
+        
+        container.append(card);
+    });
+    
+    $('#previous_orders_section').show();
+}
+
+// Display events in cards
+function displayEvents() {
+    const container = $('#events_list');
+    container.empty();
+
+    if (currentEvents.length === 0) {
+        $('#loading').hide();
+        $('#no_events').show();
+        return;
+    }
+
+    $.each(currentEvents, function(_, event) {
+        const salesStatus = getSalesStatus(event);
+        const eventDate = formatDateTime(event.start_datetime);
+
+        let statusBadge = '';
+        let orderButton = '';
+        let countdownHtml = '';
+
+        switch (salesStatus.status) {
+            case 'disabled':
+                statusBadge = $('<span>').addClass('badge bg-secondary').text('Verkauf deaktiviert');
+                break;
+            case 'not_started':
+                statusBadge = $('<span>').addClass('badge bg-warning text-dark').text('Verkauf startet bald');
+                countdownHtml = $('<div>')
+                    .addClass('alert alert-warning mt-3')
+                    .append($('<i>').addClass('bi bi-clock'))
+                    .append(' <strong>Verkaufsstart in:</strong><br>')
+                    .append($('<span>').attr('id', `countdown_start_${event.id}`).addClass('h5'))
+                    .append('<br>')
+                    .append($('<small>').text(salesStatus.message));
+                break;
+            case 'ended':
+                statusBadge = $('<span>').addClass('badge bg-danger').text('Verkauf beendet');
+                break;
+            case 'ending_soon':
+                statusBadge = $('<span>').addClass('badge bg-warning text-dark').text('Verkauf endet bald');
+                orderButton = $('<button>')
+                    .addClass('btn btn-primary')
+                    .text('Tickets bestellen')
+                    .on('click', function() { openOrderModal(event.id); });
+                countdownHtml = $('<div>')
+                    .addClass('alert alert-warning mt-3')
+                    .append($('<i>').addClass('bi bi-clock'))
+                    .append(' <strong>Verkaufsende in:</strong><br>')
+                    .append($('<span>').attr('id', `countdown_end_${event.id}`).addClass('h5'))
+                    .append('<br>')
+                    .append($('<small>').text(salesStatus.message));
+                break;
+            case 'open':
+                statusBadge = $('<span>').addClass('badge bg-success').text('Tickets verfügbar');
+                orderButton = $('<button>')
+                    .addClass('btn btn-primary')
+                    .text('Tickets bestellen')
+                    .on('click', function() { openOrderModal(event.id); });
+                break;
+        }
+
+        const card = $('<div>').addClass('col-md-6 col-lg-4 mb-4').append(
+            $('<div>').addClass('card h-100').append(
+                $('<div>').addClass('card-header d-flex justify-content-between align-items-center').append(
+                    $('<h5>').addClass('mb-0').text(event.name),
+                    statusBadge
+                ),
+                $('<div>').addClass('card-body').append(
+                    $('<p>').addClass('card-text').append(
+                        $('<i>').addClass('bi bi-geo-alt'), ' ', event.location, $('<br>'),
+                        $('<i>').addClass('bi bi-calendar'), ' ', eventDate
+                    ),
+                    event.description ? $('<p>').addClass('card-text').text(event.description) : '',
+                    $('<div>').addClass('mt-3').append(
+                        $('<strong>').text('Ticket-Preis:'), ' ', formatPrice(event.ticket_price), $('<br>'),
+                        $('<strong>').text('Max. pro Person:'), ' ', (event.max_tickets_per_user || 'Unbegrenzt'), $('<br>'),
+                        $('<strong>').text('Verfügbar:'), ' ', (event.max_tickets || 'Unbegrenzt'), ' Tickets'
+                    ),
+                    countdownHtml
+                ),
+                $('<div>').addClass('card-footer').append(orderButton)
+            )
+        );
+
+        container.append(card);
+
+        // Start countdown timers
+        if (salesStatus.targetDate) {
+            if (salesStatus.status === 'not_started') {
+                startCountdown(salesStatus.targetDate, `countdown_start_${event.id}`);
+            } else if (salesStatus.status === 'ending_soon') {
+                startCountdown(salesStatus.targetDate, `countdown_end_${event.id}`);
+            }
+        }
+    });
+
+    $('#loading').hide();
+    $('#events_container').show();
+}
+
+// Start countdown timer
+function startCountdown(targetDate, elementId) {
+    const timer = setInterval(function() {
+        if (!updateCountdown(targetDate, elementId)) {
+            clearInterval(timer);
+            // Reload events when countdown expires
+            loadEvents();
+        }
+    }, 1000);
+}
+
+// Open order modal for an event
+function openOrderModal(eventId) {
+    const event = currentEvents.find(e => e.id === eventId);
+    if (!event) {
+        showTemplateModal('Fehler', 'Event nicht gefunden.', 'OK', 'btn-danger', null, null, function() {});
+        return;
+    }
+    
+    // Check if password is needed
+    if (event.visibility === 'password_protected') {
+        $('#password_event_name').text(`Event: ${event.name}`);
+        $('#passwordModal').modal('show');
+        currentEventId = eventId;
+        return;
+    }
+    
+    currentEventId = eventId;
+    currentEventData = event;
+    loadTicketLimitsAndShowOrder();
+}
+
+// Verify event password
+function verifyEventPassword() {
+    const password = $('#event_password').val().trim();
+    if (!password) {
+        showTemplateModal('Fehler', 'Bitte gib ein Passwort ein.', 'OK', 'btn-danger', null, null, function() {});
+        return;
+    }
+    
+    api_call('/api/verify_event_password', {
+        event_id: currentEventId,
+        password: password
+    }, function(data) {
+        if (data.success) {
+            $('#passwordModal').modal('hide');
+            $('#event_password').val('');
+            currentEventData = currentEvents.find(e => e.id === currentEventId);
+            loadTicketLimitsAndShowOrder();
+        } else {
+            showTemplateModal('Fehler', data.error || 'Falsches Passwort', 'OK', 'btn-danger', null, null, function() {});
+        }
+    });
+}
+
+// Load ticket limits and show order modal
+function loadTicketLimitsAndShowOrder() {
+    api_call('/api/ticket_limits', {
+        event_id: currentEventId
+    }, function(data) {
+        if (data.success) {
+            currentTicketLimits = data;
+            showOrderModal();
+        } else {
+            showTemplateModal('Fehler', data.error || 'Fehler beim Laden der Ticket-Informationen', 'OK', 'btn-danger', null, null, function() {});
+        }
+    });
+}
+
+// Show order modal
+function showOrderModal() {
+    $('#selected_event_id').val(currentEventId);
+    $('#order_event_name').text(currentEventData.name);
+    $('#order_event_details').text(`${currentEventData.location} • ${formatDateTime(currentEventData.start_datetime)}`);
+    
+    const maxTickets = currentTicketLimits.max_order;
+    $('#ticket_count').attr('max', maxTickets);
+    
+    if (maxTickets > 0) {
+        $('#ticket_info').html(`
+            <strong>Preis pro Ticket:</strong> ${formatPrice(currentTicketLimits.ticket_price)} • 
+            <strong>Du kannst noch ${maxTickets} Tickets bestellen</strong><br>
+            <small>Du hast bereits ${currentTicketLimits.current_tickets} von ${currentTicketLimits.user_limit} Tickets für dieses Event</small>
+        `);
+    } else {
+        $('#ticket_info').html('<span class="text-danger">Du kannst keine weiteren Tickets bestellen</span>');
+        $('#ticket_count').prop('disabled', true);
+        $('#submit_order_btn').prop('disabled', true);
+    }
+    
+    // Reset form
+    $('#ticket_count').val('');
+    $('#participants_section').hide();
+    $('#participants_list').empty();
+    $('#total_price').text('0.00');
+    
+    // Load escrow agreements
+    loadEscrowAgreements(currentEventId);
+    
+    $('#orderModal').modal('show');
+}
+
+// Load escrow agreements for the event
+function loadEscrowAgreements(eventId) {
+    api_call('/api/get_escrow_agreements', {event_id: eventId}, function(data) {
+        if (data.success && data.escrow_agreements && data.escrow_agreements.length > 0) {
+            let agreementsHtml = '<ul class="list-group">';
+            data.escrow_agreements.forEach(function(agreement) {
+                agreementsHtml += `
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-shield-check text-success"></i> ${agreement.account_name}</span>
+                        <a href="${agreement.escrow_document_url}" target="_blank" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-file-earmark-pdf"></i> Vertrag ansehen
+                        </a>
+                    </li>
+                `;
+            });
+            agreementsHtml += '</ul>';
+            $('#escrow_agreements_list').html(agreementsHtml);
+            $('#escrow_agreements_section').show();
+        } else {
+            $('#escrow_agreements_section').hide();
+        }
+    });
+}
+
+// Update participants section when ticket count changes
+function updateParticipantsSection() {
+    const ticketCount = parseInt($('#ticket_count').val()) || 0;
+    const participantsSection = $('#participants_section');
+    const participantsList = $('#participants_list');
+    
+    // Update total price
+    const totalPrice = (ticketCount * currentTicketLimits.ticket_price).toFixed(2);
+    $('#total_price').text(formatPrice(totalPrice));
+    
+    if (ticketCount > 0) {
+        participantsSection.show();
+        participantsList.empty();
+        
+        for (let i = 1; i <= ticketCount; i++) {
+            const participantDiv = $(`
+                <div class="border rounded p-3 mb-3">
+                    <h6>Ticket ${i}</h6>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="participant_name_${i}" class="form-label">Name *</label>
+                            <input type="text" class="form-control" id="participant_name_${i}" required>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label for="participant_birthdate_${i}" class="form-label">Geburtsdatum *</label>
+                            <input type="date" class="form-control" id="participant_birthdate_${i}" required min="1900-01-01">
+                            <small class="form-text text-muted">Erforderlich für Altersverifikation</small>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-md-6">
+                            <label for="participant_phone_${i}" class="form-label">Telefonnummer</label>
+                            <input type="tel" class="form-control" id="participant_phone_${i}">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="participant_email_${i}" class="form-label">E-Mail-Adresse</label>
+                            <input type="email" class="form-control" id="participant_email_${i}">
+                        </div>
+                    </div>
+                </div>
+            `);
+            participantsList.append(participantDiv);
+        }
+    } else {
+        participantsSection.hide();
+    }
+}
+
+// Validate ticket order
+function validateTicketOrder() {
+    const ticketCount = parseInt($('#ticket_count').val());
+    
+    if (!ticketCount || ticketCount < 1) {
+        return { valid: false, message: 'Bitte gib eine gültige Anzahl von Tickets ein.' };
+    }
+    
+    if (ticketCount > currentTicketLimits.max_order) {
+        return { valid: false, message: `Du kannst maximal ${currentTicketLimits.max_order} Tickets bestellen.` };
+    }
+    
+    // Validate participant data
+    for (let i = 1; i <= ticketCount; i++) {
+        const name = $(`#participant_name_${i}`).val()?.trim();
+        const phone = $(`#participant_phone_${i}`).val()?.trim();
+        const birthdate = $(`#participant_birthdate_${i}`).val()?.trim();
+        const email = $(`#participant_email_${i}`).val()?.trim();
+        
+        if (!name) {
+            return { valid: false, message: `Bitte gib einen Namen für Ticket ${i} an.` };
+        }
+        
+        if (!birthdate) {
+            return { valid: false, message: `Bitte gib ein Geburtsdatum für Ticket ${i} an.` };
+        }
+        
+        // Validate birthdate is not in the future
+        const birthdateObj = new Date(birthdate);
+        const today = new Date();
+        if (birthdateObj > today) {
+            return { valid: false, message: `Das Geburtsdatum für Ticket ${i} darf nicht in der Zukunft liegen.` };
+        }
+        
+        // Validate birthdate is not before 1900
+        const minDate = new Date('1900-01-01');
+        if (birthdateObj < minDate) {
+            return { valid: false, message: `Das Geburtsdatum für Ticket ${i} darf nicht vor dem 01.01.1900 liegen.` };
+        }
+        
+        // Validate email format if provided
+        if (email && email.length > 0) {
+            const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailPattern.test(email)) {
+                return { valid: false, message: `Bitte gib eine gültige E-Mail-Adresse für Ticket ${i} an.` };
+            }
+        }
+    }
+    
+    return { valid: true };
+}
+
+// Submit ticket order
+function submitTicketOrder() {
+    const validation = validateTicketOrder();
+    if (!validation.valid) {
+        showTemplateModal('Fehler', validation.message, 'OK', 'btn-danger', null, null, function() {});
+        return;
+    }
+    
+    const ticketCount = parseInt($('#ticket_count').val());
+    const participants = [];
+    
+    for (let i = 1; i <= ticketCount; i++) {
+        const name = $(`#participant_name_${i}`).val().trim();
+        const phone = $(`#participant_phone_${i}`).val().trim();
+        const birthdate = $(`#participant_birthdate_${i}`).val().trim();
+        const email = $(`#participant_email_${i}`).val().trim();
+        
+        participants.push({
+            name: name,
+            phone: phone,
+            email: email,
+            birthdate: birthdate
+        });
+    }
+    
+    api_call('/api/create_ticket_order', {
+        event_id: currentEventId,
+        ticket_count: ticketCount,
+        participants: participants
+    }, function(data) {
+        if (data.success) {
+            $('#orderModal').modal('hide');
+            
+            // Build success message - payment details are now sent separately
+            let successMessage = `
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle-fill"></i> <strong>Deine Tickets sind reserviert!</strong>
+                </div>
+                <p><strong>Gesamtpreis:</strong> ${data.total_price}€</p>
+                <p><strong>Bestellreferenz:</strong> <code>${data.payment_reference}</code></p>
+                
+                <div class="alert alert-info mt-3">
+                    <h6><i class="bi bi-envelope"></i> Nächster Schritt</h6>
+                    <p class="mb-0">Du erhältst in Kürze eine <strong>separate E-Mail mit den Zahlungsinformationen</strong>. 
+                    Sobald deine Zahlung eingegangen ist, werden deine Tickets freigeschaltet.</p>
+                </div>
+                
+                <p class="mt-3 text-muted small">Eine Bestellbestätigung wurde dir per E-Mail zugeschickt.</p>`;
+            
+            showTemplateModal('Bestellung eingegangen!', successMessage, 
+                'OK', 'btn-success', null, null, function() {
+                    // Reload events and orders to update availability
+                    loadEvents();
+                    loadPreviousOrders();
+                });
+        } else {
+            showTemplateModal('Fehler', data.error || 'Unbekannter Fehler beim Erstellen der Bestellung', 'OK', 'btn-danger', null, null, function() {});
+        }
+    });
+}
+
+// Initialize page
+$(document).ready(function() {
+    // Load events and previous orders
+    loadEvents();
+    loadPreviousOrders();
+    
+    // Event handlers
+    $('#verify_password_btn').click(verifyEventPassword);
+    $('#submit_order_btn').click(submitTicketOrder);
+    
+    // Withdrawal policy button handler
+    $('#show_withdrawal_btn').click(function() {
+        $('#withdrawalModal').modal('show');
+    });
+    
+    $('#ticket_count').on('input change', function() {
+        updateParticipantsSection();
+        
+        const ticketCount = parseInt($(this).val()) || 0;
+        if (ticketCount > currentTicketLimits.max_order) {
+            $(this).addClass('is-invalid');
+            $(this).next('.invalid-feedback').remove();
+            $(this).after(`<div class="invalid-feedback">Du kannst maximal ${currentTicketLimits.max_order} Tickets bestellen</div>`);
+            $('#submit_order_btn').prop('disabled', true);
+        } else {
+            $(this).removeClass('is-invalid');
+            $(this).next('.invalid-feedback').remove();
+            $('#submit_order_btn').prop('disabled', false);
+        }
+    });
+    
+    // Handle password modal enter key
+    $('#event_password').on('keypress', function(e) {
+        if (e.which === 13) {
+            verifyEventPassword();
+        }
+    });
+    
+    // Reset form when modals are hidden
+    $('#passwordModal').on('hidden.bs.modal', function() {
+        $('#event_password').val('');
+    });
+    
+    $('#orderModal').on('hidden.bs.modal', function() {
+        $('#ticket_count').prop('disabled', false);
+        $('#submit_order_btn').prop('disabled', false);
+        currentEventId = null;
+        currentEventData = null;
+        currentTicketLimits = null;
+    });
+    
+    // Refresh events every 5 minutes
+    setInterval(loadEvents, 5 * 60 * 1000);
+});
+</script>

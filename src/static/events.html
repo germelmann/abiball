@@ -1,0 +1,1063 @@
+#{site_for_user_with_permission!("create_events")}
+<div class='container'>
+    <h1>Events verwalten</h1>
+    <div class='row mb-3'>
+        <div class='col-md-12'>
+            <button class='btn btn-primary' data-bs-toggle="modal" data-bs-target="#createEventModal">
+                <i class="bi bi-plus-lg"></i>&nbsp;&nbsp;Neues Event erstellen
+            </button>
+            <button class='btn btn-secondary ms-2' onclick="loadEvents()">
+                <i class="bi bi-arrow-clockwise"></i>&nbsp;&nbsp;Aktualisieren
+            </button>
+        </div>
+    </div>
+    
+    <div class='row'>
+        <div class='col-md-12'>
+            <!-- <div class="table-responsive"> -->
+                <table class='table table-striped table-sm'>
+                    <thead>
+                        <tr>
+                            <th class="text-nowrap">Name</th>
+                            <th class="text-nowrap">Datum/Zeit</th>
+                            <th class="text-nowrap">Ort</th>
+                            <th class="text-nowrap">Tickets</th>
+                            <th class="text-nowrap">Preis</th>
+                            <th class="text-nowrap">Verkauf</th>
+                            <th class="text-nowrap">Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody id='events_table'>
+                    </tbody>
+                </table>
+            <!-- </div> -->
+        </div>
+    </div>
+</div>
+
+<!-- Create Event Modal -->
+<div class="modal fade" id="createEventModal" tabindex="-1" aria-labelledby="createEventModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="createEventModalLabel">Neues Event erstellen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <form id="create_event_form">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label for="event_name_input" class="form-label">Event Name *</label>
+                                <input type="text" class="form-control" id="event_name_input" placeholder="z.B. Abiball 2024" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="event_year_input" class="form-label">Jahr *</label>
+                                <input type="number" class="form-control" id="event_year_input" placeholder="2024" min="2020" max="2050" required>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="event_location_input" class="form-label">Veranstaltungsort *</label>
+                        <input type="text" class="form-control" id="event_location_input" placeholder="z.B. Große Halle Berlin" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="event_description_input" class="form-label">Beschreibung</label>
+                        <textarea class="form-control" id="event_description_input" rows="3" placeholder="Optionale Beschreibung des Events"></textarea>
+                    </div>
+                    
+                    <!-- Date and Time fields -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="event_start_datetime_input" class="form-label">Startdatum & -zeit</label>
+                                <input type="datetime-local" class="form-control" id="event_start_datetime_input">
+                                <small class="form-text text-muted">Wann beginnt das Event?</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="event_end_datetime_input" class="form-label">Enddatum & -zeit</label>
+                                <input type="datetime-local" class="form-control" id="event_end_datetime_input">
+                                <small class="form-text text-muted">Wann endet das Event?</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="event_visibility_input" class="form-label">Sichtbarkeit *</label>
+                        <select class="form-control" id="event_visibility_input" required>
+                            <option value="public">Öffentlich - Für alle sichtbar</option>
+                            <option value="private">Privat - Nur für Eventersteller sichtbar</option>
+                            <option value="password_protected">Passwort geschützt - Mit Passwort zugänglich</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3" id="password_section" style="display: none;">
+                        <label for="event_password_input" class="form-label">Passwort</label>
+                        <input type="password" class="form-control" id="event_password_input" placeholder="Passwort für das Event">
+                        <small class="form-text text-muted">Erforderlich für passwort-geschützte Events</small>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="event_max_tickets_input" class="form-label">Maximale Tickets</label>
+                                <input type="number" class="form-control" id="event_max_tickets_input" placeholder="200" min="1" max="10000">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="event_ticket_price_input" class="form-label">Ticket-Preis (€)</label>
+                                <input type="number" class="form-control" id="event_ticket_price_input" step="0.01" min="0" placeholder="65.00">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="event_max_tickets_per_user_input" class="form-label">Max. Tickets pro Person</label>
+                                <input type="number" class="form-control" id="event_max_tickets_per_user_input" placeholder="10" min="1" max="50">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Ticket Generation Settings -->
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="event_ticket_generation_enabled_input" checked>
+                            <label class="form-check-label" for="event_ticket_generation_enabled_input">
+                                Ticket-Verkauf aktiviert
+                            </label>
+                            <small class="form-text text-muted">Können Benutzer Tickets für dieses Event kaufen?</small>
+                        </div>
+                    </div>
+                    
+                    <!-- Ticket Sale Timing -->
+                    <div class="mb-3">
+                        <h6 class="mb-3">Ticket-Verkaufszeitraum</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="event_ticket_sale_start_datetime_input" class="form-label">Verkaufsstart</label>
+                                    <input type="datetime-local" class="form-control" id="event_ticket_sale_start_datetime_input">
+                                    <small class="form-text text-muted">Ab wann können Tickets gekauft werden? (optional)</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="event_ticket_sale_end_datetime_input" class="form-label">Verkaufsende</label>
+                                    <input type="datetime-local" class="form-control" id="event_ticket_sale_end_datetime_input">
+                                    <small class="form-text text-muted">Bis wann können Tickets gekauft werden? (optional)</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="create_event_btn">Event erstellen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Event Modal -->
+<div class="modal fade" id="editEventModal" tabindex="-1" aria-labelledby="editEventModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editEventModalLabel">Event bearbeiten</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <form id="edit_event_form">
+                    <input type="hidden" id="edit_event_id">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label for="edit_event_name_input" class="form-label">Event Name *</label>
+                                <input type="text" class="form-control" id="edit_event_name_input" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="edit_event_year_input" class="form-label">Jahr *</label>
+                                <input type="number" class="form-control" id="edit_event_year_input" min="2020" max="2050" required>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="edit_event_location_input" class="form-label">Veranstaltungsort *</label>
+                        <input type="text" class="form-control" id="edit_event_location_input" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="edit_event_description_input" class="form-label">Beschreibung</label>
+                        <textarea class="form-control" id="edit_event_description_input" rows="3"></textarea>
+                    </div>
+                    
+                    <!-- Date and Time fields -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="edit_event_start_datetime_input" class="form-label">Startdatum & -zeit</label>
+                                <input type="datetime-local" class="form-control" id="edit_event_start_datetime_input">
+                                <small class="form-text text-muted">Wann beginnt das Event?</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="edit_event_end_datetime_input" class="form-label">Enddatum & -zeit</label>
+                                <input type="datetime-local" class="form-control" id="edit_event_end_datetime_input">
+                                <small class="form-text text-muted">Wann endet das Event?</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="edit_event_visibility_input" class="form-label">Sichtbarkeit *</label>
+                        <select class="form-control" id="edit_event_visibility_input" required>
+                            <option value="public">Öffentlich - Für alle sichtbar</option>
+                            <option value="private">Privat - Nur für Eventersteller sichtbar</option>
+                            <option value="password_protected">Passwort geschützt - Mit Passwort zugänglich</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3" id="edit_password_section" style="display: none;">
+                        <label for="edit_event_password_input" class="form-label">Passwort</label>
+                        <input type="password" class="form-control" id="edit_event_password_input">
+                        <small class="form-text text-muted">Leer lassen, um das aktuelle Passwort zu behalten</small>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="edit_event_max_tickets_input" class="form-label">Maximale Tickets</label>
+                                <input type="number" class="form-control" id="edit_event_max_tickets_input" min="1" max="10000">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="edit_event_ticket_price_input" class="form-label">Ticket-Preis (€)</label>
+                                <input type="text" class="form-control" id="edit_event_ticket_price_input">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="edit_event_max_tickets_per_user_input" class="form-label">Max. Tickets pro Person</label>
+                                <input type="number" class="form-control" id="edit_event_max_tickets_per_user_input" min="1" max="50">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Ticket Generation Settings -->
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="edit_event_ticket_generation_enabled_input">
+                            <label class="form-check-label" for="edit_event_ticket_generation_enabled_input">
+                                Ticket-Verkauf aktiviert
+                            </label>
+                            <small class="form-text text-muted">Können Benutzer Tickets für dieses Event kaufen?</small>
+                        </div>
+                    </div>
+                    
+                    <!-- Ticket Sale Timing -->
+                    <div class="mb-3">
+                        <h6 class="mb-3">Ticket-Verkaufszeitraum</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="edit_event_ticket_sale_start_datetime_input" class="form-label">Verkaufsstart</label>
+                                    <input type="datetime-local" class="form-control" id="edit_event_ticket_sale_start_datetime_input">
+                                    <small class="form-text text-muted">Ab wann können Tickets gekauft werden? (optional)</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="edit_event_ticket_sale_end_datetime_input" class="form-label">Verkaufsende</label>
+                                    <input type="datetime-local" class="form-control" id="edit_event_ticket_sale_end_datetime_input">
+                                    <small class="form-text text-muted">Bis wann können Tickets gekauft werden? (optional)</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Ticket Tiers Management -->
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <label class="form-label">Ticket-Kategorien</label>
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="manage_tiers_btn">
+                                <i class="bi bi-tags"></i> Kategorien verwalten
+                            </button>
+                        </div>
+                        <small class="form-text text-muted">Verwalte verschiedene Ticket-Kategorien (Standard, VIP, etc.) mit unterschiedlichen Preisen</small>
+                    </div>
+                    
+                    <!-- Bank Account Management -->
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <label class="form-label">Bankverbindungen</label>
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="manage_bank_accounts_btn">
+                                <i class="bi bi-bank"></i> Konten verwalten
+                            </button>
+                        </div>
+                        <small class="form-text text-muted">Verwalte Bankkonten für dieses Event mit prozentualer Verteilung der Zahlungen</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger" id="delete_event_btn">Event löschen</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="save_event_btn">Änderungen speichern</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Ticket Tier Management Modal -->
+<div class="modal fade" id="tierManagementModal" tabindex="-1" aria-labelledby="tierManagementModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tierManagementModalLabel">Ticket-Kategorien verwalten</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted">Erstelle und verwalte verschiedene Ticket-Kategorien für dieses Event.</p>
+                
+                <div id="tiers_container">
+                    <!-- Tier forms will be added here dynamically -->
+                </div>
+                
+                <div class="mt-3">
+                    <button type="button" class="btn btn-outline-primary" id="add_tier_btn">
+                        <i class="bi bi-plus"></i> Kategorie hinzufügen
+                    </button>
+                </div>
+                
+                <hr>
+                
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    <strong>Hinweis:</strong> Wenn keine Kategorien definiert sind, wird automatisch eine Standard-Kategorie mit dem Event-Grundpreis verwendet.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="save_tiers_btn">Kategorien speichern</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bank Account Management Modal -->
+<div class="modal fade" id="bankAccountManagementModal" tabindex="-1" aria-labelledby="bankAccountManagementModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bankAccountManagementModalLabel">Bankkonten verwalten</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted">Verwalte die Bankkonten für dieses Event. Zahlungen werden basierend auf den Prozentsätzen auf die Konten verteilt.</p>
+                
+                <div id="bank_accounts_container">
+                    <!-- Bank account forms will be added here dynamically -->
+                </div>
+                
+                <div class="mt-3">
+                    <button type="button" class="btn btn-outline-primary" id="add_bank_account_btn">
+                        <i class="bi bi-plus"></i> Konto hinzufügen
+                    </button>
+                </div>
+                
+                <hr>
+                
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Wichtig:</strong> Die Summe aller Prozentsätze muss exakt 100% ergeben. Wenn keine Konten konfiguriert sind, wird keine Bankverbindung in den Bestellbestätigungen angezeigt.
+                </div>
+                
+                <div class="alert alert-info">
+                    <strong>Total:</strong> <span id="total_percentage">0</span>%
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="save_bank_accounts_btn">Konten speichern</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let editingEvent = null;
+
+    // Handle visibility change for create modal
+    $('#event_visibility_input').change(function() {
+        if ($(this).val() === 'password_protected') {
+            $('#password_section').show();
+            $('#event_password_input').attr('required', true);
+        } else {
+            $('#password_section').hide();
+            $('#event_password_input').attr('required', false);
+        }
+    });
+
+    // Handle visibility change for edit modal
+    $('#edit_event_visibility_input').change(function() {
+        if ($(this).val() === 'password_protected') {
+            $('#edit_password_section').show();
+        } else {
+            $('#edit_password_section').hide();
+        }
+    });
+
+    // Create event
+    $('#create_event_btn').click(function() {
+        let formData = {
+            name: $('#event_name_input').val(),
+            year: parseInt($('#event_year_input').val()),
+            location: $('#event_location_input').val(),
+            description: $('#event_description_input').val(),
+            visibility: $('#event_visibility_input').val(),
+            ticket_generation_enabled: $('#event_ticket_generation_enabled_input').is(':checked')
+        };
+
+        if ($('#event_start_datetime_input').val()) {
+            formData.start_datetime = $('#event_start_datetime_input').val();
+        }
+
+        if ($('#event_end_datetime_input').val()) {
+            formData.end_datetime = $('#event_end_datetime_input').val();
+        }
+
+        if ($('#event_ticket_sale_start_datetime_input').val()) {
+            formData.ticket_sale_start_datetime = $('#event_ticket_sale_start_datetime_input').val();
+        }
+
+        if ($('#event_ticket_sale_end_datetime_input').val()) {
+            formData.ticket_sale_end_datetime = $('#event_ticket_sale_end_datetime_input').val();
+        }
+
+        if ($('#event_max_tickets_input').val()) {
+            formData.max_tickets = parseInt($('#event_max_tickets_input').val());
+        }
+
+        if ($('#event_ticket_price_input').val()) {
+            formData.ticket_price = $('#event_ticket_price_input').val();
+        }
+
+        if ($('#event_max_tickets_per_user_input').val()) {
+            formData.max_tickets_per_user = parseInt($('#event_max_tickets_per_user_input').val());
+        }
+
+        if (formData.visibility === 'password_protected') {
+            formData.password = $('#event_password_input').val();
+        }
+
+        api_call('/api/create_event', formData, function(data) {
+            if (data.success) {
+                $('#createEventModal').modal('hide');
+                $('#create_event_form')[0].reset();
+                $('#password_section').hide();
+                $('#event_ticket_generation_enabled_input').prop('checked', true);
+                loadEvents();
+                showTemplateModal('Erfolg', 'Event wurde erfolgreich erstellt!', 'OK', 'btn-success', '', '', function() {});
+            } else {
+                showTemplateModal('Fehler', data.error || 'Fehler beim Erstellen des Events', 'OK', 'btn-secondary', '', '', function() {});
+            }
+        })
+    });
+
+    // Save event changes
+    $('#save_event_btn').click(function() {
+        let formData = {
+            event_id: $('#edit_event_id').val(),
+            name: $('#edit_event_name_input').val(),
+            year: parseInt($('#edit_event_year_input').val()),
+            location: $('#edit_event_location_input').val(),
+            description: $('#edit_event_description_input').val(),
+            visibility: $('#edit_event_visibility_input').val(),
+            max_tickets: parseInt($('#edit_event_max_tickets_input').val()),
+            ticket_price: $('#edit_event_ticket_price_input').val(),
+            ticket_generation_enabled: $('#edit_event_ticket_generation_enabled_input').is(':checked')
+        };
+
+        if ($('#edit_event_start_datetime_input').val()) {
+            formData.start_datetime = $('#edit_event_start_datetime_input').val();
+        }
+
+        if ($('#edit_event_end_datetime_input').val()) {
+            formData.end_datetime = $('#edit_event_end_datetime_input').val();
+        }
+
+        if ($('#edit_event_ticket_sale_start_datetime_input').val()) {
+            formData.ticket_sale_start_datetime = $('#edit_event_ticket_sale_start_datetime_input').val();
+        }
+
+        if ($('#edit_event_ticket_sale_end_datetime_input').val()) {
+            formData.ticket_sale_end_datetime = $('#edit_event_ticket_sale_end_datetime_input').val();
+        }
+
+        if ($('#edit_event_max_tickets_per_user_input').val()) {
+            formData.max_tickets_per_user = parseInt($('#edit_event_max_tickets_per_user_input').val());
+        }
+
+        if (formData.visibility === 'password_protected' && $('#edit_event_password_input').val()) {
+            formData.password = $('#edit_event_password_input').val();
+        }
+
+        api_call('/api/update_event', formData, function(data) {
+            if (data.success) {
+                $('#editEventModal').modal('hide');
+                loadEvents();
+                showTemplateModal('Erfolg', 'Event wurde erfolgreich aktualisiert!', 'OK', 'btn-success', '', '', function() {});
+            } else {
+                showTemplateModal('Fehler', data.error || 'Fehler beim Aktualisieren des Events', 'OK', 'btn-secondary', '', '', function() {});
+            }
+        })
+    });
+
+    // Delete event
+    $('#delete_event_btn').click(function() {
+        if (!editingEvent) return;
+        
+        showTemplateModal('Event löschen', 
+            `Soll das Event "${editingEvent.name}" wirklich gelöscht werden? Diese Aktion kann nicht rückgängig gemacht werden.`,
+            'Löschen', 'btn-danger',
+            'Abbrechen', 'btn-secondary',
+            function() {
+                api_call('/api/delete_event', {event_id: editingEvent.id}, function(data) {
+                    if (data.success) {
+                        $('#editEventModal').modal('hide');
+                        loadEvents();
+                        showTemplateModal('Erfolg', 'Event wurde erfolgreich gelöscht!', 'OK', 'btn-success', '', '', function() {});
+                    } else {
+                        showTemplateModal('Fehler', data.error || 'Fehler beim Löschen des Events', 'OK', 'btn-secondary', '', '', function() {});
+                    }
+                })
+            }
+        );
+    });
+
+    function loadEvents() {
+        api_call('/api/get_events', {}, function(data) {
+            if (data.success) {
+                updateEventsTable(data.events);
+            } else {
+                showTemplateModal('Fehler', 'Fehler beim Laden der Events', 'OK', 'btn-secondary', '', '', function() {});
+            }
+        })
+    }
+
+    function updateEventsTable(events) {
+        const tbody = $('#events_table');
+        tbody.empty();
+        
+        events.forEach(function(event) {
+            const row = $('<tr>');
+            
+            // Name
+            row.append($('<td>').text(event.name));
+            
+            // Date/Time
+            let dateTimeText = 'Nicht festgelegt';
+            if (event.start_datetime) {
+                const startDate = new Date(event.start_datetime);
+                dateTimeText = startDate.toLocaleDateString('de-DE') + ' ' + startDate.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'});
+                if (event.end_datetime) {
+                    const endDate = new Date(event.end_datetime);
+                    if (endDate.toDateString() === startDate.toDateString()) {
+                        dateTimeText += ' - ' + endDate.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'});
+                    } else {
+                        dateTimeText += ' - ' + endDate.toLocaleDateString('de-DE') + ' ' + endDate.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'});
+                    }
+                }
+            }
+            row.append($('<td>').text(dateTimeText));
+            
+            // Location
+            row.append($('<td>').text(event.location));
+            
+            // Tickets info
+            let ticketsText = event.max_tickets || 'Unbegrenzt';
+            if (event.max_tickets_per_user) {
+                ticketsText += ` (${event.max_tickets_per_user}/Person)`;
+            }
+            row.append($('<td>').text(ticketsText));
+            
+            // Price
+            row.append($('<td>').text(event.ticket_price + '€'));
+            
+            // Ticket sale status
+            let saleStatus = '';
+            if (event.ticket_generation_enabled) {
+                saleStatus = '<span class="badge bg-success">Aktiv</span>';
+            } else {
+                saleStatus = '<span class="badge bg-secondary">Deaktiviert</span>';
+            }
+            row.append($('<td>').html(saleStatus));
+            
+            // Actions
+            let actionsHtml = `
+                <div class="btn-group" role="group">
+                    <a href="/live_dashboard/${event.id}" class="btn btn-sm btn-outline-info" title="Live Dashboard">
+                        <i class="bi bi-speedometer2"></i> Dashboard
+                    </a>
+                    <button class="btn btn-sm btn-outline-primary edit-event-btn" data-event-id="${event.id}">
+                        <i class="bi bi-pencil"></i> Bearbeiten
+                    </button>
+                    <button class="btn btn-sm btn-outline-success dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-download"></i>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item bulk-generate-tickets-btn" href="#" data-event-id="${event.id}">
+                            <i class="bi bi-ticket-detailed"></i> Tickets freigeben
+                        </a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item export-csv-btn" href="#" data-event-id="${event.id}">
+                            <i class="bi bi-file-earmark-spreadsheet"></i> Gästeliste CSV
+                        </a></li>
+                        <li><a class="dropdown-item export-pdf-btn" href="#" data-event-id="${event.id}">
+                            <i class="bi bi-file-earmark-pdf"></i> Gästeliste PDF
+                        </a></li>
+                    </ul>
+                </div>
+            `;
+            row.append($('<td>').html(actionsHtml));
+            
+            tbody.append(row);
+        });
+        
+        // Bind edit buttons
+        $('.edit-event-btn').click(function() {
+            const eventId = $(this).data('event-id');
+            const event = events.find(e => e.id === eventId);
+            if (event) {
+                editEvent(event);
+            }
+        });
+        
+        // Bind export buttons
+        $('.export-csv-btn').click(function(e) {
+            e.preventDefault();
+            const eventId = $(this).data('event-id');
+            window.open(`/api/export_guest_list_csv/${eventId}`, '_blank');
+        });
+        
+        $('.export-pdf-btn').click(function(e) {
+            e.preventDefault();
+            const eventId = $(this).data('event-id');
+            window.open(`/api/export_guest_list_pdf/${eventId}`, '_blank');
+        });
+        
+        $('.bulk-generate-tickets-btn').click(function(e) {
+            e.preventDefault();
+            const eventId = $(this).data('event-id');
+            const event = events.find(e => e.id === eventId);
+            const eventName = event ? event.name : 'diesem Event';
+            
+            showTemplateModal(
+                'Tickets für Event freigeben',
+                `Möchtest du alle bezahlten Tickets für "${eventName}" freigeben? Dies generiert alle noch nicht generierten Tickets für dieses Event und ermöglicht den Download für die Kunden.`,
+                'Ja, Tickets freigeben',
+                'btn-success',
+                'Abbrechen',
+                'btn-secondary',
+                function() {
+                    bulkGenerateTickets(eventId);
+                }
+            );
+        });
+    }
+    
+    function bulkGenerateTickets(eventId) {
+        api_call('/api/bulk_generate_tickets_for_event', {event_id: eventId}, function(data) {
+            if (data.success) {
+                showAlert('success', data.message);
+            } else {
+                showAlert('danger', data.error || 'Fehler beim Freigeben der Tickets');
+            }
+        });
+    }
+    
+    function showAlert(type, message) {
+        const alertHtml = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        `;
+        $('.container').prepend(alertHtml);
+        
+        // Auto-dismiss after 5 seconds
+        setTimeout(function() {
+            $('.alert').fadeOut();
+        }, 5000);
+    }
+
+    function editEvent(event) {
+        editingEvent = event;
+        $('#edit_event_id').val(event.id);
+        $('#edit_event_name_input').val(event.name);
+        $('#edit_event_year_input').val(event.year);
+        $('#edit_event_location_input').val(event.location);
+        $('#edit_event_description_input').val(event.description || '');
+        $('#edit_event_visibility_input').val(event.visibility);
+        $('#edit_event_max_tickets_input').val(event.max_tickets);
+        $('#edit_event_ticket_price_input').val(event.ticket_price);
+        $('#edit_event_max_tickets_per_user_input').val(event.max_tickets_per_user || '');
+        
+        // Handle date/time fields - load directly without formatting
+        $('#edit_event_start_datetime_input').val(event.start_datetime || '');
+        $('#edit_event_end_datetime_input').val(event.end_datetime || '');
+        
+        // Handle ticket sale timing
+        $('#edit_event_ticket_sale_start_datetime_input').val(event.ticket_sale_start_datetime || '');
+        $('#edit_event_ticket_sale_end_datetime_input').val(event.ticket_sale_end_datetime || '');
+        
+        // Handle ticket generation setting
+        $('#edit_event_ticket_generation_enabled_input').prop('checked', event.ticket_generation_enabled !== false);
+        
+        // Handle password section visibility
+        if (event.visibility === 'password_protected') {
+            $('#edit_password_section').show();
+        } else {
+            $('#edit_password_section').hide();
+        }
+        
+        $('#edit_event_password_input').val(''); // Don't show existing password
+        
+        $('#editEventModal').modal('show');
+    }
+
+    // Tier Management Functions
+    let currentTiers = [];
+    let currentEventForTiers = null;
+
+    $('#manage_tiers_btn').click(function() {
+        if (editingEvent) {
+            currentEventForTiers = editingEvent;
+            loadEventTiers(editingEvent.id);
+            $('#tierManagementModal').modal('show');
+        }
+    });
+
+    function loadEventTiers(eventId) {
+        api_call('/api/get_ticket_tiers', {event_id: eventId}, function(data) {
+            if (data.success) {
+                currentTiers = data.tiers || [];
+                renderTiersForms();
+            } else {
+                console.error('Error loading tiers:', data.error);
+                currentTiers = [];
+                renderTiersForms();
+            }
+        });
+    }
+
+    function renderTiersForms() {
+        let container = $('#tiers_container');
+        container.empty();
+
+        if (currentTiers.length === 0) {
+            // Add a default tier form
+            addTierForm('Standard', currentEventForTiers ? currentEventForTiers.ticket_price : '', 'Standard Ticket', '');
+        } else {
+            currentTiers.forEach(function(tier) {
+                addTierForm(tier.name, tier.price, tier.description, tier.max_tickets);
+            });
+        }
+    }
+
+    function addTierForm(name = '', price = '', description = '', maxTickets = '') {
+        let tierIndex = $('#tiers_container .tier-form').length;
+        let tierHtml = `
+            <div class="tier-form border rounded p-3 mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6>Kategorie ${tierIndex + 1}</h6>
+                    <button type="button" class="btn btn-sm btn-outline-danger remove-tier-btn">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Name *</label>
+                            <input type="text" class="form-control tier-name" value="${name}" placeholder="z.B. Standard, VIP" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Preis (€) *</label>
+                            <input type="number" class="form-control tier-price" value="${price}" step="0.01" min="0" placeholder="65.00" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-8">
+                        <div class="mb-3">
+                            <label class="form-label">Beschreibung</label>
+                            <input type="text" class="form-control tier-description" value="${description}" placeholder="Optionale Beschreibung">
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="mb-3">
+                            <label class="form-label">Max. Tickets für diese Kategorie</label>
+                            <input type="number" class="form-control tier-max-tickets" value="${maxTickets}" min="1" placeholder="Leer = unbegrenzt">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        $('#tiers_container').append(tierHtml);
+        
+        // Add event listener for remove button
+        $('#tiers_container .remove-tier-btn').last().click(function() {
+            $(this).closest('.tier-form').remove();
+        });
+    }
+
+    $('#add_tier_btn').click(function() {
+        addTierForm();
+    });
+
+    $('#save_tiers_btn').click(function() {
+        let tiers = [];
+        let valid = true;
+
+        $('#tiers_container .tier-form').each(function() {
+            let name = $(this).find('.tier-name').val().trim();
+            let price = $(this).find('.tier-price').val();
+            let description = $(this).find('.tier-description').val().trim();
+            let maxTickets = $(this).find('.tier-max-tickets').val();
+
+            if (!name || !price) {
+                valid = false;
+                return false;
+            }
+
+            tiers.push({
+                name: name,
+                price: parseFloat(price),
+                description: description,
+                max_tickets: maxTickets ? parseInt(maxTickets) : null
+            });
+        });
+
+        if (!valid) {
+            alert('Bitte fülle alle Pflichtfelder (Name und Preis) aus.');
+            return;
+        }
+
+        if (currentEventForTiers) {
+            api_call('/api/manage_ticket_tiers', {
+                event_id: currentEventForTiers.id,
+                tiers: tiers
+            }, function(data) {
+                if (data.success) {
+                    $('#tierManagementModal').modal('hide');
+                    loadEvents(); // Refresh the events list
+                } else {
+                    alert('Fehler beim Speichern der Kategorien: ' + (data.error || 'Unbekannter Fehler'));
+                }
+            });
+        }
+    });
+
+    // Bank Account Management
+    let currentEventForBankAccounts = null;
+    let currentBankAccounts = [];
+
+    $('#manage_bank_accounts_btn').click(function() {
+        if (editingEvent) {
+            currentEventForBankAccounts = editingEvent;
+            loadEventBankAccounts(editingEvent.id);
+            $('#bankAccountManagementModal').modal('show');
+        }
+    });
+
+    function loadEventBankAccounts(eventId) {
+        api_call('/api/get_bank_accounts', {event_id: eventId}, function(data) {
+            if (data.success) {
+                currentBankAccounts = data.accounts || [];
+                renderBankAccountsForms();
+                updateTotalPercentage();
+            } else {
+                console.error('Error loading bank accounts:', data.error);
+                currentBankAccounts = [];
+                renderBankAccountsForms();
+            }
+        });
+    }
+
+    function renderBankAccountsForms() {
+        let container = $('#bank_accounts_container');
+        container.empty();
+
+        if (currentBankAccounts.length === 0) {
+            // Add a default bank account form
+            addBankAccountForm('', '', '', '', 100, '');
+        } else {
+            currentBankAccounts.forEach(function(account) {
+                addBankAccountForm(account.account_name, account.bank_name, account.iban, account.bic, account.percentage, account.escrow_document_url || '');
+            });
+        }
+    }
+
+    function addBankAccountForm(accountName = '', bankName = '', iban = '', bic = '', percentage = 0, escrowDocUrl = '') {
+        let accountIndex = $('#bank_accounts_container .bank-account-form').length;
+        let accountHtml = `
+            <div class="bank-account-form border rounded p-3 mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6>Konto ${accountIndex + 1}</h6>
+                    <button type="button" class="btn btn-sm btn-outline-danger remove-bank-account-btn">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Kontoinhaber *</label>
+                            <input type="text" class="form-control account-name" value="${accountName}" placeholder="z.B. Max Mustermann" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Bank *</label>
+                            <input type="text" class="form-control bank-name" value="${bankName}" placeholder="z.B. Sparkasse Berlin" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">IBAN *</label>
+                            <input type="text" class="form-control account-iban" value="${iban}" placeholder="DE89 3704 0044 0532 0130 00" required>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="mb-3">
+                            <label class="form-label">BIC *</label>
+                            <input type="text" class="form-control account-bic" value="${bic}" placeholder="COBADEFFXXX" required>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="mb-3">
+                            <label class="form-label">Prozentsatz (%) *</label>
+                            <input type="number" class="form-control account-percentage" value="${percentage}" step="0.01" min="0" max="100" placeholder="50" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="mb-3">
+                            <label class="form-label">Treuhand-Vertrag URL (optional)</label>
+                            <input type="text" class="form-control escrow-document-url" value="${escrowDocUrl}" placeholder="https://example.com/documents/treuhand-vertrag.pdf">
+                            <small class="form-text text-muted">Link zu einem öffentlich zugänglichen Treuhand-Vertragsdokument (z.B. PDF in Cloud-Speicher)</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        $('#bank_accounts_container').append(accountHtml);
+        
+        // Add event listeners
+        $('#bank_accounts_container .remove-bank-account-btn').last().click(function() {
+            $(this).closest('.bank-account-form').remove();
+            updateTotalPercentage();
+        });
+        
+        $('#bank_accounts_container .account-percentage').last().on('input', function() {
+            updateTotalPercentage();
+        });
+    }
+
+    function updateTotalPercentage() {
+        let total = 0;
+        $('#bank_accounts_container .account-percentage').each(function() {
+            let value = parseFloat($(this).val()) || 0;
+            total += value;
+        });
+        $('#total_percentage').text(total.toFixed(2));
+        
+        // Color code the total
+        if (Math.abs(total - 100) < 0.01) {
+            $('#total_percentage').removeClass('text-danger text-warning').addClass('text-success');
+        } else if (total > 0) {
+            $('#total_percentage').removeClass('text-danger text-success').addClass('text-warning');
+        } else {
+            $('#total_percentage').removeClass('text-warning text-success').addClass('text-danger');
+        }
+    }
+
+    $('#add_bank_account_btn').click(function() {
+        addBankAccountForm();
+        updateTotalPercentage();
+    });
+
+    $('#save_bank_accounts_btn').click(function() {
+        let accounts = [];
+        let valid = true;
+
+        $('#bank_accounts_container .bank-account-form').each(function() {
+            let accountName = $(this).find('.account-name').val().trim();
+            let bankName = $(this).find('.bank-name').val().trim();
+            let iban = $(this).find('.account-iban').val().trim();
+            let bic = $(this).find('.account-bic').val().trim();
+            let percentage = $(this).find('.account-percentage').val();
+            let escrowDocUrl = $(this).find('.escrow-document-url').val().trim();
+
+            if (!accountName || !bankName || !iban || !bic || !percentage) {
+                valid = false;
+                return false;
+            }
+
+            accounts.push({
+                account_name: accountName,
+                bank_name: bankName,
+                iban: iban,
+                bic: bic,
+                percentage: parseFloat(percentage),
+                escrow_document_url: escrowDocUrl
+            });
+        });
+
+        if (!valid) {
+            alert('Bitte fülle alle Pflichtfelder aus.');
+            return;
+        }
+
+        // Validate total percentage
+        let total = accounts.reduce((sum, acc) => sum + acc.percentage, 0);
+        if (accounts.length > 0 && Math.abs(total - 100) >= 0.01) {
+            alert('Die Summe der Prozentsätze muss exakt 100% ergeben (aktuell: ' + total.toFixed(2) + '%)');
+            return;
+        }
+
+        if (currentEventForBankAccounts) {
+            api_call('/api/manage_bank_accounts', {
+                event_id: currentEventForBankAccounts.id,
+                accounts: accounts
+            }, function(data) {
+                if (data.success) {
+                    $('#bankAccountManagementModal').modal('hide');
+                    loadEvents(); // Refresh the events list
+                } else {
+                    alert('Fehler beim Speichern der Konten: ' + (data.error || 'Unbekannter Fehler'));
+                }
+            });
+        }
+    });
+
+    // Load events when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        loadEvents();
+    });
+</script>

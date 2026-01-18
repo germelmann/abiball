@@ -1,0 +1,376 @@
+#{site_for_user_with_permission!("create_invites")}
+<div class='container'>
+    <h1>Einladungslinks verwalten</h1>
+    <div class='row mb-3'>
+        <div class='col-md-12'>
+            <button class='btn btn-primary' data-bs-toggle="modal" data-bs-target="#createInviteModal">
+                <i class="bi bi-plus-lg"></i>&nbsp;&nbsp;Neuen Einladungslink erstellen
+            </button>
+            <button class='btn btn-secondary ms-2' onclick="loadInvitations()">
+                <i class="bi bi-arrow-clockwise"></i>&nbsp;&nbsp;Aktualisieren
+            </button>
+        </div>
+    </div>
+    
+    <div class='row'>
+        <div class='col-md-12'>
+            <div class='card'>
+                <div class='card-body'>
+                    <div class="table-responsive">
+                        <table class='table table-striped table-sm'>
+                            <thead>
+                                <tr>
+                                    <th class="text-nowrap">Name</th>
+                                    <th class="text-nowrap">Erstellt von</th>
+                                    <th class="text-nowrap">Erstellt am</th>
+                                    <th class="text-nowrap">Gültig bis</th>
+                                    <th class="text-nowrap">Max. Verwendungen</th>
+                                    <th class="text-nowrap">Verwendet</th>
+                                    <th class="text-nowrap">Status</th>
+                                    <th class="text-nowrap">Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody id='invitations_table'>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create Invitation Modal -->
+<div class="modal fade" id="createInviteModal" tabindex="-1" aria-labelledby="createInviteModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="createInviteModalLabel">Neuen Einladungslink erstellen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <form id="create_invite_form">
+                    <div class="mb-3">
+                        <label for="custom_name_input" class="form-label">Name der Einladung</label>
+                        <input type="text" class="form-control" id="custom_name_input" placeholder="z.B. Klasse 12a" value="Einladung">
+                    </div>
+                    <div class="mb-3">
+                        <label for="expires_hours_input" class="form-label">Gültigkeit (Stunden)</label>
+                        <input type="number" class="form-control" id="expires_hours_input" placeholder="Leer lassen für unbegrenzt">
+                        <div class="form-text">Leer lassen für unbegrenzte Gültigkeit</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="max_uses_input" class="form-label">Maximale Verwendungen</label>
+                        <input type="number" class="form-control" id="max_uses_input" placeholder="Leer lassen für unbegrenzt">
+                        <div class="form-text">Leer lassen für unbegrenzte Verwendungen</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="invite_permissions_select" class="form-label">Berechtigungen</label>
+                        <select multiple class="form-select" id="invite_permissions_select" size="5">
+                            <!-- Populated dynamically -->
+                        </select>
+                        <div class="form-text">Wählen Sie Berechtigungen, die automatisch zugewiesen werden (Sie können nur Berechtigungen erteilen, die Sie selbst haben)</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="invite_tags_select" class="form-label">Tags</label>
+                        <select multiple class="form-select" id="invite_tags_select" size="5">
+                            <!-- Populated dynamically -->
+                        </select>
+                        <div class="form-text">Wählen Sie Tags, die automatisch zugewiesen werden</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-primary" onclick="createInvitation()">Erstellen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Show Invitation URL Modal -->
+<div class="modal fade" id="showInviteUrlModal" tabindex="-1" aria-labelledby="showInviteUrlModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="showInviteUrlModalLabel">Einladungslink erstellt</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <p>Der Einladungslink wurde erfolgreich erstellt:</p>
+                <div class="input-group mb-3">
+                    <input type="text" class="form-control" id="invite_url_display" readonly>
+                    <button class="btn btn-outline-secondary" type="button" onclick="copyInviteUrl()">
+                        <i class="bi bi-clipboard"></i> Kopieren
+                    </button>
+                </div>
+                <div id="invite_details"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Schließen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let allTags = [];
+
+$(document).ready(function() {
+    loadInvitations();
+    loadPermissionsAndTags();
+});
+
+const availablePermissions = [
+    { key: 'view_users', icon: 'bi-people', label: 'Benutzer ansehen', group: 'Benutzer verwalten', edit: false },
+    { key: 'manage_users', icon: 'bi-people', label: 'Benutzer verwalten', group: 'Benutzer verwalten', edit: true },
+    { key: 'edit_users', icon: 'bi-pencil-square', label: 'Benutzer bearbeiten', group: 'Benutzer verwalten', edit: true },
+    { key: 'buy_tickets', icon: 'bi-ticket', label: 'Tickets kaufen', group: 'Tickets', edit: false },
+    { key: 'manage_orders', icon: 'bi-cart', label: 'Bestellungen verwalten', group: 'Tickets', edit: true },
+    { key: 'create_invites', icon: 'bi-person-plus', label: 'Einladungen erstellen', group: 'Benutzer verwalten', edit: false },
+    { key: 'create_events', icon: 'bi-calendar-plus', label: 'Events erstellen', group: 'Events', edit: false },
+    { key: 'view_logs', icon: 'bi-file-text', label: 'Logs ansehen', group: 'Admin', edit: false },
+    { key: 'admin', icon: 'bi-gear', label: 'Admin', group: 'Admin', edit: null }
+];
+
+function loadPermissionsAndTags() {
+
+    // Load all permissions
+
+    const permSelect = $('#invite_permissions_select');
+    permSelect.empty();
+    availablePermissions.forEach(function(perm) {
+        permSelect.append($('<option>').val(perm.key).text(perm.label));
+    });
+    // Load all tags
+    api_call('/api/tags', {}, function(response) {
+        if (response.success && response.tags) {
+            allTags = response.tags;
+            
+            // Populate tags select
+            const tagSelect = $('#invite_tags_select');
+            tagSelect.empty();
+            allTags.forEach(function(tag) {
+                tagSelect.append($('<option>').val(tag.name).text(tag.name));
+            });
+        }
+    });
+}
+
+function getPermissionLabel(perm) {
+    return availablePermissions.find(p => p.key === perm)?.label || perm;
+}
+
+function loadInvitations() {
+    api_call('/api/get_invitations', {}, function(response) {
+        if (response.success) {
+            updateInvitationsTable(response.invitations);
+        } else {
+            showTemplateModal('Fehler', 'Einladungen konnten nicht geladen werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+        }
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Laden der Einladungen', 'OK', 'btn-secondary', '', '', function() {});
+    });
+}
+
+function updateInvitationsTable(invitations) {
+    const tbody = $('#invitations_table');
+    tbody.empty();
+    
+    invitations.forEach(function(invitation) {
+        const row = $('<tr>');
+        
+        // Name
+        row.append($('<td>').text(invitation.custom_name || 'Einladung'));
+        
+        // Created by
+        row.append($('<td>').text(invitation.created_by));
+        
+        // Created at
+        const createdAt = invitation.created_at ? new Date(invitation.created_at).toLocaleDateString('de-DE') : '-';
+        row.append($('<td>').text(createdAt));
+        
+        // Expires at
+        const expiresAt = invitation.expires_at ? new Date(invitation.expires_at).toLocaleDateString('de-DE') : 'Unbegrenzt';
+        row.append($('<td>').text(expiresAt));
+        
+        // Max uses
+        const maxUses = invitation.max_uses || 'Unbegrenzt';
+        row.append($('<td>').text(maxUses));
+        
+        // Uses count
+        const usesCount = invitation.uses_count || 0;
+        row.append($('<td>').text(usesCount));
+        
+        // Status
+        const statusCell = $('<td>');
+        let statusBadge = '';
+        if (invitation.revoked) {
+            statusBadge = '<span class="badge bg-danger">Widerrufen</span>';
+        } else if (!invitation.active) {
+            statusBadge = '<span class="badge bg-secondary">Inaktiv</span>';
+        } else if (invitation.expires_at && new Date(invitation.expires_at) < new Date()) {
+            statusBadge = '<span class="badge bg-warning">Abgelaufen</span>';
+        } else if (invitation.max_uses && invitation.uses_count >= invitation.max_uses) {
+            statusBadge = '<span class="badge bg-secondary">Erschöpft</span>';
+        } else {
+            statusBadge = '<span class="badge bg-success">Aktiv</span>';
+        }
+        statusCell.html(statusBadge);
+        row.append(statusCell);
+        
+        // Actions
+        const actionsCell = $('<td>');
+        if (!invitation.revoked) {
+            // Toggle activation button
+            const toggleBtn = $('<button>')
+                .addClass('btn btn-sm')
+                .addClass(invitation.active ? 'btn-warning' : 'btn-success')
+                .html(invitation.active ? '<i class="bi bi-pause-circle"></i>' : '<i class="bi bi-play-circle"></i>')
+                .attr('title', invitation.active ? 'Deaktivieren' : 'Aktivieren')
+                .click(() => toggleInvitationActive(invitation.token, !invitation.active));
+            actionsCell.append(toggleBtn);
+            
+            // Add spacing
+            actionsCell.append(' ');
+            
+            const revokeBtn = $('<button>')
+                .addClass('btn btn-sm btn-danger')
+                .html('<i class="bi bi-x-circle"></i>')
+                .attr('title', 'Widerrufen')
+                .click(() => revokeInvitation(invitation.token));
+            actionsCell.append(revokeBtn);
+        }
+        row.append(actionsCell);
+        
+        tbody.append(row);
+    });
+}
+
+function createInvitation() {
+    const customName = $('#custom_name_input').val().trim() || 'Einladung';
+    const expiresHours = $('#expires_hours_input').val();
+    const maxUses = $('#max_uses_input').val();
+    const selectedPermissions = $('#invite_permissions_select').val() || [];
+    const selectedTags = $('#invite_tags_select').val() || [];
+    
+    const data = {
+        custom_name: customName
+    };
+    
+    if (expiresHours && expiresHours > 0) {
+        data.expires_hours = parseInt(expiresHours);
+    }
+    
+    if (maxUses && maxUses > 0) {
+        data.max_uses = parseInt(maxUses);
+    }
+    
+    if (selectedPermissions.length > 0) {
+        data.permissions = selectedPermissions;
+    }
+    
+    if (selectedTags.length > 0) {
+        data.tags = selectedTags;
+    }
+    
+    api_call('/api/create_invite', data, function(response) {
+        if (response.success) {
+            $('#createInviteModal').modal('hide');
+            
+            // Show URL modal
+            $('#invite_url_display').val(response.invite_url);
+            
+            let details = '<strong>Details:</strong><ul>';
+            details += '<li>Name: ' + customName + '</li>';
+            details += '<li>Gültig bis: ' + (response.expires_at ? new Date(response.expires_at).toLocaleDateString('de-DE') : 'Unbegrenzt') + '</li>';
+            details += '<li>Max. Verwendungen: ' + (response.max_uses || 'Unbegrenzt') + '</li>';
+            if (response.permissions && response.permissions.length > 0) {
+                details += '<li>Berechtigungen: ' + response.permissions.map(p => getPermissionLabel(p)).join(', ') + '</li>';
+            }
+            if (response.tags && response.tags.length > 0) {
+                details += '<li>Tags: ' + response.tags.join(', ') + '</li>';
+            }
+            details += '</ul>';
+            $('#invite_details').html(details);
+            
+            $('#showInviteUrlModal').modal('show');
+            
+            // Reset form
+            $('#create_invite_form')[0].reset();
+            $('#custom_name_input').val('Einladung');
+            $('#invite_permissions_select').val([]);
+            $('#invite_tags_select').val([]);
+            
+            // Reload table
+            loadInvitations();
+        } else {
+            showTemplateModal('Fehler', 'Einladungslink konnte nicht erstellt werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+        }
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Erstellen des Einladungslinks', 'OK', 'btn-secondary', '', '', function() {});
+    });
+}
+
+function revokeInvitation(token) {
+    showTemplateModal(
+        'Einladung widerrufen',
+        'Möchten Sie diese Einladung wirklich widerrufen? Sie kann danach nicht mehr verwendet werden.',
+        'Widerrufen',
+        'btn-danger',
+        'Abbrechen',
+        'btn-secondary',
+        function() {
+            api_call('/api/revoke_invitation', {token: token}, function(response) {
+                if (response.success) {
+                    loadInvitations();
+                    showTemplateModal('Erfolg', 'Einladung wurde widerrufen.', 'OK', 'btn-success', '', '', function() {});
+                } else {
+                    showTemplateModal('Fehler', 'Einladung konnte nicht widerrufen werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+                }
+            }, function() {
+                showTemplateModal('Fehler', 'Netzwerkfehler beim Widerrufen der Einladung', 'OK', 'btn-secondary', '', '', function() {});
+            });
+        }
+    );
+}
+
+function toggleInvitationActive(token, active) {
+    const action = active ? 'aktivieren' : 'deaktivieren';
+    const actionCapitalized = active ? 'Aktivieren' : 'Deaktivieren';
+    
+    showTemplateModal(
+        `Einladung ${action}`,
+        `Möchten Sie diese Einladung wirklich ${action}?`,
+        actionCapitalized,
+        active ? 'btn-success' : 'btn-warning',
+        'Abbrechen',
+        'btn-secondary',
+        function() {
+            api_call('/api/toggle_invitation_active', {token: token, active: active}, function(response) {
+                if (response.success) {
+                    loadInvitations();
+                    showTemplateModal('Erfolg', `Einladung wurde ${active ? 'aktiviert' : 'deaktiviert'}.`, 'OK', 'btn-success', '', '', function() {});
+                } else {
+                    showTemplateModal('Fehler', `Einladung konnte nicht ${active ? 'aktiviert' : 'deaktiviert'} werden: ` + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
+                }
+            }, function() {
+                showTemplateModal('Fehler', `Netzwerkfehler beim ${actionCapitalized} der Einladung`, 'OK', 'btn-secondary', '', '', function() {});
+            });
+        }
+    );
+}
+
+function copyInviteUrl() {
+    const urlField = document.getElementById('invite_url_display');
+    urlField.select();
+    urlField.setSelectionRange(0, 99999); // For mobile devices
+    
+    try {
+        document.execCommand('copy');
+        showTemplateModal('Erfolg', 'Einladungslink wurde in die Zwischenablage kopiert.', 'OK', 'btn-success', '', '', function() {});
+    } catch (err) {
+        showTemplateModal('Fehler', 'Kopieren fehlgeschlagen. Bitte manuell kopieren.', 'OK', 'btn-secondary', '', '', function() {});
+    }
+}
+</script>

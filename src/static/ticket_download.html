@@ -1,0 +1,170 @@
+#{site_for_user_with_permission!("buy_tickets")}
+<div class='container'>
+    <h1>Meine Tickets</h1>
+    
+    <!-- Loading indicator -->
+    <div id="tickets_loading">
+        <div class="spinner-border spinner-border-sm" role="status">
+            <span class="visually-hidden">Lade...</span>
+        </div>
+        Lade deine Tickets...
+    </div>
+    
+    <!-- No tickets message -->
+    <div id="no_tickets" style="display: none;">
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i> 
+            <strong>Keine Tickets verfügbar</strong><br>
+            Du hast noch keine freigegebenen Tickets. Tickets werden nach der Bezahlung und Freigabe durch die Veranstalter hier angezeigt.
+            <br><br>
+            <a href="/tickets" class="btn btn-primary">
+                <i class="bi bi-plus-lg"></i> Tickets bestellen
+            </a>
+        </div>
+    </div>
+    
+    <!-- Tickets list -->
+    <div id="tickets_container" style="display: none;">
+        <p class="text-muted mb-4">
+            <i class="bi bi-info-circle"></i> 
+            Hier findest du all deine freigegebenen Tickets. Klicke auf "Ticket herunterladen" um ein einzelnes Ticket als PDF herunterzuladen.
+        </p>
+        
+        <div id="tickets_list">
+            <!-- Tickets will be loaded here -->
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    loadUserTickets();
+});
+
+function loadUserTickets() {
+    $('#tickets_loading').show();
+    $('#no_tickets').hide();
+    $('#tickets_container').hide();
+    
+    api_call('/api/get_user_tickets', {}, function(data) {
+        $('#tickets_loading').hide();
+        
+        if (data.success) {
+            if (data.tickets && data.tickets.length > 0) {
+                displayTickets(data.tickets);
+                $('#tickets_container').show();
+            } else {
+                $('#no_tickets').show();
+            }
+        } else {
+            showAlert('danger', data.error || 'Fehler beim Laden der Tickets');
+        }
+    });
+}
+
+function displayTickets(tickets) {
+    const container = $('#tickets_list');
+    container.empty();
+    
+    tickets.forEach(function(ticket) {
+        const eventDate = ticket.event_start_datetime ? 
+            new Date(ticket.event_start_datetime).toLocaleDateString('de-DE', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            }) : 'Datum noch nicht festgelegt';
+            
+        const orderDate = new Date(ticket.order_date).toLocaleDateString('de-DE');
+        
+        const card = $(`
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="mb-0">${ticket.event_name}</h5>
+                        <small class="text-muted">
+                            <i class="bi bi-geo-alt"></i> ${ticket.event_location} | 
+                            <i class="bi bi-calendar"></i> ${eventDate}
+                        </small>
+                    </div>
+                    <span class="badge bg-success">
+                        <i class="bi bi-check-circle"></i> Freigegeben
+                    </span>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <strong>Bestellung:</strong> ${ticket.payment_reference}<br>
+                            <strong>Bestellt am:</strong> ${orderDate}<br>
+                            <strong>Anzahl Tickets:</strong> ${ticket.participants.length}
+                        </div>
+                    </div>
+                    
+                    <h6 class="mb-3">Teilnehmer & Tickets:</h6>
+                    <div class="row" id="participants_${ticket.order_id}">
+                        <!-- Participants will be added here -->
+                    </div>
+                </div>
+            </div>
+        `);
+        
+        const participantsContainer = card.find(`#participants_${ticket.order_id}`);
+        
+        ticket.participants.forEach(function(participant, index) {
+            const contactInfo = [participant.phone, participant.email].filter(x => x && x.length > 0).join(', ');
+            const participantCol = $(`
+                <div class="col-md-6 mb-3">
+                    <div class="border rounded p-3">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>${participant.name}</strong>
+                                ${contactInfo ? `<br><small class="text-muted">${contactInfo}</small>` : ''}
+                                <br><span class="badge bg-primary mt-1">Ticket ${participant.ticket_number}</span>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-success" 
+                                    onclick="downloadTicket('${ticket.order_id}', ${participant.ticket_number})">
+                                <i class="bi bi-download"></i> Download
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `);
+            
+            participantsContainer.append(participantCol);
+        });
+        
+        container.append(card);
+    });
+}
+
+function downloadTicket(orderId, ticketNumber) {
+    // Check if downloads are allowed first
+    api_call('/api/ticket_download_settings', {}, function(data) {
+        if (data.success && data.download_allowed) {
+            window.open(`/api/download_ticket/${orderId}/${ticketNumber}`, '_blank');
+        } else {
+            showAlert('warning', 'Ticket-Downloads sind derzeit nicht verfügbar. Bitte wende dich an den Support.');
+        }
+    });
+}
+
+function showAlert(type, message) {
+    const alertHtml = `
+        <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    `;
+    
+    // Insert alert at the top of the container
+    $('.container').prepend(alertHtml);
+    
+    // Auto-dismiss after 5 seconds
+    setTimeout(function() {
+        $('.alert').fadeOut();
+    }, 5000);
+}
+</script>

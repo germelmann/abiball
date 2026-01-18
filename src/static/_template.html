@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+
+<html data-bs-theme="dark">
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>#{EVENT_NAME} - Ticket-System</title>
+    <link rel="icon" type="image/png" href="/images/favicon.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <meta name="theme-color" content="#0d6efd">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Ticket Scanner">
+    <link rel="apple-touch-icon" href="/images/icon-192.png">
+    <link href="/include/bootstrap.min.css" rel="stylesheet">
+    <link href="/include/bower_components/bootstrap-icons-1.13.1/bootstrap-icons.min.css" rel="stylesheet">
+
+    <link href="/include/fonts.css" rel="stylesheet">
+    <link href="/include/default.css" rel="stylesheet">
+
+    <script src="/include/code.js"></script>
+    <script src="/include/zxing.min.js"></script>
+    <script src="/include/bootstrap.bundle.min.js"></script>
+    <script src="/include/bower_components/jquery/dist/jquery.min.js"></script>
+
+    <link href="/include/datatables.min.css" rel="stylesheet">
+
+    <script src="/include/datatables.min.js"></script>
+</head>
+
+<body>
+    <div class="header">
+        <nav class="navbar navbar-expand-lg bg-body-tertiary" style="background-color: ##{DARK_THEME_COLOR}; margin-bottom: 2em;">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="/">
+                    <strong>#{EVENT_NAME}</strong>
+                </a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent"
+                    aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse justify-content-end" id="navbarSupportedContent">
+                    #{print_navbar()}
+                </div>
+            </div>
+        </nav>
+    </div>
+
+
+    #{CONTENT}
+
+<div class="footer hide-on-mobile">
+    <nav class="navbar navbar-expand-lg bg-body-tertiary footer" style="background-color: ##{DARK_THEME_COLOR};">
+        <div class="container-fluid d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center">
+                <span>
+                    &copy; 2026 Abikomitee
+                </span>
+            </div>
+            <span>
+                Version 1.1
+            </span>
+        </div>
+    </nav>
+</div>
+
+<script>
+// Check if user has tickets and show/hide the ticket download nav
+$(document).ready(function() {
+    if (typeof checkUserTickets === 'function') {
+        return; // Function already defined, don't redefine
+    }
+    
+    function checkUserTickets() {
+        // Only check if user is logged in and ticket download nav exists
+        if ($('#ticket_download_nav').length && $('#ticket_download_nav').is(':visible')) {
+            api_call('/api/get_user_tickets', {}, function(data) {
+                if (data.success && data.tickets && data.tickets.length > 0) {
+                    $('#ticket_download_nav').show();
+                } else {
+                    $('#ticket_download_nav').hide();
+                }
+            }, function() {
+                // On error, hide the nav
+                $('#ticket_download_nav').hide();
+            });
+        }
+    }
+    
+    // Check on page load
+    checkUserTickets();
+});
+</script>
+
+</body>
+
+</html>
+
+<div class="modal" id="__template_modal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true" style='z-index: 200000;'>
+  <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" >
+        </h5>
+      </div>
+      <div class="modal-body">
+      </div>
+      <div class="modal-footer">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="__template_modal_with_input" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true" style='z-index: 200000;'>
+    <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" >
+          </h5>
+        </div>
+        <div class="modal-body">
+            <div class="modal-body-hint"></div>
+            <div class="mb-3 mt-2">
+                <input type="text" id="ti_template_modal_input" class="form-control">
+            </div>
+        </div>
+        <div class="modal-footer">
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+    (function () {
+        'use strict';
+
+        const getStoredTheme = () => localStorage.getItem('theme');
+        const setStoredTheme = theme => localStorage.setItem('theme', theme);
+
+        const getPreferredTheme = () => {
+            const storedTheme = getStoredTheme();
+            if (storedTheme) {
+                return storedTheme;
+            }
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        };
+
+        const setTheme = theme => {
+            let appliedTheme = theme;
+            if (theme === 'auto') {
+                appliedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-bs-theme', appliedTheme);
+            } else {
+                document.documentElement.setAttribute('data-bs-theme', theme);
+            }
+            // Remove/add bg-body-tertiary from .navbar in dark/light mode
+            document.querySelectorAll('.navbar').forEach(navbar => {
+                if (document.documentElement.getAttribute('data-bs-theme') === 'dark') {
+                    navbar.classList.remove('bg-body-tertiary');
+                    navbar.style.backgroundColor = '##{DARK_THEME_COLOR}';
+                } else {
+                    navbar.classList.add('bg-body-tertiary');
+                    navbar.style.backgroundColor = '';
+                }
+            });
+        };
+
+        setTheme(getPreferredTheme());
+
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            const storedTheme = getStoredTheme();
+            if (storedTheme !== 'light' && storedTheme !== 'dark') {
+                setTheme(getPreferredTheme());
+            }
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            // Add theme switcher button if not present
+            if (!document.getElementById('theme-switcher')) {
+                const nav = document.querySelector('.navbar .container-fluid');
+                if (nav) {
+                    const btnGroup = document.createElement('div');
+                    btnGroup.className = 'btn-group ms-2';
+                    btnGroup.id = 'theme-switcher';
+                    btnGroup.innerHTML = `
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-theme-value="light" aria-pressed="false" title="Helles Design">
+                            <i class="bi bi-sun"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-theme-value="dark" aria-pressed="false" title="Dunkles Design">
+                            <i class="bi bi-moon"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-theme-value="auto" aria-pressed="false" title="Automatisch">
+                            <i class="bi bi-circle-half"></i>
+                        </button>
+                    `;
+                    nav.appendChild(btnGroup);
+                }
+            }
+
+            const showActiveTheme = (theme) => {
+                document.querySelectorAll('[data-bs-theme-value]').forEach(element => {
+                    element.classList.remove('active');
+                    element.setAttribute('aria-pressed', 'false');
+                });
+                const btnToActive = document.querySelector(`[data-bs-theme-value="${theme}"]`);
+                if (btnToActive) {
+                    btnToActive.classList.add('active');
+                    btnToActive.setAttribute('aria-pressed', 'true');
+                }
+            };
+
+            showActiveTheme(getPreferredTheme());
+
+            document.querySelectorAll('[data-bs-theme-value]')
+                .forEach(toggle => {
+                    toggle.addEventListener('click', () => {
+                        const theme = toggle.getAttribute('data-bs-theme-value');
+                        setStoredTheme(theme);
+                        setTheme(theme);
+                        showActiveTheme(theme);
+                    });
+                });
+        });
+    })();
+
+
+    // Theme handling only
+    document.addEventListener("DOMContentLoaded", function() {
+        // No logo handling needed
+    });
+
+
+    function showTemplateModal(title, text, confirm_label, confirm_class,
+    cancel_label, cancel_class, confirm_callback) {
+    $('#__template_modal .modal-title').html(title);
+    $('#__template_modal .modal-body').html(text);
+    let bu_confirm = $('<button>').addClass('btn ' + confirm_class).html(confirm_label);
+    $('#__template_modal .modal-footer').empty().append(bu_confirm);
+    if (cancel_label !== null) {
+        let bu_cancel = $('<button>').addClass('btn ' + cancel_class).html(cancel_label);
+        bu_cancel.click(function(e) {
+            $('#__template_modal').modal('hide');
+        });
+        $('#__template_modal .modal-footer').append(bu_cancel);
+    }
+    bu_confirm.click(function(e) {
+        confirm_callback();
+        $('#__template_modal').modal('hide');
+    });
+    $('#__template_modal').modal('show');
+}
+
+function showTemplateModalWithInput(title, text, confirm_label, confirm_class,
+    cancel_label, cancel_class, label, placeholder, confirm_callback) {
+    $('#__template_modal_with_input .modal-title').html(title);
+    $('#__template_modal_with_input .modal-body-hint').html(text);
+    $('#__template_modal_with_input #ti_template_modal_input').val('').attr('placeholder', placeholder);
+    $('#ti_template_modal_input').unbind();
+    let bu_confirm = $('<button disabled>').addClass('btn btn-outline-secondary').html(confirm_label);
+    $('#__template_modal_with_input .modal-footer').empty().append(bu_confirm);
+    if (cancel_label !== null) {
+        let bu_cancel = $('<button>').addClass('btn ' + cancel_class).html(cancel_label).attr('data-dismiss', 'modal');
+        $('#__template_modal_with_input .modal-footer').append(bu_cancel);
+    }
+    bu_confirm.click(function(e) {
+        confirm_callback($('#ti_template_modal_input').val());
+        $('#__template_modal_with_input').modal('hide');
+    });
+    $('#__template_modal_with_input').on('shown.bs.modal', function(e) {
+        $('#ti_template_modal_input').focus();
+    });
+
+    function handle_ti_update() {
+        if ($('#ti_template_modal_input').val().length > 0) {
+            bu_confirm.removeClass('btn-outline-secondary').addClass(confirm_class).prop('disabled', false);
+        } else {
+            bu_confirm.addClass('btn-outline-secondary').removeClass(confirm_class).prop('disabled', true);
+        }
+    }
+    $('#ti_template_modal_input').keydown(function (e) {
+        handle_ti_update();
+    });
+    $('#ti_template_modal_input').keyup(function (e) {
+        handle_ti_update();
+    });
+    $('#ti_template_modal_input').change(function (e) {
+        handle_ti_update();
+    });
+    $('#ti_template_modal_input').keydown(function (e) {
+        if (e.key === 'Enter') {
+            if ($('#ti_template_modal_input').val().length > 0)
+                bu_confirm.click();
+        }
+    });
+    $('#__template_modal_with_input').modal('show');
+}
+</script>

@@ -1,0 +1,427 @@
+#{site_for_user_with_permission!("manage_orders")}
+<style>
+    .stat-card {
+        transition: transform 0.2s;
+    }
+    
+    .stat-card:hover {
+        transform: translateY(-5px);
+    }
+    
+    .stat-number {
+        font-size: 3rem;
+        font-weight: bold;
+        margin: 0.5rem 0;
+    }
+    
+    .stat-label {
+        font-size: 1rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    
+    .refresh-indicator {
+        position: fixed;
+        top: 70px;
+        right: 20px;
+        z-index: 1000;
+    }
+    
+    .chart-container {
+        position: relative;
+        height: 300px;
+        margin-top: 1rem;
+    }
+    
+    .list-container {
+        max-height: 500px;
+        overflow-y: auto;
+    }
+    
+    .attendee-item {
+        border-left: 3px solid #28a745;
+        transition: background-color 0.2s;
+    }
+    
+    .attendee-item:hover {
+        background-color: rgba(0, 123, 255, 0.1);
+    }
+    
+    .missing-item {
+        border-left: 3px solid #dc3545;
+    }
+    
+    .update-time {
+        font-size: 0.85rem;
+        color: #6c757d;
+    }
+</style>
+
+<div class='container-fluid mt-4'>
+    <div class='row'>
+        <div class='col-md-12'>
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h1><i class="bi bi-speedometer2"></i> Live Dashboard</h1>
+                    <small class="text-muted">Event-ID: <span id="event-name">Lade...</span></small>
+                </div>
+                <div class="d-flex gap-2 align-items-center">
+                    <span class="update-time" id="last-update">Lade...</span>
+                    <button class="btn btn-primary" id="refresh-btn">
+                        <i class="bi bi-arrow-clockwise"></i> Aktualisieren
+                    </button>
+                    <button class="btn btn-outline-secondary" id="toggle-auto-refresh">
+                        <i class="bi bi-pause-circle"></i> Auto-Refresh
+                    </button>
+                    <a href="/events" class="btn btn-secondary">
+                        <i class="bi bi-arrow-left"></i> Zurück zu Events
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Statistics Cards -->
+            <div class="row g-4 mb-4">
+                <div class="col-md-3">
+                    <div class="card stat-card text-center border-primary">
+                        <div class="card-body">
+                            <i class="bi bi-people-fill text-primary" style="font-size: 2rem;"></i>
+                            <div class="stat-number text-primary" id="total-tickets">-</div>
+                            <div class="stat-label">Gesamt Tickets</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card stat-card text-center border-success">
+                        <div class="card-body">
+                            <i class="bi bi-check-circle-fill text-success" style="font-size: 2rem;"></i>
+                            <div class="stat-number text-success" id="checked-in">-</div>
+                            <div class="stat-label">Eingecheckt</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card stat-card text-center border-warning">
+                        <div class="card-body">
+                            <i class="bi bi-clock-fill text-warning" style="font-size: 2rem;"></i>
+                            <div class="stat-number text-warning" id="not-checked-in">-</div>
+                            <div class="stat-label">Ausstehend</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card stat-card text-center border-info">
+                        <div class="card-body">
+                            <i class="bi bi-activity text-info" style="font-size: 2rem;"></i>
+                            <div class="stat-number text-info" id="scans-last-minute">-</div>
+                            <div class="stat-label">Scans (letzte Min.)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Arrival Distribution Chart -->
+            <div class="row mb-4">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-bar-chart-fill"></i> Ankunftsverteilung (letzte 12 Stunden)</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="chart-container">
+                                <canvas id="arrival-chart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Attendee Lists -->
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0">
+                                <i class="bi bi-check-circle"></i> Anwesend 
+                                <span class="badge bg-light text-dark float-end" id="present-count">0</span>
+                            </h5>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="list-container" id="present-list">
+                                <div class="text-center text-muted p-4">
+                                    <i class="bi bi-hourglass-split" style="font-size: 2rem;"></i>
+                                    <p>Lade Daten...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header bg-danger text-white">
+                            <h5 class="mb-0">
+                                <i class="bi bi-x-circle"></i> Fehlend 
+                                <span class="badge bg-light text-dark float-end" id="missing-count">0</span>
+                            </h5>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="list-container" id="missing-list">
+                                <div class="text-center text-muted p-4">
+                                    <i class="bi bi-hourglass-split" style="font-size: 2rem;"></i>
+                                    <p>Lade Daten...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<script>
+let autoRefreshEnabled = true;
+let autoRefreshInterval = null;
+let arrivalChart = null;
+let currentEventId = null;
+
+$(document).ready(function() {
+    // Get event ID from URL path (/live_dashboard/event_id)
+    const pathParts = window.location.pathname.split('/');
+    if (pathParts.length >= 3 && pathParts[1] === 'live_dashboard') {
+        currentEventId = pathParts[2];
+    }
+    
+    if (!currentEventId) {
+        showTemplateModal('Fehler', 'Keine Event-ID angegeben', 'OK', 'btn-secondary', '', '', function() {
+            window.location.href = '/events';
+        });
+        return;
+    }
+    
+    // Initialize chart
+    const ctx = document.getElementById('arrival-chart').getContext('2d');
+    arrivalChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Ankünfte',
+                data: [],
+                backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false
+                }
+            }
+        }
+    });
+    
+    // Set up button handlers
+    $('#refresh-btn').click(function() {
+        refreshData();
+    });
+    
+    $('#toggle-auto-refresh').click(function() {
+        autoRefreshEnabled = !autoRefreshEnabled;
+        updateAutoRefreshButton();
+        if (autoRefreshEnabled) {
+            startAutoRefresh();
+        } else {
+            stopAutoRefresh();
+        }
+    });
+    
+    // Load event details
+    loadEventDetails();
+    
+    // Initial load
+    refreshData();
+    startAutoRefresh();
+});
+
+function loadEventDetails() {
+    api_call('/api/get_event', { event_id: currentEventId }, function(data) {
+        if (data.success && data.event) {
+            const event = data.event;
+            $('#event-name').text(event.name + ' (' + event.year + ')');
+        } else {
+            $('#event-name').text(currentEventId);
+        }
+    }, function() {
+        $('#event-name').text(currentEventId);
+    });
+}
+
+function updateAutoRefreshButton() {
+    const btn = $('#toggle-auto-refresh');
+    if (autoRefreshEnabled) {
+        btn.html('<i class="bi bi-pause-circle"></i> Auto-Refresh: An');
+        btn.removeClass('btn-outline-secondary').addClass('btn-success');
+    } else {
+        btn.html('<i class="bi bi-play-circle"></i> Auto-Refresh: Aus');
+        btn.removeClass('btn-success').addClass('btn-outline-secondary');
+    }
+}
+
+function startAutoRefresh() {
+    if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+    }
+    autoRefreshInterval = setInterval(refreshData, 5000); // Refresh every 5 seconds
+}
+
+function stopAutoRefresh() {
+    if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+    }
+}
+
+function refreshData() {
+    // Update stats
+    api_call('/api/live_stats', { event_id: currentEventId }, function(data) {
+        if (data.success) {
+            updateStats(data.stats);
+        }
+    }, function() {
+        console.error('Error fetching stats');
+    });
+    
+    // Update lists
+    api_call('/api/live_list', { event_id: currentEventId }, function(data) {
+        if (data.success) {
+            updateLists(data);
+        }
+    }, function() {
+        console.error('Error fetching lists');
+    });
+}
+
+function updateStats(stats) {
+    // Update stat cards
+    $('#total-tickets').text(stats.total_tickets);
+    $('#checked-in').text(stats.checked_in);
+    $('#not-checked-in').text(stats.not_checked_in);
+    $('#scans-last-minute').text(stats.scans_last_minute);
+}
+
+function updateStats(stats) {
+    // Update stat cards
+    $('#total-tickets').text(stats.total_tickets);
+    $('#checked-in').text(stats.checked_in);
+    $('#not-checked-in').text(stats.not_checked_in);
+    $('#scans-last-minute').text(stats.scans_last_minute);
+    
+    // Update chart
+    if (stats.arrival_distribution && stats.arrival_distribution.length > 0) {
+        const labels = stats.arrival_distribution.map(d => d.hour);
+        const data = stats.arrival_distribution.map(d => d.count);
+        
+        arrivalChart.data.labels = labels;
+        arrivalChart.data.datasets[0].data = data;
+        arrivalChart.update();
+    }
+    
+    // Update last update time
+    if (stats.last_updated) {
+        const updateTime = new Date(stats.last_updated);
+        $('#last-update').text('Zuletzt aktualisiert: ' + updateTime.toLocaleTimeString('de-DE'));
+    }
+}
+
+function updateLists(data) {
+    // Update present list
+    const presentList = $('#present-list');
+    const presentCount = $('#present-count');
+    
+    if (data.present && data.present.length > 0) {
+        presentCount.text(data.present.length);
+        
+        let presentHtml = '<div class="list-group list-group-flush">';
+        data.present.forEach(function(person) {
+            const checkedInTime = person.checked_in_at ? new Date(person.checked_in_at).toLocaleTimeString('de-DE') : '-';
+            presentHtml += `
+                <div class="list-group-item attendee-item">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>${person.name || 'Unbekannt'}</strong>
+                            <br>
+                            <small class="text-muted">Ticket #${person.ticket_number} | Ref: ${person.reference}</small>
+                        </div>
+                        <div class="text-end">
+                            <small class="text-success">
+                                <i class="bi bi-check-circle-fill"></i> ${checkedInTime}
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        presentHtml += '</div>';
+        presentList.html(presentHtml);
+    } else {
+        presentCount.text('0');
+        presentList.html('<div class="text-center text-muted p-4"><p>Noch keine Ankünfte</p></div>');
+    }
+    
+    // Update missing list
+    const missingList = $('#missing-list');
+    const missingCount = $('#missing-count');
+    
+    if (data.missing && data.missing.length > 0) {
+        missingCount.text(data.missing.length);
+        
+        let missingHtml = '<div class="list-group list-group-flush">';
+        data.missing.forEach(function(person) {
+            missingHtml += `
+                <div class="list-group-item missing-item">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>${person.name || 'Unbekannt'}</strong>
+                            <br>
+                            <small class="text-muted">Ticket #${person.ticket_number} | Ref: ${person.reference}</small>
+                        </div>
+                        <div>
+                            <small class="text-danger">
+                                <i class="bi bi-x-circle"></i> Ausstehend
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        missingHtml += '</div>';
+        missingList.html(missingHtml);
+    } else {
+        missingCount.text('0');
+        missingList.html('<div class="text-center text-muted p-4"><p>Alle anwesend</p></div>');
+    }
+}
+
+// Clean up on page unload
+$(window).on('beforeunload', function() {
+    stopAutoRefresh();
+});
+</script>
