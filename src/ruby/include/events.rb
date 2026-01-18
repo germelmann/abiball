@@ -19,6 +19,8 @@ class Main < Sinatra::Base
             e.ticket_generation_enabled AS ticket_generation_enabled,
             e.ticket_sale_start_datetime AS ticket_sale_start_datetime,
             e.ticket_sale_end_datetime AS ticket_sale_end_datetime,
+            e.target_tickets AS target_tickets,
+            e.expected_users AS expected_users,
             e.created_by AS created_by,
             e.created_at AS created_at
         FIELDS
@@ -76,8 +78,8 @@ class Main < Sinatra::Base
         require_user_with_permission!("create_events")
         data = parse_request_data(
             required_keys: [:name, :year, :location], 
-            optional_keys: [:description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime],
-            types: {year: Integer, max_tickets: Integer, max_tickets_per_user: Integer, ticket_generation_enabled: :boolean}
+            optional_keys: [:description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :target_tickets, :expected_users],
+            types: {year: Integer, max_tickets: Integer, max_tickets_per_user: Integer, ticket_generation_enabled: :boolean, target_tickets: Integer, expected_users: Integer}
         )
         
         # Generate unique event ID
@@ -118,6 +120,8 @@ class Main < Sinatra::Base
             ticket_generation_enabled: ticket_generation_enabled,
             ticket_sale_start_datetime: data[:ticket_sale_start_datetime],
             ticket_sale_end_datetime: data[:ticket_sale_end_datetime],
+            target_tickets: data[:target_tickets],
+            expected_users: data[:expected_users],
             created_by: @session_user[:username],
             created_at: DateTime.now.to_s,
             active: true
@@ -140,6 +144,8 @@ class Main < Sinatra::Base
                 ticket_generation_enabled: $ticket_generation_enabled,
                 ticket_sale_start_datetime: $ticket_sale_start_datetime,
                 ticket_sale_end_datetime: $ticket_sale_end_datetime,
+                target_tickets: $target_tickets,
+                expected_users: $expected_users,
                 created_by: $created_by,
                 created_at: $created_at,
                 active: $active
@@ -188,6 +194,8 @@ class Main < Sinatra::Base
                    e.visibility AS visibility,
                    e.max_tickets AS max_tickets,
                    e.ticket_price AS ticket_price,
+                   e.target_tickets AS target_tickets,
+                   e.expected_users AS expected_users,
                    e.created_by AS created_by,
                    e.created_at AS created_at,
                    e.password AS password
@@ -234,8 +242,8 @@ class Main < Sinatra::Base
         require_user_with_permission!("create_events")
         data = parse_request_data(
             required_keys: [:event_id],
-            optional_keys: [:name, :year, :location, :description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :active],
-            types: {year: Integer, max_tickets: Integer, ticket_price: Float, max_tickets_per_user: Integer, ticket_generation_enabled: :boolean, active: :boolean}
+            optional_keys: [:name, :year, :location, :description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :target_tickets, :expected_users, :active],
+            types: {year: Integer, max_tickets: Integer, ticket_price: Float, max_tickets_per_user: Integer, ticket_generation_enabled: :boolean, target_tickets: Integer, expected_users: Integer, active: :boolean}
         )
         
         # Check if user can edit this event
@@ -245,7 +253,7 @@ class Main < Sinatra::Base
         updates = []
         params = {event_id: data[:event_id]}
         
-        [:name, :year, :location, :description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :active].each do |field|
+        [:name, :year, :location, :description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :target_tickets, :expected_users, :active].each do |field|
             if data.key?(field)
                 updates << "e.#{field} = $#{field}"
                 params[field] = data[field]

@@ -106,16 +106,83 @@
                         </div>
                     </div>
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title"><i class="bi bi-calculator"></i> Durchschnitt</h6>
+                            <div>
+                                <strong id="avg_tickets_per_participant">-</strong> Tickets/Besteller
+                            </div>
+                            <small class="text-muted" id="unique_users_info">- Besteller</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
                     <div class="card">
                         <div class="card-body">
                             <h6 class="card-title">Aktionen</h6>
                             <button class="btn btn-primary btn-sm" onclick="generateOrderSummaryPDF()">
-                                <i class="bi bi-file-pdf"></i> Bestellübersicht PDF
+                                <i class="bi bi-file-pdf"></i> Übersicht
                             </button>
-                            <button class="btn btn-secondary btn-sm ms-2" onclick="refreshStatistics()">
-                                <i class="bi bi-arrow-clockwise"></i> Aktualisieren
+                            <button class="btn btn-secondary btn-sm ms-2" onclick="refreshStatistics()" title="Aktualisieren">
+                                <i class="bi bi-arrow-clockwise"></i>
                             </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Sales Target Progress (shown only when event is selected and target is set) -->
+            <div class="row mt-3" id="target_progress_section" style="display: none;">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title"><i class="bi bi-bullseye"></i> Verkaufsziel-Fortschritt</h6>
+                            <div class="d-flex justify-content-between mb-1">
+                                <span><strong id="target_current">-</strong> von <strong id="target_goal">-</strong> Tickets</span>
+                                <span id="target_percent">-%</span>
+                            </div>
+                            <div class="progress" style="height: 25px;">
+                                <div class="progress-bar" id="target_progress_bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Sales Forecast (shown only when event is selected and expected users is set) -->
+            <div class="row mt-3" id="forecast_section" style="display: none;">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title"><i class="bi bi-graph-up-arrow"></i> Verkaufsprognose</h6>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="d-flex align-items-center">
+                                        <div>
+                                            <small class="text-muted">Erwartete Besteller</small>
+                                            <div><strong id="forecast_expected_users">-</strong></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="d-flex align-items-center">
+                                        <div>
+                                            <small class="text-muted">Prognostizierte Tickets</small>
+                                            <div><strong id="forecast_tickets">-</strong></div>
+                                            <small class="text-muted" id="forecast_formula">Erwartete Besteller × Durchschnitt</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4" id="forecast_diff_container">
+                                    <div class="d-flex align-items-center">
+                                        <div>
+                                            <small class="text-muted">Differenz zum Ziel</small>
+                                            <div><strong id="forecast_difference">-</strong></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -471,6 +538,62 @@
                 $('#tickets_paid').text(ticketsPaid);
                 $('#tickets_reserved').text(ticketsReserved);
                 $('#tickets_breakdown').text(`${ticketsPaid} bezahlt, ${ticketsReserved} reserviert`);
+                
+                // New statistics: Average tickets per participant
+                const avgTickets = data.statistics.avg_tickets_per_participant || 0;
+                const uniqueUsers = data.statistics.unique_users || 0;
+                $('#avg_tickets_per_participant').text(avgTickets.toFixed(2));
+                $('#unique_users_info').text(uniqueUsers + ' Besteller');
+                
+                // Sales Target Progress (only show when event selected and target is set)
+                const targetTickets = data.statistics.target_tickets;
+                const targetProgress = data.statistics.target_progress_percent;
+                if (eventId && targetTickets && targetTickets > 0) {
+                    $('#target_progress_section').show();
+                    $('#target_current').text(data.statistics.total_tickets_sold);
+                    $('#target_goal').text(targetTickets);
+                    $('#target_percent').text(targetProgress.toFixed(1) + '%');
+                    
+                    // Update progress bar
+                    const progressPercent = Math.min(targetProgress, 100);
+                    $('#target_progress_bar')
+                        .css('width', progressPercent + '%')
+                        .attr('aria-valuenow', progressPercent);
+                    
+                    // Color coding for progress bar
+                    if (targetProgress >= 100) {
+                        $('#target_progress_bar').removeClass('bg-warning bg-danger').addClass('bg-success');
+                    } else if (targetProgress >= 75) {
+                        $('#target_progress_bar').removeClass('bg-danger bg-success').addClass('bg-warning');
+                    } else {
+                        $('#target_progress_bar').removeClass('bg-warning bg-success').addClass('bg-primary');
+                    }
+                } else {
+                    $('#target_progress_section').hide();
+                }
+                
+                // Sales Forecast (only show when event selected and expected users is set)
+                const expectedUsers = data.statistics.expected_users;
+                const forecastTickets = data.statistics.forecast_tickets;
+                const forecastDifference = data.statistics.forecast_difference;
+                if (eventId && expectedUsers && expectedUsers > 0 && avgTickets > 0) {
+                    $('#forecast_section').show();
+                    $('#forecast_expected_users').text(expectedUsers);
+                    $('#forecast_tickets').text(forecastTickets);
+                    $('#forecast_formula').text(expectedUsers + ' × ' + avgTickets.toFixed(2) + ' = ' + forecastTickets);
+                    
+                    // Show difference to target if both target and forecast are available
+                    if (targetTickets && targetTickets > 0 && forecastDifference !== null) {
+                        $('#forecast_diff_container').show();
+                        const diffText = forecastDifference >= 0 ? '+' + forecastDifference : forecastDifference;
+                        const diffClass = forecastDifference >= 0 ? 'text-success' : 'text-danger';
+                        $('#forecast_difference').html('<span class="' + diffClass + '">' + diffText + '</span>');
+                    } else {
+                        $('#forecast_diff_container').hide();
+                    }
+                } else {
+                    $('#forecast_section').hide();
+                }
             } else {
                 console.error('Fehler beim Laden der Statistiken:', data.error);
             }

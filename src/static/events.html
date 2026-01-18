@@ -155,6 +155,27 @@
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Sales Targets & Forecasting (Optional) -->
+                    <div class="mb-3">
+                        <h6 class="mb-3">Verkaufsziele & Prognose (optional)</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="event_target_tickets_input" class="form-label">Mindestverkaufsziel (Tickets)</label>
+                                    <input type="number" class="form-control" id="event_target_tickets_input" min="1" placeholder="z.B. 350">
+                                    <small class="form-text text-muted">Ziel für Ticket-Verkäufe (für Fortschrittsanzeige)</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="event_expected_users_input" class="form-label">Erwartete Teilnehmer</label>
+                                    <input type="number" class="form-control" id="event_expected_users_input" min="1" placeholder="z.B. 98">
+                                    <small class="form-text text-muted">Erwartete Anzahl Besteller (für Verkaufsprognose)</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -282,6 +303,27 @@
                                     <label for="edit_event_ticket_sale_end_datetime_input" class="form-label">Verkaufsende</label>
                                     <input type="datetime-local" class="form-control" id="edit_event_ticket_sale_end_datetime_input">
                                     <small class="form-text text-muted">Bis wann können Tickets gekauft werden? (optional)</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Sales Targets & Forecasting (Optional) -->
+                    <div class="mb-3">
+                        <h6 class="mb-3">Verkaufsziele & Prognose (optional)</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="edit_event_target_tickets_input" class="form-label">Mindestverkaufsziel (Tickets)</label>
+                                    <input type="number" class="form-control" id="edit_event_target_tickets_input" min="1" placeholder="z.B. 350">
+                                    <small class="form-text text-muted">Ziel für Ticket-Verkäufe (für Fortschrittsanzeige)</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="edit_event_expected_users_input" class="form-label">Erwartete Teilnehmer</label>
+                                    <input type="number" class="form-control" id="edit_event_expected_users_input" min="1" placeholder="z.B. 98">
+                                    <small class="form-text text-muted">Erwartete Anzahl Besteller (für Verkaufsprognose)</small>
                                 </div>
                             </div>
                         </div>
@@ -457,6 +499,15 @@
             formData.max_tickets_per_user = parseInt($('#event_max_tickets_per_user_input').val());
         }
 
+        // Optional: Sales targets & forecasting fields
+        if ($('#event_target_tickets_input').val()) {
+            formData.target_tickets = parseInt($('#event_target_tickets_input').val());
+        }
+
+        if ($('#event_expected_users_input').val()) {
+            formData.expected_users = parseInt($('#event_expected_users_input').val());
+        }
+
         if (formData.visibility === 'password_protected') {
             formData.password = $('#event_password_input').val();
         }
@@ -507,6 +558,21 @@
 
         if ($('#edit_event_max_tickets_per_user_input').val()) {
             formData.max_tickets_per_user = parseInt($('#edit_event_max_tickets_per_user_input').val());
+        }
+
+        // Optional: Sales targets & forecasting fields (can be cleared to null)
+        let targetTicketsVal = $('#edit_event_target_tickets_input').val();
+        if (targetTicketsVal !== '' && targetTicketsVal !== null) {
+            formData.target_tickets = parseInt(targetTicketsVal);
+        } else {
+            formData.target_tickets = null;
+        }
+
+        let expectedUsersVal = $('#edit_event_expected_users_input').val();
+        if (expectedUsersVal !== '' && expectedUsersVal !== null) {
+            formData.expected_users = parseInt(expectedUsersVal);
+        } else {
+            formData.expected_users = null;
         }
 
         if (formData.visibility === 'password_protected' && $('#edit_event_password_input').val()) {
@@ -724,6 +790,10 @@
         
         // Handle ticket generation setting
         $('#edit_event_ticket_generation_enabled_input').prop('checked', event.ticket_generation_enabled !== false);
+        
+        // Handle sales targets & forecasting fields (optional)
+        $('#edit_event_target_tickets_input').val(event.target_tickets || '');
+        $('#edit_event_expected_users_input').val(event.expected_users || '');
         
         // Handle password section visibility
         if (event.visibility === 'password_protected') {

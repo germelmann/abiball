@@ -1299,6 +1299,10 @@ class Main < Sinatra::Base
         
         event_id = data[:event_id]
         
+        # Initialize variables for forecast-related data
+        target_tickets = nil
+        expected_users = nil
+        
         if event_id && !event_id.empty?
             # Event-specific statistics
             # Get paid tickets (sold and confirmed)
@@ -1320,12 +1324,14 @@ class Main < Sinatra::Base
             # Total tickets sold includes both paid and reserved
             total_tickets_sold = tickets_paid + tickets_reserved
             
-            # Get event max tickets
+            # Get event data including target_tickets and expected_users
             event_data = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
                 MATCH (e:Event {id: $event_id})
-                RETURN e.max_tickets AS max_tickets
+                RETURN e.max_tickets AS max_tickets, e.target_tickets AS target_tickets, e.expected_users AS expected_users
             END_OF_QUERY
             max_tickets = event_data.first&.dig('max_tickets') || 0
+            target_tickets = event_data.first&.dig('target_tickets')
+            expected_users = event_data.first&.dig('expected_users')
             # Available tickets excludes both paid and reserved tickets
             tickets_available = max_tickets - total_tickets_sold
             
@@ -1368,6 +1374,14 @@ class Main < Sinatra::Base
                 RETURN COUNT(p) AS total_participants
             END_OF_QUERY
             total_participants = participants_result.first&.dig('total_participants') || 0
+            
+            # Count unique users who placed orders for this event (paid and pending)
+            unique_users_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
+                MATCH (u:User)-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
+                WHERE o.status = 'paid' OR o.status = 'pending'
+                RETURN COUNT(DISTINCT u) AS unique_users
+            END_OF_QUERY
+            unique_users = unique_users_result.first&.dig('unique_users') || 0
         else
             # Global statistics (all events)
             # Get paid tickets
@@ -1430,6 +1444,34 @@ class Main < Sinatra::Base
                 RETURN COUNT(p) AS total_participants
             END_OF_QUERY
             total_participants = participants_result.first&.dig('total_participants') || 0
+            
+            # Count unique users who placed orders (paid and pending)
+            unique_users_result = neo4j_query(<<~END_OF_QUERY)
+                MATCH (u:User)-[:PLACED]->(o:TicketOrder)
+                WHERE o.status = 'paid' OR o.status = 'pending'
+                RETURN COUNT(DISTINCT u) AS unique_users
+            END_OF_QUERY
+            unique_users = unique_users_result.first&.dig('unique_users') || 0
+        end
+        
+        # Calculate average tickets per participant (user who placed order)
+        # This is total_tickets_sold / unique_users
+        avg_tickets_per_participant = unique_users > 0 ? (total_tickets_sold.to_f / unique_users).round(2) : 0.0
+        
+        # Calculate forecast based on expected users (if available)
+        forecast_tickets = nil
+        forecast_difference = nil
+        if expected_users && expected_users > 0 && avg_tickets_per_participant > 0
+            forecast_tickets = (expected_users * avg_tickets_per_participant).to_i
+            if target_tickets && target_tickets > 0
+                forecast_difference = forecast_tickets - target_tickets
+            end
+        end
+        
+        # Calculate progress toward target (if target is set)
+        target_progress_percent = nil
+        if target_tickets && target_tickets > 0
+            target_progress_percent = ((total_tickets_sold.to_f / target_tickets) * 100).round(1)
         end
         
         statistics = {
@@ -1441,7 +1483,15 @@ class Main < Sinatra::Base
             pending_orders: pending_orders,
             revenue_paid_total: revenue_paid_total.round(2),
             revenue_total: revenue_total.round(2),
-            total_participants: total_participants
+            total_participants: total_participants,
+            # New statistics
+            unique_users: unique_users,
+            avg_tickets_per_participant: avg_tickets_per_participant,
+            target_tickets: target_tickets,
+            expected_users: expected_users,
+            forecast_tickets: forecast_tickets,
+            forecast_difference: forecast_difference,
+            target_progress_percent: target_progress_percent
         }
         
         respond(success: true, statistics: statistics)
