@@ -1344,11 +1344,18 @@ class Main < Sinatra::Base
                     pending_orders = row['count']
                 end
             end
+
+            # Calculate total revenue for this event
+            revenue_paid_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
+                MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
+                WHERE o.status = 'paid'
+                RETURN SUM(o.total_price) AS total_revenue
+            END_OF_QUERY
+            revenue_paid_total = revenue_paid_result.first&.dig('total_revenue') || 0.0
             
             # Calculate total revenue for this event
             revenue_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
                 MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
-                WHERE o.status = 'paid'
                 RETURN SUM(o.total_price) AS total_revenue
             END_OF_QUERY
             revenue_total = revenue_result.first&.dig('total_revenue') || 0.0
@@ -1400,11 +1407,18 @@ class Main < Sinatra::Base
                     pending_orders = row['count']
                 end
             end
+
+            # Calculate total paid revenue
+            revenue_paid_result = neo4j_query(<<~END_OF_QUERY)
+                MATCH (o:TicketOrder)
+                WHERE o.status = 'paid'
+                RETURN SUM(o.total_price) AS total_revenue
+            END_OF_QUERY
+            revenue_paid_total = revenue_paid_result.first&.dig('total_revenue') || 0.0
             
             # Calculate total revenue
             revenue_result = neo4j_query(<<~END_OF_QUERY)
                 MATCH (o:TicketOrder)
-                WHERE o.status = 'paid'
                 RETURN SUM(o.total_price) AS total_revenue
             END_OF_QUERY
             revenue_total = revenue_result.first&.dig('total_revenue') || 0.0
@@ -1425,6 +1439,7 @@ class Main < Sinatra::Base
             tickets_available: tickets_available,
             paid_orders: paid_orders,
             pending_orders: pending_orders,
+            revenue_paid_total: revenue_paid_total.round(2),
             revenue_total: revenue_total.round(2),
             total_participants: total_participants
         }
@@ -1777,7 +1792,8 @@ class Main < Sinatra::Base
             
             total_tickets_sold = orders.select { |o| o['status'] == 'paid' }.sum { |o| o['ticket_count'] || 0 }
             tickets_available = MAX_TICKETS_GLOBAL - total_tickets_sold
-            total_revenue = orders.select { |o| o['status'] == 'paid' }.sum { |o| o['total_price']&.to_f || 0.0 }
+            total_paid_revenue = orders.select { |o| o['status'] == 'paid' }.sum { |o| o['total_price']&.to_f || 0.0 }
+            total_revenue = orders.sum { |o| o['total_price']&.to_f || 0.0 }
             paid_orders = orders.count { |o| o['status'] == 'paid' }
             pending_orders = orders.count { |o| o['status'] == 'pending' }
             
@@ -1785,6 +1801,7 @@ class Main < Sinatra::Base
                 ['Verkaufte Tickets:', total_tickets_sold.to_s],
                 ['Verfügbare Tickets:', tickets_available.to_s],
                 ['Gesamtumsatz:', "#{total_revenue.round(2)}€"],
+                ['Bestätigter Umsatz:', "#{total_paid_revenue.round(2)}€"],
                 ['Bezahlte Bestellungen:', paid_orders.to_s],
                 ['Ausstehende Bestellungen:', pending_orders.to_s]
             ]

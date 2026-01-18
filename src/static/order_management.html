@@ -461,7 +461,7 @@
             if (data.success) {
                 $('#total_tickets_sold').text(data.statistics.total_tickets_sold);
                 $('#tickets_available').text(data.statistics.tickets_available);
-                $('#revenue_total').text(data.statistics.revenue_total + '€');
+                $('#revenue_total').text(data.statistics.revenue_paid_total + '€ (' + data.statistics.revenue_total + '€)');
                 $('#total_participants').text(data.statistics.total_participants);
                 $('#paid_orders').text(data.statistics.paid_orders);
                 $('#pending_orders').text(data.statistics.pending_orders);
