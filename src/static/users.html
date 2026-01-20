@@ -134,6 +134,12 @@
                 $('#user_list').empty();
                 for (let user of data.permissions) {
                     let row = $('<tr>');
+                    
+                    // Highlight users without orders using Bootstrap table-warning class
+                    if (user.order_count === 0) {
+                        row.addClass('table-warning');
+                    }
+                    
                     row.append($('<td>').text(user.name));
                     row.append($('<td>').text(user.username || ''));
                     row.append($('<td>').text(user.email));

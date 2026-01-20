@@ -429,6 +429,11 @@ class Main < Sinatra::Base
         end
     end
 
+    def print_global_banner()
+        return '' unless defined?(GLOBAL_BANNER) && GLOBAL_BANNER
+        "<div class='alert alert-warning text-center mb-0' role='alert' style='border-radius: 0;'>#{GLOBAL_BANNER}</div>"
+    end
+
     def get_support_mailto(request_type)
         types = {
             'general' => 'Allgemein',

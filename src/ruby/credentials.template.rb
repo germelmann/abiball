@@ -44,6 +44,11 @@ DARK_THEME_COLOR = '121622'
 
 SUPPORT_EMAIL = 'support@example.com'
 
+# Global Banner Configuration
+# Set to nil or leave unset to hide the banner
+# Set to a HTML string to display a warning banner on all pages
+# Example: GLOBAL_BANNER = '<strong>Wichtig:</strong> Der Ticketverkauf endet am 31.12.2024! <a href="/tickets">Jetzt bestellen</a>'
+GLOBAL_BANNER = nil
 
 if defined? Mail
     Mail.defaults do
