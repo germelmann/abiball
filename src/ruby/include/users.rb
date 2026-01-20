@@ -203,6 +203,10 @@ class Main < Sinatra::Base
         permissions = neo4j_query(<<~END_OF_QUERY)
             MATCH (u:User)
             OPTIONAL MATCH (u)-[:HAS_PERMISSION]->(p:Permission)
+            OPTIONAL MATCH (u)-[:PLACED]->(o:TicketOrder)
+            WITH u, 
+                 COLLECT(DISTINCT p.name) AS permissions,
+                 COUNT(DISTINCT o) AS order_count
             RETURN u.email AS email, 
                    u.name AS name, 
                    u.username AS username, 
@@ -210,7 +214,8 @@ class Main < Sinatra::Base
                    u.phone AS phone,
                    COALESCE(u.email_verified, false) AS email_verified,
                    COALESCE(u.scanner_only, false) AS scanner_only,
-                   COLLECT(p.name) AS permissions
+                   permissions,
+                   order_count
         END_OF_QUERY
 
         respond(success: true, permissions: permissions)

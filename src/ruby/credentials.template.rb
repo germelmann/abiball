@@ -44,6 +44,7 @@ DARK_THEME_COLOR = '121622'
 
 SUPPORT_EMAIL = 'support@example.com'
 
+GLOBAL_BANNER = nil
 
 if defined? Mail
     Mail.defaults do
