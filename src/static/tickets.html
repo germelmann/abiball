@@ -376,7 +376,7 @@ function displayPreviousOrders(orders) {
             if (order.latest_payment_request && order.latest_payment_request.status === 'sent') {
                 paymentStatusHtml = `
                     <div class="alert alert-info mt-3 mb-0">
-                        <strong><i class="bi bi-envelope-check"></i> Zahlungsaufforderung erhalten</strong>
+                        <strong><i class="bi bi-envelope-check"></i>&nbsp;&nbsp;Zahlungsaufforderung erhalten</strong>
                         <p class="mb-1">Bitte überweise auf folgendes Konto:</p>
                         <ul class="mb-0">
                             <li><strong>Empfänger:</strong> ${order.latest_payment_request.bank_account_name || '-'}</li>
@@ -391,14 +391,14 @@ function displayPreviousOrders(orders) {
                 // Payment request marked as paid but order status not yet updated
                 paymentStatusHtml = `
                     <div class="alert alert-success mt-3 mb-0">
-                        <i class="bi bi-check-circle"></i> <strong>Zahlung eingegangen</strong>
+                        <i class="bi bi-check-circle"></i>&nbsp;&nbsp;<strong>Zahlung eingegangen</strong>
                         <p class="mb-0">Deine Zahlung wurde verarbeitet.</p>
                     </div>`;
             } else {
                 paymentStatusHtml = `
                     <div class="alert alert-secondary mt-3 mb-0">
-                        <i class="bi bi-clock"></i> <strong>Tickets reserviert</strong>
-                        <p class="mb-0">Du erhältst in Kürze eine Zahlungsaufforderung per E-Mail.</p>
+                        <i class="bi bi-clock"></i>&nbsp;&nbsp;<strong>Tickets reserviert</strong>
+                        <p class="mb-0">Sobald Deine Bestellung angenommen wurde, erhältst Du eine Zahlungsaufforderung per E-Mail.</p>
                     </div>`;
             }
         }
@@ -828,7 +828,7 @@ function submitTicketOrder() {
                     Sobald deine Zahlung eingegangen ist, werden deine Tickets freigeschaltet.</p>
                 </div>
                 
-                <p class="mt-3 text-muted small">Eine Bestellbestätigung wurde dir per E-Mail zugeschickt.</p>`;
+                <p class="mt-3 text-muted small">Eine Bestellbestätigung wird Dir nach Annahme Deiner Bestellung per E-Mail zugeschickt.</p>`;
             
             showTemplateModal('Bestellung eingegangen!', successMessage, 
                 'OK', 'btn-success', null, null, function() {

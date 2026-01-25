@@ -446,28 +446,44 @@ class Main < Sinatra::Base
             'financial' => 'Finanziell',
             'companion' => 'Schwerbehinderung / Begleitperson benötigt (SGB IX)',
             'refund' => 'Rückerstattung',
+            'datenschutz' => 'Datenschutz',
+            'impressum' => 'Impressum',
             'other' => 'Sonstiges'
         }
 
         type_label = types[request_type.to_s] || types['general']
         subject = "[Support] #{type_label} - #{EVENT_NAME}"
+
         body = <<~TEXT
             Hallo,
 
             [Dein Anliegen bitte hier eintragen]
 
-            Viele Grüße
-            #{@session_user[:name]}
-
 
             ----------------------------------------
             Anfragedaten (bitte nicht entfernen):
-            Name: #{@session_user[:name]}
-            E-Mail: #{@session_user[:email]}
-            ID: #{@session_user[:username]}
             Thema: #{type_label}
             ----------------------------------------
         TEXT
+        if @session_user
+            body = <<~TEXT
+                Hallo,
+
+                [Dein Anliegen bitte hier eintragen]
+
+                Viele Grüße
+                #{@session_user[:name] ? @session_user[:name] : ''}
+
+
+                ----------------------------------------
+                Anfragedaten (bitte nicht entfernen):
+                Name: #{@session_user[:name] ? @session_user[:name] : ''}
+                E-Mail: #{@session_user[:email] ? @session_user[:email] : ''}
+                ID: #{@session_user[:username] ? @session_user[:username] : ''}
+                Thema: #{type_label}
+                ----------------------------------------
+            TEXT
+        end
 
         escaped_subject = CGI.escape(subject).gsub('+', '%20').gsub('%0A', '%0D%0A')
         escaped_body = CGI.escape(body).gsub('+', '%20').gsub('%0A', '%0D%0A')
@@ -513,6 +529,34 @@ class Main < Sinatra::Base
             links
         else
             login
+        end
+    end
+
+    def print_impressum()
+        log("Impressum aufgerufen")
+        StringIO.open do |io|
+            io.puts "<h1>Impressum</h1>"
+            io.puts "<p>Angaben gemäß § 5 TMG:</p>"
+            io.puts "<p>#{IMPRESSUM_MAINTAINTER}</p>"
+            io.puts "<h2>Kontakt</h2>"
+            io.puts "<p>E-Mail: <a href='#{get_support_mailto('impressum')}'>#{SUPPORT_EMAIL}</a></p>"
+            io.string
+        end
+    end
+
+    def print_datenschutz()
+        log("Datenschutzerklärung aufgerufen")
+        StringIO.open do |io|
+            io.puts "<h1>Datenschutzerklärung</h1>"
+            io.puts "<p>Wir nehmen den Schutz Ihrer persönlichen Daten sehr ernst. Ihre Daten werden vertraulich und entsprechend der gesetzlichen Datenschutzvorschriften sowie dieser Datenschutzerklärung behandelt.</p>"
+            io.puts "<h2>Erhebung und Verarbeitung personenbezogener Daten</h2>"
+            io.puts "<p>Personenbezogene Daten werden nur erhoben, wenn Sie uns diese im Rahmen Ihrer Bestellung, bei einer Registrierung oder bei der Kontaktaufnahme freiwillig mitteilen.</p>"
+            io.puts "<h2>Verwendung von Cookies</h2>"
+            io.puts "<p>Unsere Website setzt einen einzigen Cookie (Session-ID), um den Benutzer während der Sitzung zu identifizieren und die Nutzung bestimmter Funktionen zu ermöglichen.</p>"
+            io.puts "<h2>Ihre Rechte</h2>"
+            io.puts "<p>Sie haben das Recht auf Auskunft über Ihre gespeicherten personenbezogenen Daten sowie auf Berichtigung, Löschung oder Einschränkung der Verarbeitung dieser Daten.</p>"
+            io.puts "<p>Bei Fragen zur Erhebung, Verarbeitung oder Nutzung Ihrer personenbezogenen Daten, bei Auskünften, Berichtigung, Sperrung oder Löschung von Daten wenden Sie sich bitte an: <a href='#{get_support_mailto('datenschutz')}'>#{SUPPORT_EMAIL}</a>.</p>"
+            io.string
         end
     end
 
