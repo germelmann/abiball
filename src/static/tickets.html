@@ -109,7 +109,12 @@
                                 <!-- Withdrawal Policy Section -->
                                 <div class="mb-3">
                                     <button type="button" class="btn btn-outline-secondary btn-sm" id="show_withdrawal_btn">
-                                        <i class="bi bi-info-circle"></i> Widerrufsbelehrung anzeigen
+                                        <i class="bi bi-info-circle"></i>&nbsp;&nbsp;Widerrufsbelehrung anzeigen
+                                    </button>
+                                <!-- </div>
+                                <div class="mb-3"> -->
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="financial_hardship_btn">
+                                        <i class="bi bi-wallet2"></i>&nbsp;&nbsp;Ich kann mir den Preis nicht leisten
                                     </button>
                                 </div>
                             </form>
@@ -855,6 +860,14 @@ $(document).ready(function() {
     // Withdrawal policy button handler
     $('#show_withdrawal_btn').click(function() {
         $('#withdrawalModal').modal('show');
+    });
+
+    $('#financial_hardship_btn').click(function() {
+        showTemplateModal('Hilfe bei den Kosten', 
+            'Wenn du dir den Ticketpreis nicht leisten kannst, kontaktiere uns bitte unter <a href="#{get_support_mailto("financial")}">#{SUPPORT_EMAIL}</a>, damit wir gemeinsam eine Lösung finden können.<br>Wir werden Dein Anliegen diskret und vertraulich behandeln.', 
+            'Anfrage senden', 'btn-primary', 'Schließen', 'btn-secondary', function() {
+                window.location.href = '#{get_support_mailto("financial")}';
+            });
     });
     
     $('#ticket_count').on('input change', function() {
