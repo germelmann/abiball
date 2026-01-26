@@ -2188,9 +2188,9 @@ class Main < Sinatra::Base
             format_email_with_template("Bestellung eingegangen", content)
         end
         log("Bestelleingang für Bestellung #{order_id} versendet")
-    rescue => e
-        log("Bestelleingang für Bestellung #{order_id} fehlgeschlagen: #{e.message}")
-        debug e
+    # rescue => e
+    #     log("Bestelleingang für Bestellung #{order_id} fehlgeschlagen: #{e.message}")
+    #     debug e
     end
 
     # Send payment request email with bank account details and QR code
