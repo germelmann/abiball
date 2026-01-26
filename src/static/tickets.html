@@ -193,6 +193,23 @@
             </div>
         </div>
     </div>
+
+    <div class="modal fade" id="processingModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="processingModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Deine Bestellung wird geprüft...</h5>
+                </div>
+                <div class="modal-body" id="processing_content">
+                    <div class="text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Verarbeite Bestellung...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -793,6 +810,10 @@ function submitTicketOrder() {
         showTemplateModal('Fehler', validation.message, 'OK', 'btn-danger', null, null, function() {});
         return;
     }
+    $('#submit_order_btn').prop('disabled', true);
+    $('#ticket_count').prop('disabled', true);
+    $('#participants_section input').prop('disabled', true);
+    $('#processingModal').show();
     
     const ticketCount = parseInt($('#ticket_count').val());
     const participants = [];
@@ -816,8 +837,11 @@ function submitTicketOrder() {
         ticket_count: ticketCount,
         participants: participants
     }, function(data) {
+        console.log(data);
         if (data.success) {
-            $('#orderModal').modal('hide');
+            $('#processingModal').hide();
+            console.log('Order created successfully:', data);
+            $('#orderModal').hide();
             
             // Build success message - payment details are now sent separately
             let successMessage = `
@@ -838,11 +862,14 @@ function submitTicketOrder() {
             showTemplateModal('Bestellung eingegangen!', successMessage, 
                 'OK', 'btn-success', null, null, function() {
                     // Reload events and orders to update availability
-                    loadEvents();
-                    loadPreviousOrders();
+                    window.location.reload();
                 });
         } else {
             showTemplateModal('Fehler', data.error || 'Unbekannter Fehler beim Erstellen der Bestellung', 'OK', 'btn-danger', null, null, function() {});
+            $('#processingModal').hide();
+            $('#submit_order_btn').prop('disabled', false);
+            $('#ticket_count').prop('disabled', false);
+            $('#participants_section input').prop('disabled', false);
         }
     });
 }

@@ -60,8 +60,6 @@ function api_call(url, data, callback, options) {
         clearTimeout(window.please_wait_timeout);
         $('.api_messages').empty().hide();
         if (typeof (callback) !== 'undefined') {
-            if (options.method !== 'GET')
-                data.success = true;
             callback(data);
         }
     });
