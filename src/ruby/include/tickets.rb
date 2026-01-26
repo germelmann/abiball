@@ -2190,6 +2190,7 @@ class Main < Sinatra::Base
         log("Bestelleingang für Bestellung #{order_id} versendet")
     rescue => e
         log("Bestelleingang für Bestellung #{order_id} fehlgeschlagen: #{e.message}")
+        debug e
     end
 
     # Send payment request email with bank account details and QR code
