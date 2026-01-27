@@ -398,7 +398,7 @@ class Main < Sinatra::Base
 
             format_email_with_template("Anmeldecode", content)
         end
-        respond(:ok => 'yay', :tag => tag)
+        respond(:success => true, :ok => 'yay', :tag => tag)
     end
 
     def logout()
@@ -416,7 +416,7 @@ class Main < Sinatra::Base
 
     post '/api/logout' do
         logout()
-        respond(:ok => 'yeah')
+        respond(:success => true, :ok => 'yeah')
     end
 
     def get_todays_smart_sentence()
