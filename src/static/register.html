@@ -68,7 +68,7 @@
                 feedbackDiv.html('<i class="bi bi-x-circle"></i> Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche erlaubt.').addClass('text-danger').removeClass('text-success');
                 $(this).addClass('is-invalid').removeClass('is-valid');
             } else {
-                feedbackDiv.html('<i class="bi bi-check-circle"></i> Gültiger Nutzer-ID').addClass('text-success').removeClass('text-danger');
+                feedbackDiv.html('<i class="bi bi-check-circle"></i> Gültige Nutzer-ID').addClass('text-success').removeClass('text-danger');
                 $(this).addClass('is-valid').removeClass('is-invalid');
             }
         });
@@ -144,7 +144,7 @@
                         <div class="mb-3">
                             <label for="username_input" class="form-label">Nutzer-ID</label>
                             <input type="text" id='username_input' class="form-control" placeholder="Wähle eine Nutzer-ID" required>
-                            <div class="form-text">Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche erlaubt.</div>
+                            <div class="form-text"><i class="bi bi-info-circle"></i>&nbsp;&nbsp;Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche erlaubt. Deine ID wirst Du später für Zahlungen verwenden, z.B. bei einer Überweisung als Verwendungszweck.</div>
                         </div>
                         
                         <div class="mb-3">
@@ -155,7 +155,8 @@
                         <div class="mb-3">
                             <label for="address_input" class="form-label">Adresse</label>
                             <textarea id='address_input' class="form-control" rows="3" placeholder="Straße, PLZ Ort" required></textarea>
-                            <div class="form-text"><i class="bi bi-info-circle"></i> Deine Adresse wird für Ticketbestellungen verwendet. Bitte stelle sicher, dass alle Angaben korrekt und vollständig sind.</div>
+                            <!-- <div class="form-text"><i class="bi bi-info-circle"></i>&nbsp;&nbsp;Deine Adresse wird für Ticketbestellungen verwendet. Bitte stelle sicher, dass alle Angaben korrekt und vollständig sind. Sollte auf deine Adresse zugegriffen werden müssen, wird das automatisch im Server-Log vermerkt. </div> -->
+                            <div class="form-text"><i class="bi bi-info-circle"></i>&nbsp;&nbsp;Deine Adresse ist für uns nicht sichtbar. Sollten wir dennoch darauf zugreifen müssen, werden wir Dich darüber informieren. Zudem wird jeder Zugriff automatisch im Server-Log protokolliert.</div>
                         </div>
                         
                         <div class="mb-3">
