@@ -103,38 +103,38 @@ $(document).ready(function() {
 </html>
 
 <div class="modal" id="__template_modal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true" style='z-index: 200000;'>
-  <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" >
-        </h5>
-      </div>
-      <div class="modal-body">
-      </div>
-      <div class="modal-footer">
-      </div>
+    <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"></h5>
+
+            </div>
+            <div class="modal-body">
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
     </div>
-  </div>
 </div>
 
 <div class="modal" id="__template_modal_with_input" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true" style='z-index: 200000;'>
     <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" >
-          </h5>
-        </div>
-        <div class="modal-body">
-            <div class="modal-body-hint"></div>
-            <div class="mb-3 mt-2">
-                <input type="text" id="ti_template_modal_input" class="form-control">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"></h5>
+
+            </div>
+            <div class="modal-body">
+                <div class="modal-body-hint"></div>
+                <div class="mb-3 mt-2">
+                    <input type="text" id="ti_template_modal_input" class="form-control">
+                </div>
+            </div>
+                <div class="modal-footer">
             </div>
         </div>
-        <div class="modal-footer">
-        </div>
-      </div>
     </div>
-  </div>
+</div>
 
 <script>
     (function () {
@@ -236,7 +236,7 @@ $(document).ready(function() {
     });
 
 
-    function showTemplateModal(title, text, confirm_label, confirm_class,
+function showTemplateModal(title, text, confirm_label, confirm_class,
     cancel_label, cancel_class, confirm_callback) {
     $('#__template_modal .modal-title').html(title);
     $('#__template_modal .modal-body').html(text);
