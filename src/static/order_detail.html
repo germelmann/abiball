@@ -70,6 +70,7 @@
                         <select class="form-control" id="status_input" disabled>
                             <option value="pending">Ausstehend</option>
                             <option value="paid">Bezahlt</option>
+                            <option value="offline_payment">Barzahlung</option>
                             <option value="cancelled">Storniert</option>
                             <option value="cancelled_by_user">Storniert durch Käufer</option>
                         </select>
@@ -552,7 +553,7 @@ function generateOrderPDF() {
 }
 
 function checkTicketGenerationStatus(orderId, status) {
-    if (status === 'paid') {
+    if (status === 'paid' || status === 'offline_payment') {
         api_call('/api/check_tickets_generated', {order_id: orderId}, function(data) {
             if (data.success) {
                 if (data.tickets_generated) {

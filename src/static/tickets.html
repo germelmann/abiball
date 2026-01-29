@@ -395,7 +395,14 @@ function displayPreviousOrders(orders) {
         // Payment request status
         let paymentStatusHtml = '';
         if (order.status !== 'paid') {
-            if (order.latest_payment_request && order.latest_payment_request.status === 'sent') {
+            if (order.status === 'offline_payment') {
+                // Offline payment - no payment request will be sent
+                paymentStatusHtml = `
+                    <div class="alert alert-info mt-3 mb-0">
+                        <i class="bi bi-wallet2"></i>&nbsp;&nbsp;<strong>Zahlung vor Ort</strong>
+                        <p class="mb-0">Für dieses Event ist keine Online-Zahlung erforderlich. Die Bezahlung erfolgt vor Ort (z.B. in bar).</p>
+                    </div>`;
+            } else if (order.latest_payment_request && order.latest_payment_request.status === 'sent') {
                 paymentStatusHtml = `
                     <div class="alert alert-info mt-3 mb-0">
                         <strong><i class="bi bi-envelope-check"></i>&nbsp;&nbsp;Zahlungsaufforderung erhalten</strong>
@@ -655,9 +662,12 @@ function showOrderModal() {
     $('#ticket_count').attr('max', maxTickets);
     
     if (maxTickets > 0) {
+        let paymentInfo = currentTicketLimits.payment_required === false 
+            ? '<span class="badge bg-info ms-2">Zahlung vor Ort</span>'
+            : '';
         $('#ticket_info').html(`
             <strong>Preis pro Ticket:</strong> ${formatPrice(currentTicketLimits.ticket_price)} • 
-            <strong>Du kannst noch ${maxTickets} Tickets bestellen</strong><br>
+            <strong>Du kannst noch ${maxTickets} Tickets bestellen</strong>${paymentInfo}<br>
             <small>Du hast bereits ${currentTicketLimits.current_tickets} von ${currentTicketLimits.user_limit} Tickets für dieses Event</small>
         `);
     } else {
@@ -843,21 +853,41 @@ function submitTicketOrder() {
             console.log('Order created successfully:', data);
             $('#orderModal').hide();
             
-            // Build success message - payment details are now sent separately
-            let successMessage = `
-                <div class="alert alert-success">
-                    <i class="bi bi-check-circle-fill"></i> <strong>Deine Tickets sind reserviert!</strong>
-                </div>
-                <p><strong>Gesamtpreis:</strong> ${data.total_price}€</p>
-                <p><strong>Bestellreferenz:</strong> <code>${data.payment_reference}</code></p>
-                
-                <div class="alert alert-info mt-3">
-                    <h6><i class="bi bi-envelope"></i> Nächster Schritt</h6>
-                    <p class="mb-0">Du erhältst in Kürze eine <strong>separate E-Mail mit den Zahlungsinformationen</strong>. 
-                    Sobald deine Zahlung eingegangen ist, werden deine Tickets freigeschaltet.</p>
-                </div>
-                
-                <p class="mt-3 text-muted small">Eine Bestellbestätigung wird Dir nach Annahme Deiner Bestellung per E-Mail zugeschickt.</p>`;
+            // Build success message - different based on payment_required
+            let successMessage;
+            if (data.payment_required === false) {
+                // No online payment required - payment happens offline (e.g., cash)
+                successMessage = `
+                    <div class="alert alert-success">
+                        <i class="bi bi-check-circle-fill"></i> <strong>Deine Tickets sind reserviert!</strong>
+                    </div>
+                    <p><strong>Gesamtpreis:</strong> ${data.total_price}€</p>
+                    <p><strong>Bestellreferenz:</strong> <code>${data.payment_reference}</code></p>
+                    
+                    <div class="alert alert-info mt-3">
+                        <h6><i class="bi bi-wallet2"></i> Zahlung vor Ort</h6>
+                        <p class="mb-0">Für dieses Event ist <strong>keine Online-Zahlung erforderlich</strong>. 
+                        Die Bezahlung erfolgt vor Ort (z.B. in bar). Du erhältst weitere Informationen in einer separaten Nachricht.</p>
+                    </div>
+                    
+                    <p class="mt-3 text-muted small">Eine Bestellbestätigung wurde Dir per E-Mail zugeschickt.</p>`;
+            } else {
+                // Online payment required - payment details will be sent separately
+                successMessage = `
+                    <div class="alert alert-success">
+                        <i class="bi bi-check-circle-fill"></i> <strong>Deine Tickets sind reserviert!</strong>
+                    </div>
+                    <p><strong>Gesamtpreis:</strong> ${data.total_price}€</p>
+                    <p><strong>Bestellreferenz:</strong> <code>${data.payment_reference}</code></p>
+                    
+                    <div class="alert alert-info mt-3">
+                        <h6><i class="bi bi-envelope"></i> Nächster Schritt</h6>
+                        <p class="mb-0">Du erhältst in Kürze eine <strong>separate E-Mail mit den Zahlungsinformationen</strong>. 
+                        Sobald deine Zahlung eingegangen ist, werden deine Tickets freigeschaltet.</p>
+                    </div>
+                    
+                    <p class="mt-3 text-muted small">Eine Bestellbestätigung wird Dir nach Annahme Deiner Bestellung per E-Mail zugeschickt.</p>`;
+            }
             
             showTemplateModal('Bestellung eingegangen!', successMessage, 
                 'OK', 'btn-success', null, null, function() {

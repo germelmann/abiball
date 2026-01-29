@@ -135,6 +135,17 @@
                         </div>
                     </div>
                     
+                    <!-- Payment Required Setting -->
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="event_payment_required_input" checked>
+                            <label class="form-check-label" for="event_payment_required_input">
+                                Online-Zahlung erforderlich
+                            </label>
+                            <small class="form-text text-muted">Wenn deaktiviert, werden Zahlungsaufforderungen nicht versendet (z.B. für Barzahlung vor Ort)</small>
+                        </div>
+                    </div>
+                    
                     <!-- Ticket Sale Timing -->
                     <div class="mb-3">
                         <h6 class="mb-3">Ticket-Verkaufszeitraum</h6>
@@ -284,6 +295,17 @@
                                 Ticket-Verkauf aktiviert
                             </label>
                             <small class="form-text text-muted">Können Benutzer Tickets für dieses Event kaufen?</small>
+                        </div>
+                    </div>
+                    
+                    <!-- Payment Required Setting -->
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="edit_event_payment_required_input">
+                            <label class="form-check-label" for="edit_event_payment_required_input">
+                                Online-Zahlung erforderlich
+                            </label>
+                            <small class="form-text text-muted">Wenn deaktiviert, werden Zahlungsaufforderungen nicht versendet (z.B. für Barzahlung vor Ort)</small>
                         </div>
                     </div>
                     
@@ -468,7 +490,8 @@
             location: $('#event_location_input').val(),
             description: $('#event_description_input').val(),
             visibility: $('#event_visibility_input').val(),
-            ticket_generation_enabled: $('#event_ticket_generation_enabled_input').is(':checked')
+            ticket_generation_enabled: $('#event_ticket_generation_enabled_input').is(':checked'),
+            payment_required: $('#event_payment_required_input').is(':checked')
         };
 
         if ($('#event_start_datetime_input').val()) {
@@ -518,6 +541,7 @@
                 $('#create_event_form')[0].reset();
                 $('#password_section').hide();
                 $('#event_ticket_generation_enabled_input').prop('checked', true);
+                $('#event_payment_required_input').prop('checked', true);
                 loadEvents();
                 showTemplateModal('Erfolg', 'Event wurde erfolgreich erstellt!', 'OK', 'btn-success', '', '', function() {});
             } else {
@@ -537,7 +561,8 @@
             visibility: $('#edit_event_visibility_input').val(),
             max_tickets: parseInt($('#edit_event_max_tickets_input').val()),
             ticket_price: $('#edit_event_ticket_price_input').val(),
-            ticket_generation_enabled: $('#edit_event_ticket_generation_enabled_input').is(':checked')
+            ticket_generation_enabled: $('#edit_event_ticket_generation_enabled_input').is(':checked'),
+            payment_required: $('#edit_event_payment_required_input').is(':checked')
         };
 
         if ($('#edit_event_start_datetime_input').val()) {
@@ -658,8 +683,12 @@
             }
             row.append($('<td>').text(ticketsText));
             
-            // Price
-            row.append($('<td>').text(event.ticket_price + '€'));
+            // Price (with payment status indicator)
+            let priceHtml = event.ticket_price + '€';
+            if (event.payment_required === false) {
+                priceHtml += ' <span class="badge bg-info" title="Zahlung erfolgt vor Ort">Bar</span>';
+            }
+            row.append($('<td>').html(priceHtml));
             
             // Ticket sale status
             let saleStatus = '';
@@ -790,6 +819,9 @@
         
         // Handle ticket generation setting
         $('#edit_event_ticket_generation_enabled_input').prop('checked', event.ticket_generation_enabled !== false);
+        
+        // Handle payment required setting (default to true for backward compatibility)
+        $('#edit_event_payment_required_input').prop('checked', event.payment_required !== false);
         
         // Handle sales targets & forecasting fields (optional)
         $('#edit_event_target_tickets_input').val(event.target_tickets || '');

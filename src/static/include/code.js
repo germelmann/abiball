@@ -121,6 +121,7 @@ function getOrderStatusText(status) {
         'paid': 'Bezahlt',
         'pending': 'Ausstehend',
         'pending_payment': 'Zahlung ausstehend',
+        'offline_payment': 'Barzahlung',
         'cancelled': 'Storniert',
         'cancelled_by_user': 'Storniert durch Käufer'
     };
@@ -132,6 +133,7 @@ function getOrderStatusBadgeClass(status) {
         'paid': 'bg-success',
         'pending': 'bg-warning',
         'pending_payment': 'bg-info',
+        'offline_payment': 'bg-info',
         'cancelled': 'bg-danger',
         'cancelled_by_user': 'bg-danger'
     };

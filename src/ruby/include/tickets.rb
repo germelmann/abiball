@@ -11,6 +11,7 @@ class Main < Sinatra::Base
             'paid' => 'Bezahlt',
             'pending' => 'Ausstehend',
             'pending_payment' => 'Zahlung ausstehend',
+            'offline_payment' => 'Barzahlung',
             'cancelled' => 'Storniert',
             'cancelled_by_user' => 'Storniert durch Käufer'
         }
@@ -173,7 +174,7 @@ class Main < Sinatra::Base
         # Validate ticket count against event-specific limit (include reserved/pending tickets)
         event_sold_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
             MATCH (e:Event {id: $event_id})<-[:FOR]-(o:TicketOrder)
-            WHERE o.status = 'paid' OR o.status = 'pending'
+            WHERE o.status = 'paid' OR o.status = 'pending' OR o.status = 'offline_payment'
             RETURN SUM(o.ticket_count) AS total
         END_OF_QUERY
         event_sold = event_sold_result.first&.dig('total') || 0
@@ -281,7 +282,7 @@ class Main < Sinatra::Base
                 tier_sold_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id, tier_id: tier_id})
                     MATCH (e:Event {id: $event_id})-[:HAS_TIER]->(t:TicketTier {id: $tier_id})
                     OPTIONAL MATCH (o:TicketOrder)-[:FOR_TIER]->(t)
-                    WHERE o.status = 'paid' OR o.status = 'pending'
+                    WHERE o.status = 'paid' OR o.status = 'pending' OR o.status = 'offline_payment'
                     RETURN COALESCE(SUM(o.ticket_count), 0) AS sold
                 END_OF_QUERY
                 tier_sold = tier_sold_result.first&.dig('sold') || 0
@@ -315,10 +316,17 @@ class Main < Sinatra::Base
         # Payment requests are now a separate step and can be sent manually or in bulk.
         # 
         # Order Status Flow:
-        # - 'pending': Order created, tickets reserved, no payment request sent yet
-        # - 'paid': Payment received and confirmed
+        # - 'pending': Order created, tickets reserved, awaiting review/payment
+        # - 'offline_payment': Order confirmed for offline payment (e.g., cash at venue)
+        # - 'paid': Payment received and confirmed (online payment)
         # - 'cancelled': Order cancelled by admin
         # - 'cancelled_by_user': Order cancelled by customer
+        
+        # Determine if payment is required for this event (for email messaging)
+        payment_required = event[:payment_required] != false
+        
+        # All orders start as 'pending' for review - admin can then mark as paid or offline_payment
+        order_status = 'pending'
         
         # Create ticket order and link to event (without bank account assignment)
         order_params = {
@@ -330,7 +338,7 @@ class Main < Sinatra::Base
             total_price: ticket_price * ticket_count,
             individual_ticket_price: ticket_price,
             payment_ref: payment_ref,
-            status: 'pending',
+            status: order_status,
             created_at: DateTime.now.to_s,
             tier_name: tier_name
         }
@@ -398,15 +406,15 @@ class Main < Sinatra::Base
             END_OF_QUERY
         end
         
-        # NOTE: Payment request is NOT automatically sent.
-        # The order is created in 'pending' status with tickets reserved.
+        # NOTE: Payment request is NOT automatically sent for online payment events.
+        # The order is created in 'pending' or 'offline_payment' status with tickets reserved.
         # A payment request will be sent separately, either manually per order or in bulk via event settings.
         # Send order received confirmation email (without payment details - those come with payment request)
-        send_order_received_email(user_email, order_id, payment_ref, event, participants, ticket_price * ticket_count)
+        send_order_received_email(user_email, order_id, payment_ref, event, participants, ticket_price * ticket_count, payment_required)
         
         log("Neue Bestellung #{order_id} erstellt für #{user_email} - #{ticket_count} Tickets, #{ticket_price * ticket_count}€")
         
-        respond(success: true, order_id: order_id, payment_reference: payment_ref, total_price: ticket_price * ticket_count, ticket_count: ticket_count, payment_request_sent: false)
+        respond(success: true, order_id: order_id, payment_reference: payment_ref, total_price: ticket_price * ticket_count, ticket_count: ticket_count, payment_request_sent: false, payment_required: payment_required)
     end
     
     # Get payment QR code for an order
@@ -477,17 +485,32 @@ class Main < Sinatra::Base
         end
     end
 
-    # Admin: Mark order as paid
+    # Admin: Mark order as paid (or offline_payment for non-payment events)
     post "/api/mark_order_paid" do
         require_user_with_permission!("manage_orders")
         data = parse_request_data(required_keys: [:order_id])
 
-        neo4j_query(<<~END_OF_QUERY, {order_id: data[:order_id], date: Date.today.to_s})
-            MATCH (o:TicketOrder {id: $order_id})
-            SET o.status = 'paid', o.paid_at = $date
+        # Check if the event requires payment
+        event_result = neo4j_query(<<~END_OF_QUERY, {order_id: data[:order_id]})
+            MATCH (o:TicketOrder {id: $order_id})-[:FOR]->(e:Event)
+            RETURN e.payment_required AS payment_required
         END_OF_QUERY
         
-        respond(success: true)
+        if event_result.empty?
+            respond(success: false, error: "Order not found or not linked to an event")
+            return
+        end
+        
+        # If payment_required is false, set status to offline_payment instead of paid
+        payment_required = event_result.first&.dig('payment_required') != false
+        new_status = payment_required ? 'paid' : 'offline_payment'
+        
+        neo4j_query(<<~END_OF_QUERY, {order_id: data[:order_id], date: Date.today.to_s, status: new_status})
+            MATCH (o:TicketOrder {id: $order_id})
+            SET o.status = $status, o.paid_at = $date
+        END_OF_QUERY
+        
+        respond(success: true, new_status: new_status)
     end
 
     # Admin: Mark order as unpaid
@@ -1047,7 +1070,7 @@ class Main < Sinatra::Base
         event_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
             MATCH (e:Event {id: $event_id})
             WHERE e.active = true
-            RETURN e.max_tickets AS max_tickets, e.ticket_price AS ticket_price, e.visibility AS visibility
+            RETURN e.max_tickets AS max_tickets, e.ticket_price AS ticket_price, e.visibility AS visibility, e.payment_required AS payment_required
         END_OF_QUERY
         
         if event_result.empty?
@@ -1090,7 +1113,7 @@ class Main < Sinatra::Base
         # Get event tickets sold (include reserved/pending tickets)
         event_sold_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
             MATCH (e:Event {id: $event_id})<-[:FOR]-(o:TicketOrder)
-            WHERE o.status = 'paid' OR o.status = 'pending'
+            WHERE o.status = 'paid' OR o.status = 'pending' OR o.status = 'offline_payment'
             RETURN SUM(o.ticket_count) AS total
         END_OF_QUERY
         event_sold = event_sold_result.first&.dig('total') || 0
@@ -1098,7 +1121,7 @@ class Main < Sinatra::Base
         # Get user's current tickets for this event
         user_orders = neo4j_query(<<~END_OF_QUERY, {email: user_email, event_id: event_id})
             MATCH (u:User {email: $email})-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
-            WHERE o.status = 'paid' OR o.status = 'pending'
+            WHERE o.status = 'paid' OR o.status = 'pending' OR o.status = 'offline_payment'
             RETURN o.ticket_count AS ticket_count
         END_OF_QUERY
         current_tickets = user_orders.sum { |o| o['ticket_count'] }
@@ -1115,7 +1138,8 @@ class Main < Sinatra::Base
                 available_event: available_event,
                 max_tickets_event: event['max_tickets'],
                 event_sold: event_sold,
-                max_order: max_order > 0 ? max_order : 0)
+                max_order: max_order > 0 ? max_order : 0,
+                payment_required: event['payment_required'] != false)
     end
 
     # Get current user's ticket orders
@@ -1308,15 +1332,15 @@ class Main < Sinatra::Base
         
         if event_id && !event_id.empty?
             # Event-specific statistics
-            # Get paid tickets (sold and confirmed)
+            # Get paid tickets (sold and confirmed - includes paid and offline_payment)
             tickets_paid_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
                 MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
-                WHERE o.status = 'paid'
+                WHERE o.status = 'paid' OR o.status = 'offline_payment'
                 RETURN SUM(o.ticket_count) AS total
             END_OF_QUERY
             tickets_paid = tickets_paid_result.first&.dig('total') || 0
             
-            # Get reserved (pending) tickets
+            # Get reserved (pending only) tickets
             tickets_reserved_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
                 MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
                 WHERE o.status = 'pending'
@@ -1324,7 +1348,7 @@ class Main < Sinatra::Base
             END_OF_QUERY
             tickets_reserved = tickets_reserved_result.first&.dig('total') || 0
             
-            # Total tickets sold includes both paid and reserved
+            # Total tickets sold includes both paid/offline_payment and reserved
             total_tickets_sold = tickets_paid + tickets_reserved
             
             # Get event data including target_tickets and expected_users
@@ -1335,7 +1359,7 @@ class Main < Sinatra::Base
             max_tickets = event_data.first&.dig('max_tickets') || 0
             target_tickets = event_data.first&.dig('target_tickets')
             expected_users = event_data.first&.dig('expected_users')
-            # Available tickets excludes both paid and reserved tickets
+            # Available tickets excludes both paid/offline_payment and reserved tickets
             tickets_available = max_tickets - total_tickets_sold
             
             # Get order counts by status for this event
@@ -1347,22 +1371,22 @@ class Main < Sinatra::Base
             paid_orders = 0
             pending_orders = 0
             order_counts_result.each do |row|
-                if row['status'] == 'paid'
-                    paid_orders = row['count']
+                if row['status'] == 'paid' || row['status'] == 'offline_payment'
+                    paid_orders += row['count']
                 elsif row['status'] == 'pending'
                     pending_orders = row['count']
                 end
             end
 
-            # Calculate total revenue for this event
+            # Calculate paid revenue for this event (includes paid and offline_payment)
             revenue_paid_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
                 MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
-                WHERE o.status = 'paid'
+                WHERE o.status = 'paid' OR o.status = 'offline_payment'
                 RETURN SUM(o.total_price) AS total_revenue
             END_OF_QUERY
             revenue_paid_total = revenue_paid_result.first&.dig('total_revenue') || 0.0
             
-            # Calculate total revenue for this event
+            # Calculate total revenue for this event (all orders)
             revenue_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
                 MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
                 RETURN SUM(o.total_price) AS total_revenue
@@ -1373,29 +1397,29 @@ class Main < Sinatra::Base
             participants_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
                 MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
                 MATCH (o)-[:INCLUDES]->(p:Participant)
-                WHERE (o.status = 'paid' OR o.status = 'pending') AND p.name IS NOT NULL AND p.name <> ''
+                WHERE (o.status = 'paid' OR o.status = 'pending' OR o.status = 'offline_payment') AND p.name IS NOT NULL AND p.name <> ''
                 RETURN COUNT(p) AS total_participants
             END_OF_QUERY
             total_participants = participants_result.first&.dig('total_participants') || 0
             
-            # Count unique users who placed orders for this event (paid and pending)
+            # Count unique users who placed orders for this event (paid, pending and offline_payment)
             unique_users_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
                 MATCH (u:User)-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
-                WHERE o.status = 'paid' OR o.status = 'pending'
+                WHERE o.status = 'paid' OR o.status = 'pending' OR o.status = 'offline_payment'
                 RETURN COUNT(DISTINCT u) AS unique_users
             END_OF_QUERY
             unique_users = unique_users_result.first&.dig('unique_users') || 0
         else
             # Global statistics (all events)
-            # Get paid tickets
+            # Get paid tickets (includes paid and offline_payment)
             tickets_paid_result = neo4j_query(<<~END_OF_QUERY)
                 MATCH (o:TicketOrder)
-                WHERE o.status = 'paid'
+                WHERE o.status = 'paid' OR o.status = 'offline_payment'
                 RETURN SUM(o.ticket_count) AS total
             END_OF_QUERY
             tickets_paid = tickets_paid_result.first&.dig('total') || 0
             
-            # Get reserved tickets
+            # Get reserved tickets (pending only)
             tickets_reserved_result = neo4j_query(<<~END_OF_QUERY)
                 MATCH (o:TicketOrder)
                 WHERE o.status = 'pending'
@@ -1403,10 +1427,10 @@ class Main < Sinatra::Base
             END_OF_QUERY
             tickets_reserved = tickets_reserved_result.first&.dig('total') || 0
             
-            # Total tickets includes both paid and reserved
+            # Total tickets includes both paid/offline_payment and reserved
             total_tickets_sold = tickets_paid + tickets_reserved
             
-            # Calculate tickets available (excludes both paid and reserved)
+            # Calculate tickets available (excludes both paid/offline_payment and reserved)
             tickets_available = MAX_TICKETS_GLOBAL - total_tickets_sold
             
             # Get order counts by status
@@ -1418,40 +1442,40 @@ class Main < Sinatra::Base
             paid_orders = 0
             pending_orders = 0
             order_counts_result.each do |row|
-                if row['status'] == 'paid'
-                    paid_orders = row['count']
+                if row['status'] == 'paid' || row['status'] == 'offline_payment'
+                    paid_orders += row['count']
                 elsif row['status'] == 'pending'
                     pending_orders = row['count']
                 end
             end
 
-            # Calculate total paid revenue
+            # Calculate total paid revenue (includes paid and offline_payment)
             revenue_paid_result = neo4j_query(<<~END_OF_QUERY)
                 MATCH (o:TicketOrder)
-                WHERE o.status = 'paid'
+                WHERE o.status = 'paid' OR o.status = 'offline_payment'
                 RETURN SUM(o.total_price) AS total_revenue
             END_OF_QUERY
             revenue_paid_total = revenue_paid_result.first&.dig('total_revenue') || 0.0
             
-            # Calculate total revenue
+            # Calculate total revenue (all orders)
             revenue_result = neo4j_query(<<~END_OF_QUERY)
                 MATCH (o:TicketOrder)
                 RETURN SUM(o.total_price) AS total_revenue
             END_OF_QUERY
             revenue_total = revenue_result.first&.dig('total_revenue') || 0.0
             
-            # Count total participants (paid and reserved orders)
+            # Count total participants (paid, pending and offline_payment orders)
             participants_result = neo4j_query(<<~END_OF_QUERY)
                 MATCH (o:TicketOrder)-[:INCLUDES]->(p:Participant)
-                WHERE (o.status = 'paid' OR o.status = 'pending') AND p.name IS NOT NULL AND p.name <> ''
+                WHERE (o.status = 'paid' OR o.status = 'pending' OR o.status = 'offline_payment') AND p.name IS NOT NULL AND p.name <> ''
                 RETURN COUNT(p) AS total_participants
             END_OF_QUERY
             total_participants = participants_result.first&.dig('total_participants') || 0
             
-            # Count unique users who placed orders (paid and pending)
+            # Count unique users who placed orders (paid, pending and offline_payment)
             unique_users_result = neo4j_query(<<~END_OF_QUERY)
                 MATCH (u:User)-[:PLACED]->(o:TicketOrder)
-                WHERE o.status = 'paid' OR o.status = 'pending'
+                WHERE o.status = 'paid' OR o.status = 'pending' OR o.status = 'offline_payment'
                 RETURN COUNT(DISTINCT u) AS unique_users
             END_OF_QUERY
             unique_users = unique_users_result.first&.dig('unique_users') || 0
@@ -1609,19 +1633,19 @@ class Main < Sinatra::Base
             RETURN o.status AS status, o.tickets_generated AS tickets_generated
         END_OF_QUERY
         
-        can_generate = order['status'] == 'paid' && !order['tickets_generated']
+        can_generate = (order['status'] == 'paid' || order['status'] == 'offline_payment') && !order['tickets_generated']
         
         respond(success: true, can_generate_tickets: can_generate, order_status: order['status'], tickets_generated: !!order['tickets_generated'])
     end
 
-    # Generate tickets for a paid order (admin only)
+    # Generate tickets for a paid or offline_payment order (admin only)
     post "/api/generate_tickets" do
         require_user_with_permission!("manage_orders")
         data = parse_request_data(required_keys: [:order_id])
         
         order_id = data[:order_id]
         
-        # Get order details and verify it's paid
+        # Get order details and verify it's paid or offline_payment
         order = neo4j_query_expect_one(<<~END_OF_QUERY, {order_id: order_id})
             MATCH (u:User)-[:PLACED]->(o:TicketOrder {id: $order_id})
             OPTIONAL MATCH (o)-[:INCLUDES]->(p:Participant)
@@ -1631,8 +1655,8 @@ class Main < Sinatra::Base
                    COLLECT({name: p.name, phone: p.phone, email: p.email, birthdate: p.birthdate, ticket_number: p.ticket_number}) AS participants
         END_OF_QUERY
         
-        unless order['status'] == 'paid'
-            respond(success: false, error: "Tickets können nur für bezahlte Bestellungen generiert werden")
+        unless order['status'] == 'paid' || order['status'] == 'offline_payment'
+            respond(success: false, error: "Tickets können nur für bestätigte Bestellungen generiert werden")
             return
         end
         
@@ -2140,7 +2164,7 @@ class Main < Sinatra::Base
     # Send order confirmation email
     # Send order received confirmation email (without payment details)
     # This is sent immediately when an order is placed
-    def send_order_received_email(user_email, order_id, payment_ref, event, participants, total_price)
+    def send_order_received_email(user_email, order_id, payment_ref, event, participants, total_price, payment_required = true)
         # Get user details
         user_result = neo4j_query(<<~END_OF_QUERY, {email: user_email})
             MATCH (u:User {email: $email})
@@ -2176,10 +2200,17 @@ class Main < Sinatra::Base
                     io.puts "                <div class=\"participant\">#{index + 1}. #{participant['name']}#{contact_info.empty? ? '' : ' (' + contact_info + ')'}</div>"
                 end
                 io.puts "            </div>"
-                io.puts "            <div class=\"info-badge\">"
-                io.puts "                <strong>Nächste Schritte:</strong>"
-                io.puts "                <p>Du erhältst in Kürze eine separate E-Mail mit den Zahlungsinformationen. Deine Tickets werden nach Eingang der Zahlung final bestätigt.</p>"
-                io.puts "            </div>"
+                if payment_required
+                    io.puts "            <div class=\"info-badge\">"
+                    io.puts "                <strong>Nächste Schritte:</strong>"
+                    io.puts "                <p>Du erhältst in Kürze eine separate E-Mail mit den Zahlungsinformationen. Deine Tickets werden nach Eingang der Zahlung final bestätigt.</p>"
+                    io.puts "            </div>"
+                else
+                    io.puts "            <div class=\"info-badge\">"
+                    io.puts "                <strong>Zahlung vor Ort:</strong>"
+                    io.puts "                <p>Für dieses Event ist keine Online-Zahlung erforderlich. Die Bezahlung erfolgt vor Ort (z.B. in bar). Du erhältst weitere Informationen in einer separaten Nachricht.</p>"
+                    io.puts "            </div>"
+                end
                 io.puts "            <p><a href=\"#{WEB_ROOT}/tickets\" class=\"btn\">Meine Bestellungen ansehen</a></p>"
                 io.puts "            <p>Bei Fragen wende dich gerne an unseren Support.</p>"
                 io.string
@@ -2519,7 +2550,7 @@ class Main < Sinatra::Base
                 order_status: order_data['status'],
                 tickets_generated: !!order_data['tickets_generated'],
                 tickets_generated_at: order_data['tickets_generated_at'],
-                can_download_tickets: order_data['status'] == 'paid' && !!order_data['tickets_generated'])
+                can_download_tickets: (order_data['status'] == 'paid' || order_data['status'] == 'offline_payment') && !!order_data['tickets_generated'])
     end
 
     # Toggle ticket download setting (admin only)
@@ -2545,7 +2576,7 @@ class Main < Sinatra::Base
         # Get all orders by the user with generated tickets
         tickets = neo4j_query(<<~END_OF_QUERY, {user_email: user_email})
             MATCH (u:User {email: $user_email})-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event)
-            WHERE o.status = 'paid' AND o.tickets_generated = true
+            WHERE (o.status = 'paid' OR o.status = 'offline_payment') AND o.tickets_generated = true
             MATCH (o)-[:INCLUDES]->(p:Participant)
             RETURN e.id AS event_id,
                    e.name AS event_name,
@@ -2574,10 +2605,10 @@ class Main < Sinatra::Base
         
         event_id = data[:event_id]
         
-        # Get all paid orders for this event that don't have tickets generated yet
+        # Get all paid and offline_payment orders for this event that don't have tickets generated yet
         orders = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
             MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
-            WHERE o.status = 'paid' AND (o.tickets_generated IS NULL OR o.tickets_generated = false)
+            WHERE (o.status = 'paid' OR o.status = 'offline_payment') AND (o.tickets_generated IS NULL OR o.tickets_generated = false)
             RETURN o.id AS order_id
         END_OF_QUERY
         
@@ -2942,7 +2973,7 @@ class Main < Sinatra::Base
         stats = neo4j_query(<<~END_OF_QUERY, query_params).first
             MATCH (o:TicketOrder)-[:INCLUDES]->(p:Participant)
             MATCH (o)-[:FOR]->(e:Event)
-            WHERE o.status = 'paid' #{event_filter}
+            WHERE (o.status = 'paid' OR o.status = 'offline_payment') #{event_filter}
             WITH 
                 COUNT(p) AS total_tickets,
                 SUM(CASE WHEN p.redeemed = true THEN 1 ELSE 0 END) AS checked_in,
@@ -2962,7 +2993,7 @@ class Main < Sinatra::Base
         recent_scans = neo4j_query(<<~END_OF_QUERY, query_params.merge({one_minute_ago: one_minute_ago}))
             MATCH (o:TicketOrder)-[:INCLUDES]->(p:Participant)
             MATCH (o)-[:FOR]->(e:Event)
-            WHERE o.status = 'paid' 
+            WHERE (o.status = 'paid' OR o.status = 'offline_payment')
               AND p.redeemed = true 
               AND p.redeemed_at > $one_minute_ago
               #{event_filter}
@@ -2976,7 +3007,7 @@ class Main < Sinatra::Base
         arrival_distribution = neo4j_query(<<~END_OF_QUERY, query_params.merge({twelve_hours_ago: twelve_hours_ago}))
             MATCH (o:TicketOrder)-[:INCLUDES]->(p:Participant)
             MATCH (o)-[:FOR]->(e:Event)
-            WHERE o.status = 'paid' 
+            WHERE (o.status = 'paid' OR o.status = 'offline_payment')
               AND p.redeemed = true 
               AND p.redeemed_at > $twelve_hours_ago
               #{event_filter}
@@ -3028,7 +3059,7 @@ class Main < Sinatra::Base
         present = neo4j_query(<<~END_OF_QUERY, query_params)
             MATCH (o:TicketOrder)-[:INCLUDES]->(p:Participant)
             MATCH (o)-[:FOR]->(e:Event)
-            WHERE o.status = 'paid' 
+            WHERE (o.status = 'paid' OR o.status = 'offline_payment')
               AND p.redeemed = true 
               #{event_filter}
             RETURN 
@@ -3043,7 +3074,7 @@ class Main < Sinatra::Base
         missing = neo4j_query(<<~END_OF_QUERY, query_params)
             MATCH (o:TicketOrder)-[:INCLUDES]->(p:Participant)
             MATCH (o)-[:FOR]->(e:Event)
-            WHERE o.status = 'paid' 
+            WHERE (o.status = 'paid' OR o.status = 'offline_payment')
               AND (p.redeemed IS NULL OR p.redeemed = false)
               #{event_filter}
             RETURN 
