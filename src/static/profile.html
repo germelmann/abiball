@@ -93,17 +93,19 @@ function loadProfileData() {
 
 function displayTags(tags) {
     if (!tags || tags.length === 0) {
-        $('#profile_tags_container').html('<span class="text-muted">Keine Tags zugewiesen</span>');
+        $('#profile_tags').html('<span class="text-muted">Keine Tags zugewiesen</span>');
         return;
     }
     
     const container = $('#profile_tags');
     container.empty();
-    console.log(tags);
     
     tags.forEach(function(tag) {
+        if (!tag.name || !tag.color) {
+            return;
+        }
+        
         const textColor = getTextColor(tag.color);
-        console.log(`Tag: ${tag.name}, Color: ${tag.color}, Text Color: ${textColor}`);
         const badge = $('<span>')
             .addClass('badge me-1 mb-1')
             .css({
