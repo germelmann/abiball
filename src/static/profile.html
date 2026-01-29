@@ -31,12 +31,14 @@
                     <div class='row mb-3'>
                         <div class='col-sm-3'><strong>E-Mail Status:</strong></div>
                         <div class='col-sm-9'>
-                            <span id='profile_email_status' class='badge'>-</span>
+                            <span id='profile_email_status' class='badge bg-danger'>Nicht bestätigt</span>
                         </div>
                     </div>
                     <div class='row mb-3'>
                         <div class='col-sm-3'><strong>Tags:</strong></div>
-                        <div class='col-sm-9' id='profile_tags'>-</div>
+                        <div class='col-sm-9' id='profile_tags'>
+                            <div class='text-muted'>Keine Tags zugewiesen</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -93,7 +95,7 @@ function loadProfileData() {
 
 function displayTags(tags) {
     if (!tags || tags.length === 0) {
-        $('#profile_tags').html('<span class="text-muted">Keine Tags zugewiesen</span>');
+        $('#profile_tags').html('<div class="text-muted">Keine Tags zugewiesen</div>');
         return;
     }
     
