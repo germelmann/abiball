@@ -248,7 +248,9 @@ class Main < Sinatra::Base
         data = parse_request_data(
             required_keys: [:event_id],
             optional_keys: [:name, :year, :location, :description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :target_tickets, :expected_users, :payment_required, :active],
-            types: {year: Integer, max_tickets: Integer, ticket_price: Float, max_tickets_per_user: Integer, ticket_generation_enabled: :boolean, target_tickets: Integer, expected_users: Integer, payment_required: :boolean, active: :boolean}
+            types: {year: Integer, max_tickets: Integer, ticket_price: Float, max_tickets_per_user: Integer, ticket_generation_enabled: :boolean, target_tickets: Integer, expected_users: Integer, payment_required: :boolean, active: :boolean},
+            max_body_length: 10 * 1024 * 1024,
+            max_string_length: 5 * 1024 * 1024,
         )
         
         # Check if user can edit this event
