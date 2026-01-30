@@ -509,10 +509,8 @@ class Main < Sinatra::Base
                 </div>" : ""}
             </div>
             <br>
-            <div class='alert alert-info'>
-                <h5><i class='bi bi-info-circle'></i> #{EVENT_NAME}</h5>
-                <p>Willkommen im Ticket-System für den #{EVENT_NAME}! Hier kannst du deine Tickets bestellen und verwalten.</p>
-                <p><strong>Veranstaltungsort:</strong> #{EVENT_LOCATION}<br>
+            <div class='alert alert-danger'>
+                Wir haben festgestellt, dass Apple unsere automatischen Mails an <b>@icloud.com</b>-Adressen blockiert. Wenn Du dich bereits mit einer solchen Adresse registriert hast, schreib uns bitte eine alternative E-Mail-Adresse an <a href='#{get_support_mailto('data_change')}'>#{SUPPORT_EMAIL}</a>, um deine E-Mail-Adresse zu ändern. Nutze dazu bitte deine @icloud.com-Adresse als Absender.
             </div>"
         login = "<p>Du bist nicht angemeldet. Bitte melde dich an, um Tickets bestellen zu können.</p>
             <div class='row'>
@@ -521,9 +519,9 @@ class Main < Sinatra::Base
                     <a class='btn btn-primary' href='login'><i class='bi bi-person-lock'></i>&nbsp;&nbsp;Anmelden</a>
                 </div>
             </div>
-            <div class='alert alert-info mt-3'>
-                <h5><i class='bi bi-info-circle'></i> #{EVENT_NAME} - Ticket-System</h5>
-                <p>Melde dich an, um Tickets für den #{EVENT_NAME} zu bestellen. Falls du noch keinen Account hast, wende dich an das Abikomitee.</p>
+            <br>
+            <div class='alert alert-danger'>
+                Wir haben festgestellt, dass Apple unsere automatischen Mails an <b>@icloud.com</b>-Adressen blockiert. Wenn Du dich bereits mit einer solchen Adresse registriert hast, schreib uns bitte eine alternative E-Mail-Adresse an <a href='#{get_support_mailto('data_change')}'>#{SUPPORT_EMAIL}</a>, um deine E-Mail-Adresse zu ändern. Nutze dazu bitte deine @icloud.com-Adresse als Absender.
             </div>"
         if user_logged_in?
             links
