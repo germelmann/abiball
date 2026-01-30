@@ -959,9 +959,17 @@ class Main < Sinatra::Base
 
     post "/api/all_ticket_orders" do
         require_user_with_permission!("view_users")
+        data = parse_request_data(required_keys: [], optional_keys: [:event_id])
         
-        orders = neo4j_query(<<~END_OF_QUERY)
+        event_id = data[:event_id]
+        
+        # Build query with optional event filter using WHERE clause
+        event_filter = (event_id && !event_id.to_s.empty?) ? "WHERE e.id = $event_id" : ""
+        query_params = (event_id && !event_id.to_s.empty?) ? {event_id: event_id} : {}
+        
+        orders = neo4j_query(<<~END_OF_QUERY, query_params)
             MATCH (u:User)-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event)
+            #{event_filter}
             OPTIONAL MATCH (o)-[:INCLUDES]->(p:Participant)
             OPTIONAL MATCH (o)-[:HAS_PAYMENT_REQUEST]->(pr:PaymentRequest)
             OPTIONAL MATCH (pr)-[:USES_ACCOUNT]->(b:BankAccount)
@@ -994,6 +1002,7 @@ class Main < Sinatra::Base
                    COALESCE(e.year, '') AS event_year,
                    participants,
                    latest_payment_request
+            ORDER BY o.created_at DESC
         END_OF_QUERY
         
         respond(success: true, orders: orders)

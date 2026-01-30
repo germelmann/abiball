@@ -425,7 +425,13 @@
     }
     
     function refresh_ticket_orders() {
-        api_call('/api/all_ticket_orders', {}, function(data) {
+        let eventId = $('#event_filter_select').val();
+        let params = {};
+        if (eventId) {
+            params.event_id = eventId;
+        }
+        
+        api_call('/api/all_ticket_orders', params, function(data) {
             if (data.success) {
                 $('#ticket_orders_list').empty();
                 for (let order of data.orders) {
@@ -895,6 +901,7 @@
         
         // Event filter change handler
         $('#event_filter_select').change(function() {
+            refresh_ticket_orders();
             refreshStatistics();
         });
         

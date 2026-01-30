@@ -8,7 +8,10 @@
     
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">Bestellung #<span id="order_id_display"></span></h5>
+            <div>
+                <h5 class="mb-0">Bestellung #<span id="order_id_display"></span></h5>
+                <span class="badge bg-info fs-6 mt-1" id="event_badge"><i class="bi bi-calendar-event"></i> <span id="event_name_display"></span></span>
+            </div>
             <div>
                 <button type="button" class="btn btn-primary" id="edit_order_btn" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
                     <i class="bi bi-pencil"></i> Bearbeiten
@@ -294,6 +297,13 @@ function renumberParticipants() {
 function populateOrderForm(order) {
     $('#order_id_display').text(order.order_id);
     $('#order_id_input').val(order.order_id);
+    
+    // Event information - display prominently
+    let eventDisplayText = order.event_name || '';
+    if (order.event_year) {
+        eventDisplayText += ' ' + order.event_year;
+    }
+    $('#event_name_display').text(eventDisplayText || 'Unbekanntes Event');
     
     // User information
     $('#user_name_input').val(order.user_name);
