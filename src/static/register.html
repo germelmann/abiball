@@ -72,6 +72,30 @@
                 $(this).addClass('is-valid').removeClass('is-invalid');
             }
         });
+
+        $('#email_input').on('input', function() {
+            let email = $(this).val().trim();
+            let feedbackDiv = $('#email_feedback');
+            
+            if (!feedbackDiv.length) {
+                feedbackDiv = $('<div id="email_feedback" class="form-text"></div>');
+                $(this).parent().append(feedbackDiv);
+            }
+            
+            if (email.length === 0) {
+                feedbackDiv.html('').removeClass('text-danger text-success');
+                $(this).removeClass('is-invalid is-valid');
+            } else if (!email.includes('@')) {
+                feedbackDiv.html('<i class="bi bi-x-circle"></i> Bitte eine gültige E-Mail-Adresse eingeben.').addClass('text-danger').removeClass('text-success');
+                $(this).addClass('is-invalid').removeClass('is-valid');
+            } else if (email.includes('@icloud.com')) {
+                feedbackDiv.html('<i class="bi bi-x-circle"></i> Leider blockiert Apple zurzeit unsere automatischen Mails an @icloud.com-Adressen. Bitte verwende eine andere E-Mail-Adresse.').addClass('text-danger').removeClass('text-success');
+                $(this).addClass('is-invalid').removeClass('is-valid');
+            } else {
+                feedbackDiv.html('').removeClass('text-danger text-success');
+                $(this).removeClass('is-invalid is-valid');
+            }
+        });
         
         $('#register_form').on('submit', function(e) {
             e.preventDefault();
@@ -100,6 +124,11 @@
             
             if (!email.includes('@')) {
                 showTemplateModal('Fehler', 'Bitte eine gültige E-Mail-Adresse eingeben.', 'OK', 'btn-primary', null, null, function() {});
+                return;
+            }
+
+            if (email.includes('@icloud.com')) {
+                showTemplateModal('Fehler', 'Leider blockiert Apple zurzeit unsere automatischen Mails an @icloud.com-Adressen. Bitte verwende eine andere E-Mail-Adresse.', 'OK', 'btn-primary', null, null, function() {});
                 return;
             }
             
