@@ -45,9 +45,12 @@ if PROFILE.include?(:static)
     end
     docker_compose[:services][:nginx][:links] = ["ruby:ruby"]
     nginx_config = <<~eos
-        log_format custom '$http_x_forwarded_for - $remote_user [$time_local] "$request" '
-                          '$status $body_bytes_sent "$http_referer" '
-                          '"$http_user_agent" "$request_time"';
+        log_format custom '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" rt=$request_time '
+                        'uct=$upstream_connect_time uht=$upstream_header_time urt=$upstream_response_time '
+                        'ua="$upstream_addr" us="$upstream_status" '
+                        'xff="$http_x_forwarded_for" rid="$request_id"';
 
         map $sent_http_content_type $expires {
             default                         off;
@@ -113,6 +116,9 @@ if PROFILE.include?(:static)
             location @ruby {
                 proxy_pass http://#{PROJECT_NAME_FIXED}-ruby-1:9292;
                 proxy_set_header Host $host;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header X-Request-Id $request_id;
                 proxy_http_version 1.1;
                 proxy_set_header Upgrade $http_upgrade;
                 proxy_set_header Connection Upgrade;
