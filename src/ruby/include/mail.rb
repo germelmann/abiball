@@ -144,7 +144,6 @@ class Main < Sinatra::Base
                 <p>Hallo [NAME],</p>
                 <p>dein Konto ([ID]) wurde gelöscht.</p>
                 <p>Alle mit deinem Konto verbundenen Daten wurden entfernt.</p>
-                <p>Falls dies ein Fehler war, kontaktiere uns bitte umgehend unter #{support_email}.</p>
             BODY
             category: 'user',
             label: 'Konto gelöscht'
