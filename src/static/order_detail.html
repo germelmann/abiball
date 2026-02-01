@@ -138,6 +138,137 @@
             </form>
         </div>
     </div>
+
+    <!-- Manual Email Section -->
+    <div class="card mt-4" id="manual_mail_section" #{can_send_manual_mail? ? "" : "style='display:none'"}>
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-envelope"></i> Manuelle E-Mails</h5>
+        </div>
+        <div class="card-body">
+            <!-- <p class="text-muted mb-3">
+                <i class="bi bi-info-circle"></i> Sende vordefinierte E-Mails an den Kunden. Du kannst den Inhalt vor dem Senden bearbeiten.
+            </p> -->
+            <div class="d-flex flex-wrap gap-2" id="order_mail_buttons">
+                <button type="button" class="btn btn-outline-success manual-mail-btn" data-template="order_accepted_cash">
+                    <i class="bi bi-envelope"></i> Bestellung angenommen (Barzahlung) <span class="badge bg-secondary mail-counter" data-template="order_accepted_cash">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-success manual-mail-btn" data-template="payment_received">
+                    <i class="bi bi-envelope"></i> Zahlung eingegangen <span class="badge bg-secondary mail-counter" data-template="payment_received">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled">
+                    <i class="bi bi-envelope"></i> Bestellung storniert <span class="badge bg-secondary mail-counter" data-template="order_cancelled">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled_user_request">
+                    <i class="bi bi-envelope"></i> Storniert (auf Wunsch) <span class="badge bg-secondary mail-counter" data-template="order_cancelled_user_request">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-info manual-mail-btn" data-template="order_reminder_1">
+                    <i class="bi bi-envelope"></i> Erinnerung 1 <span class="badge bg-secondary mail-counter" data-template="order_reminder_1">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-info manual-mail-btn" data-template="order_reminder_2">
+                    <i class="bi bi-envelope"></i> Erinnerung 2 <span class="badge bg-secondary mail-counter" data-template="order_reminder_2">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-secondary manual-mail-btn" data-template="order_adjusted">
+                    <i class="bi bi-envelope"></i> Bestellung angepasst <span class="badge bg-secondary mail-counter" data-template="order_adjusted">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-secondary manual-mail-btn" data-template="order_adjusted_user_request">
+                    <i class="bi bi-envelope"></i> Angepasst (auf Wunsch) <span class="badge bg-secondary mail-counter" data-template="order_adjusted_user_request">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-warning manual-mail-btn" data-template="order_issue">
+                    <i class="bi bi-envelope"></i> Problem mit Bestellung <span class="badge bg-secondary mail-counter" data-template="order_issue">0</span>
+                </button>
+            </div>
+
+            <hr>
+            
+            <!-- Mail Log Section -->
+            <h6 class="mb-3"><i class="bi bi-clock-history"></i> E-Mail-Verlauf</h6>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover" id="order_mail_log_table">
+                    <thead>
+                        <tr>
+                            <th>Datum</th>
+                            <th>Template</th>
+                            <th>Betreff</th>
+                            <th>Gesendet von</th>
+                            <th>Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="order_mail_log_tbody">
+                        <tr>
+                            <td colspan="5" class="text-center text-muted"><em>Keine E-Mails gesendet</em></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manual Email Compose Modal -->
+<div class="modal fade" id="manualMailModal" tabindex="-1" aria-labelledby="manualMailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="manualMailModalLabel"><i class="bi bi-envelope"></i> E-Mail bearbeiten und senden</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="mail_template_key">
+                <div class="mb-3">
+                    <label for="mail_recipient" class="form-label">Empfänger</label>
+                    <input type="text" class="form-control" id="mail_recipient" readonly>
+                </div>
+                <div class="mb-3">
+                    <label for="mail_subject" class="form-label">Betreff</label>
+                    <input type="text" class="form-control" id="mail_subject">
+                </div>
+                <div class="mb-3">
+                    <label for="mail_body" class="form-label">Nachricht (HTML)</label>
+                    <textarea class="form-control" id="mail_body" rows="12"></textarea>
+                    <small class="text-muted">Ersetze Platzhalter wie [X], [REASON] durch den gewünschten Text. Die Grußformel am Ende wird automatisch hinzugefügt.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="send_manual_mail_btn">
+                    <i class="bi bi-send"></i> E-Mail senden
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Mail Log Detail Modal -->
+<div class="modal fade" id="mailLogDetailModal" tabindex="-1" aria-labelledby="mailLogDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="mailLogDetailModalLabel"><i class="bi bi-envelope-open"></i> E-Mail-Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <strong>Gesendet:</strong> <span id="log_detail_timestamp"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>Von:</strong> <span id="log_detail_sender"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>An:</strong> <span id="log_detail_recipient"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>Betreff:</strong> <span id="log_detail_subject"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>Inhalt:</strong>
+                    <div class="border p-3 bg-light" id="log_detail_body" style="max-height: 400px; overflow-y: auto;"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Send Payment Request Modal -->
@@ -327,6 +458,9 @@ function populateOrderForm(order) {
     
     // Render participants
     renderParticipants(order.participants || []);
+    
+    // Initialize manual mail section
+    initializeMailSection();
 }
 
 // Render payment requests section
@@ -600,5 +734,171 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ==================== Manual Mail Functions ====================
+
+// Load mail counters for this order
+function loadMailCounters() {
+    if (!currentOrder) return;
+    
+    api_call('/api/manual_mail/order_counters', { order_id: currentOrder.order_id }, function(data) {
+        if (data.success) {
+            // Update all counter badges
+            $('.mail-counter').each(function() {
+                const templateKey = $(this).data('template');
+                const count = data.counters[templateKey] || 0;
+                $(this).text(count);
+                if (count > 0) {
+                    $(this).removeClass('bg-secondary').addClass('bg-primary');
+                } else {
+                    $(this).removeClass('bg-primary').addClass('bg-secondary');
+                }
+            });
+        }
+    });
+}
+
+// Load mail log for this order
+function loadMailLog() {
+    if (!currentOrder) return;
+    
+    api_call('/api/manual_mail/order_logs', { order_id: currentOrder.order_id }, function(data) {
+        if (data.success && data.logs && data.logs.length > 0) {
+            const tbody = $('#order_mail_log_tbody');
+            tbody.empty();
+            
+            data.logs.forEach(function(log) {
+                const row = $('<tr>');
+                
+                // Timestamp
+                const timestamp = new Date(log.timestamp);
+                row.append($('<td>').text(timestamp.toLocaleString('de-DE')));
+                
+                // Template
+                row.append($('<td>').text(log.template_key));
+                
+                // Subject
+                row.append($('<td>').text(log.subject));
+                
+                // Sender
+                row.append($('<td>').text(log.sender_username));
+                
+                // Actions
+                const actionsCell = $('<td>');
+                const viewBtn = $('<button>')
+                    .addClass('btn btn-sm btn-outline-info')
+                    .html('<i class="bi bi-eye"></i>')
+                    .attr('title', 'Details anzeigen')
+                    .on('click', function() {
+                        showMailLogDetail(log.id);
+                    });
+                actionsCell.append(viewBtn);
+                row.append(actionsCell);
+                
+                tbody.append(row);
+            });
+        } else {
+            $('#order_mail_log_tbody').html('<tr><td colspan="5" class="text-center text-muted"><em>Keine E-Mails gesendet</em></td></tr>');
+        }
+    });
+}
+
+// Show mail log detail
+function showMailLogDetail(logId) {
+    api_call('/api/manual_mail/log_details', { log_id: logId }, function(data) {
+        if (data.success && data.log) {
+            const log = data.log;
+            
+            $('#log_detail_timestamp').text(new Date(log.timestamp).toLocaleString('de-DE'));
+            $('#log_detail_sender').text(log.sender_username);
+            $('#log_detail_recipient').text(log.recipient_email);
+            $('#log_detail_subject').text(log.subject);
+            $('#log_detail_body').html(log.body);
+            
+            new bootstrap.Modal(document.getElementById('mailLogDetailModal')).show();
+        } else {
+            showTemplateModal('Fehler', 'Log-Details konnten nicht geladen werden.', 'OK', 'btn-primary', null, null, function() {});
+        }
+    });
+}
+
+// Handle manual mail button click
+$(document).on('click', '.manual-mail-btn', function() {
+    if (!currentOrder) return;
+    
+    const templateKey = $(this).data('template');
+    
+    // Load the template with pre-filled data
+    api_call('/api/manual_mail/get_template', {
+        template_key: templateKey,
+        order_id: currentOrder.order_id,
+        username: currentOrder.user_username
+    }, function(data) {
+        if (data.success && data.template) {
+            $('#mail_template_key').val(templateKey);
+            $('#mail_recipient').val(currentOrder.user_email + ' (' + currentOrder.user_name + ')');
+            $('#mail_subject').val(data.template.subject);
+            $('#mail_body').val(data.template.body);
+            
+            new bootstrap.Modal(document.getElementById('manualMailModal')).show();
+        } else {
+            showTemplateModal('Fehler', data.error || 'Template konnte nicht geladen werden.', 'OK', 'btn-primary', null, null, function() {});
+        }
+    });
+});
+
+// Send manual mail
+$('#send_manual_mail_btn').on('click', function() {
+    if (!currentOrder) return;
+    
+    const templateKey = $('#mail_template_key').val();
+    const subject = $('#mail_subject').val();
+    const body = $('#mail_body').val();
+    
+    if (!subject.trim()) {
+        showTemplateModal('Fehler', 'Bitte gib einen Betreff ein.', 'OK', 'btn-primary', null, null, function() {});
+        return;
+    }
+    
+    if (!body.trim()) {
+        showTemplateModal('Fehler', 'Bitte gib eine Nachricht ein.', 'OK', 'btn-primary', null, null, function() {});
+        return;
+    }
+    
+    const btn = $(this);
+    btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> Sende...');
+    
+    api_call('/api/manual_mail/send', {
+        template_key: templateKey,
+        recipient_username: currentOrder.user_username,
+        subject: subject,
+        body: body,
+        order_id: currentOrder.order_id
+    }, function(data) {
+        btn.prop('disabled', false).html('<i class="bi bi-send"></i> E-Mail senden');
+        
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('manualMailModal')).hide();
+            showTemplateModal('Erfolg', 'E-Mail wurde erfolgreich gesendet.', 'OK', 'btn-success', null, null, function() {
+                // Reload counters and log
+                loadMailCounters();
+                loadMailLog();
+            });
+        } else {
+            showTemplateModal('Fehler', data.error || 'Fehler beim Senden der E-Mail.', 'OK', 'btn-primary', null, null, function() {});
+        }
+    }, function() {
+        btn.prop('disabled', false).html('<i class="bi bi-send"></i> E-Mail senden');
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Senden der E-Mail.', 'OK', 'btn-primary', null, null, function() {});
+    });
+});
+
+// Initialize mail section when order is loaded
+function initializeMailSection() {
+    if ($('#manual_mail_section').is(':visible') && currentOrder) {
+        loadMailCounters();
+        loadMailLog();
+    }
 }
 </script>

@@ -10,6 +10,7 @@ require 'digest'
 require 'mail'
 require 'neo4j_bolt'
 require './credentials.rb'
+require './include/mail.rb'
 require 'securerandom'
 require 'sinatra/base'
 require 'sinatra/cookies'
@@ -510,7 +511,7 @@ class Main < Sinatra::Base
             </div>
             <br>
             <div class='alert alert-danger'>
-                Wir haben festgestellt, dass Apple unsere automatischen Mails an <b>@icloud.com</b>-Adressen blockiert. Wenn Du dich bereits mit einer solchen Adresse registriert hast, schreib uns bitte eine alternative E-Mail-Adresse an <a href='#{get_support_mailto('data_change')}'>#{SUPPORT_EMAIL}</a>, um deine E-Mail-Adresse zu ändern. Nutze dazu bitte deine @icloud.com-Adresse als Absender.
+                Wir haben festgestellt, dass Apple unsere automatischen Mails an <b>@icloud.com</b>-Adressen blockiert. Wenn Du dich bereits mit einer solchen Adresse registriert hast, schreib uns bitte eine alternative E-Mail-Adresse an <a href='#{get_support_mailto('data_change')}'>#{SUPPORT_EMAIL}</a>. Nutze dazu bitte deine @icloud.com-Adresse als Absender.
             </div>"
         login = "<p>Du bist nicht angemeldet. Bitte melde dich an, um Tickets bestellen zu können.</p>
             <div class='row'>
@@ -521,7 +522,7 @@ class Main < Sinatra::Base
             </div>
             <br>
             <div class='alert alert-danger'>
-                Wir haben festgestellt, dass Apple unsere automatischen Mails an <b>@icloud.com</b>-Adressen blockiert. Wenn Du dich bereits mit einer solchen Adresse registriert hast, schreib uns bitte eine alternative E-Mail-Adresse an <a href='#{get_support_mailto('data_change')}'>#{SUPPORT_EMAIL}</a>, um deine E-Mail-Adresse zu ändern. Nutze dazu bitte deine @icloud.com-Adresse als Absender.
+                Wir haben festgestellt, dass Apple unsere automatischen Mails an <b>@icloud.com</b>-Adressen blockiert. Wenn Du dich bereits mit einer solchen Adresse registriert hast, schreib uns bitte eine alternative E-Mail-Adresse an <a href='#{get_support_mailto('data_change')}'>#{SUPPORT_EMAIL}</a>. Nutze dazu bitte deine @icloud.com-Adresse als Absender.
             </div>"
         if user_logged_in?
             links

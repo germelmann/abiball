@@ -6,6 +6,7 @@ class Main < Sinatra::Base
         { key: 'edit_users', icon: 'bi-pencil-square', label: 'Benutzer bearbeiten', group: 'Benutzer verwalten', edit: true },
         { key: 'buy_tickets', icon: 'bi-ticket', label: 'Tickets kaufen', group: 'Tickets', edit: false },
         { key: 'manage_orders', icon: 'bi-cart', label: 'Bestellungen verwalten', group: 'Tickets', edit: true },
+        { key: 'manual_mail_send', icon: 'bi-envelope', label: 'Manuelle E-Mails senden', group: 'Kommunikation', edit: false },
         { key: 'create_invites', icon: 'bi-person-plus', label: 'Einladungen erstellen', group: 'Benutzer verwalten', edit: false },
         { key: 'create_events', icon: 'bi-calendar-plus', label: 'Events erstellen', group: 'Events', edit: false },
         { key: 'view_logs', icon: 'bi-file-text', label: 'Logs ansehen', group: 'Admin', edit: false },

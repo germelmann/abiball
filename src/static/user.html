@@ -74,7 +74,7 @@
                                     <i class='bi bi-eye'></i> Adresse anzeigen
                                 </button>
                                 <div class='text-muted mt-2'>
-                                    <small><i class='bi bi-info-circle'></i> Zugriff wird protokolliert</small>
+                                    <small><i class='bi bi-info-circle'></i> Zugriff wird protokolliert. Informiere den Nutzer bitte zusätzlich über eine manuelle E-Mail!</small>
                                 </div>
                             </div>
                             <div id='address_shown' style='display: none;'>
@@ -215,6 +215,133 @@
                         </table>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manual Email Section -->
+    <div class='row mb-4' id='manual_mail_section' #{can_send_manual_mail? ? "" : "style='display:none'"}>
+        <div class='col-md-12'>
+            <div class='card'>
+                <div class='card-header'>
+                    <h5 class='card-title mb-0'><i class='bi bi-envelope'></i> Manuelle E-Mails</h5>
+                </div>
+                <div class='card-body'>
+                    <div class='d-flex flex-wrap gap-2' id='user_mail_buttons'>
+                        <button type='button' class='btn btn-outline-warning user-manual-mail-btn' data-template='user_issue'>
+                            <i class='bi bi-envelope'></i> Problem mit Konto <span class='badge bg-secondary user-mail-counter' data-template='user_issue'>0</span>
+                        </button>
+                        <button type='button' class='btn btn-outline-info user-manual-mail-btn' data-template='address_viewed'>
+                            <i class='bi bi-envelope'></i> Adresse eingesehen <span class='badge bg-secondary user-mail-counter' data-template='address_viewed'>0</span>
+                        </button>
+                        <button type='button' class='btn btn-outline-secondary user-manual-mail-btn' data-template='user_updated'>
+                            <i class='bi bi-envelope'></i> Konto aktualisiert <span class='badge bg-secondary user-mail-counter' data-template='user_updated'>0</span>
+                        </button>
+                        <button type='button' class='btn btn-outline-secondary user-manual-mail-btn' data-template='user_updated_user_request'>
+                            <i class='bi bi-envelope'></i> Konto aktualisiert (auf Wunsch) <span class='badge bg-secondary user-mail-counter' data-template='user_updated_user_request'>0</span>
+                        </button>
+                        <button type='button' class='btn btn-outline-danger user-manual-mail-btn' data-template='account_deletion_notice'>
+                            <i class='bi bi-envelope'></i> Konto wird gelöscht in [X] Tagen <span class='badge bg-secondary user-mail-counter' data-template='account_deletion_notice'>0</span>
+                        </button>
+                        <button type='button' class='btn btn-outline-danger user-manual-mail-btn' data-template='account_deleted'>
+                            <i class='bi bi-envelope'></i> Konto gelöscht <span class='badge bg-secondary user-mail-counter' data-template='account_deleted'>0</span>
+                        </button>
+                        <button type='button' class='btn btn-outline-danger user-manual-mail-btn' data-template='user_deleted_user_request'>
+                            <i class='bi bi-envelope'></i> Konto gelöscht (auf Wunsch) <span class='badge bg-secondary user-mail-counter' data-template='user_deleted_user_request'>0</span>
+                        </button>
+                    </div>
+                    
+                    <hr>
+                    
+                    <!-- Mail Log Section -->
+                    <h6 class='mb-3'><i class='bi bi-clock-history'></i> E-Mail-Verlauf</h6>
+                    <div class='table-responsive'>
+                        <table class='table table-sm table-hover' id='user_mail_log_table'>
+                            <thead>
+                                <tr>
+                                    <th>Datum</th>
+                                    <th>Template</th>
+                                    <th>Betreff</th>
+                                    <th>Gesendet von</th>
+                                    <th>Bestellung</th>
+                                    <th>Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody id='user_mail_log_tbody'>
+                                <tr>
+                                    <td colspan='6' class='text-center text-muted'><em>Keine E-Mails gesendet</em></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manual Email Compose Modal -->
+<div class='modal fade' id='userManualMailModal' tabindex='-1' aria-labelledby='userManualMailModalLabel' aria-hidden='true'>
+    <div class='modal-dialog modal-lg'>
+        <div class='modal-content'>
+            <div class='modal-header'>
+                <h5 class='modal-title' id='userManualMailModalLabel'><i class='bi bi-envelope'></i> E-Mail bearbeiten und senden</h5>
+                <button type='button' class='btn-close' data-bs-dismiss='modal' aria-label='Schließen'></button>
+            </div>
+            <div class='modal-body'>
+                <input type='hidden' id='user_mail_template_key'>
+                <div class='mb-3'>
+                    <label for='user_mail_recipient' class='form-label'>Empfänger</label>
+                    <input type='text' class='form-control' id='user_mail_recipient' readonly>
+                </div>
+                <div class='mb-3'>
+                    <label for='user_mail_subject' class='form-label'>Betreff</label>
+                    <input type='text' class='form-control' id='user_mail_subject'>
+                </div>
+                <div class='mb-3'>
+                    <label for='user_mail_body' class='form-label'>Nachricht (HTML)</label>
+                    <textarea class='form-control' id='user_mail_body' rows='12'></textarea>
+                    <small class="text-muted">Ersetze Platzhalter wie [X], [REASON] durch den gewünschten Text. Die Grußformel am Ende wird automatisch hinzugefügt.</small>
+                </div>
+            </div>
+            <div class='modal-footer'>
+                <button type='button' class='btn btn-secondary' data-bs-dismiss='modal'>Abbrechen</button>
+                <button type='button' class='btn btn-primary' id='send_user_manual_mail_btn'>
+                    <i class='bi bi-send'></i> E-Mail senden
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- User Mail Log Detail Modal -->
+<div class='modal fade' id='userMailLogDetailModal' tabindex='-1' aria-labelledby='userMailLogDetailModalLabel' aria-hidden='true'>
+    <div class='modal-dialog modal-lg'>
+        <div class='modal-content'>
+            <div class='modal-header'>
+                <h5 class='modal-title' id='userMailLogDetailModalLabel'><i class='bi bi-envelope-open'></i> E-Mail-Details</h5>
+                <button type='button' class='btn-close' data-bs-dismiss='modal' aria-label='Schließen'></button>
+            </div>
+            <div class='modal-body'>
+                <div class='mb-3'>
+                    <strong>Gesendet:</strong> <span id='user_log_detail_timestamp'></span>
+                </div>
+                <div class='mb-3'>
+                    <strong>Von:</strong> <span id='user_log_detail_sender'></span>
+                </div>
+                <div class='mb-3'>
+                    <strong>An:</strong> <span id='user_log_detail_recipient'></span>
+                </div>
+                <div class='mb-3'>
+                    <strong>Betreff:</strong> <span id='user_log_detail_subject'></span>
+                </div>
+                <div class='mb-3'>
+                    <strong>Inhalt:</strong>
+                    <div class='border p-3 bg-light' id='user_log_detail_body' style='max-height: 400px; overflow-y: auto;'></div>
+                </div>
+            </div>
+            <div class='modal-footer'>
+                <button type='button' class='btn btn-secondary' data-bs-dismiss='modal'>Schließen</button>
             </div>
         </div>
     </div>
@@ -359,6 +486,9 @@ function loadUserDetails() {
 
             // Tags
             displayUserTags(user.tags);
+            
+            // Initialize manual mail section
+            initializeUserMailSection();
         } else {
             showTemplateModal('Fehler', 'Benutzerdaten konnten nicht geladen werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {
                 window.location.href = '/users';
@@ -954,6 +1084,183 @@ function isLightColor(color) {
     // Calculate relative luminance
     const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
     return luminance > 0.5;
+}
+
+// ==================== Manual Mail Functions ====================
+
+// Load mail counters for this user
+function loadUserMailCounters() {
+    if (!currentUsername) return;
+    
+    api_call('/api/manual_mail/user_counters', { username: currentUsername }, function(data) {
+        if (data.success) {
+            // Update all counter badges
+            $('.user-mail-counter').each(function() {
+                const templateKey = $(this).data('template');
+                const count = data.counters[templateKey] || 0;
+                $(this).text(count);
+                if (count > 0) {
+                    $(this).removeClass('bg-secondary').addClass('bg-primary');
+                } else {
+                    $(this).removeClass('bg-primary').addClass('bg-secondary');
+                }
+            });
+        }
+    });
+}
+
+// Load mail log for this user
+function loadUserMailLog() {
+    if (!currentUsername) return;
+    
+    api_call('/api/manual_mail/user_logs', { username: currentUsername }, function(data) {
+        if (data.success && data.logs && data.logs.length > 0) {
+            const tbody = $('#user_mail_log_tbody');
+            tbody.empty();
+            
+            data.logs.forEach(function(log) {
+                const row = $('<tr>');
+                
+                // Timestamp
+                const timestamp = new Date(log.timestamp);
+                row.append($('<td>').text(timestamp.toLocaleString('de-DE')));
+                
+                // Template
+                row.append($('<td>').text(log.template_key));
+                
+                // Subject
+                row.append($('<td>').text(log.subject));
+                
+                // Sender
+                row.append($('<td>').text(log.sender_username));
+                
+                // Order (if applicable)
+                const orderCell = $('<td>');
+                if (log.order_id) {
+                    const orderLink = $('<a>')
+                        .attr('href', '/order_detail/' + log.order_id)
+                        .attr('target', '_blank')
+                        .text(log.order_id);
+                    orderCell.append(orderLink);
+                } else {
+                    orderCell.text('-');
+                }
+                row.append(orderCell);
+                
+                // Actions
+                const actionsCell = $('<td>');
+                const viewBtn = $('<button>')
+                    .addClass('btn btn-sm btn-outline-info')
+                    .html('<i class="bi bi-eye"></i>')
+                    .attr('title', 'Details anzeigen')
+                    .on('click', function() {
+                        showUserMailLogDetail(log.id);
+                    });
+                actionsCell.append(viewBtn);
+                row.append(actionsCell);
+                
+                tbody.append(row);
+            });
+        } else {
+            $('#user_mail_log_tbody').html('<tr><td colspan="6" class="text-center text-muted"><em>Keine E-Mails gesendet</em></td></tr>');
+        }
+    });
+}
+
+// Show mail log detail
+function showUserMailLogDetail(logId) {
+    api_call('/api/manual_mail/log_details', { log_id: logId }, function(data) {
+        if (data.success && data.log) {
+            const log = data.log;
+            
+            $('#user_log_detail_timestamp').text(new Date(log.timestamp).toLocaleString('de-DE'));
+            $('#user_log_detail_sender').text(log.sender_username);
+            $('#user_log_detail_recipient').text(log.recipient_email);
+            $('#user_log_detail_subject').text(log.subject);
+            $('#user_log_detail_body').html(log.body);
+            
+            new bootstrap.Modal(document.getElementById('userMailLogDetailModal')).show();
+        } else {
+            showTemplateModal('Fehler', 'Log-Details konnten nicht geladen werden.', 'OK', 'btn-primary', null, null, function() {});
+        }
+    });
+}
+
+// Handle manual mail button click
+$(document).on('click', '.user-manual-mail-btn', function() {
+    if (!currentUsername || !currentUserData) return;
+    
+    const templateKey = $(this).data('template');
+    
+    // Load the template with pre-filled data
+    api_call('/api/manual_mail/get_template', {
+        template_key: templateKey,
+        username: currentUsername
+    }, function(data) {
+        if (data.success && data.template) {
+            $('#user_mail_template_key').val(templateKey);
+            $('#user_mail_recipient').val(currentUserData.email + ' (' + currentUserData.name + ')');
+            $('#user_mail_subject').val(data.template.subject);
+            $('#user_mail_body').val(data.template.body);
+            
+            new bootstrap.Modal(document.getElementById('userManualMailModal')).show();
+        } else {
+            showTemplateModal('Fehler', data.error || 'Template konnte nicht geladen werden.', 'OK', 'btn-primary', null, null, function() {});
+        }
+    });
+});
+
+// Send manual mail for user
+$('#send_user_manual_mail_btn').on('click', function() {
+    if (!currentUsername) return;
+    
+    const templateKey = $('#user_mail_template_key').val();
+    const subject = $('#user_mail_subject').val();
+    const body = $('#user_mail_body').val();
+    
+    if (!subject.trim()) {
+        showTemplateModal('Fehler', 'Bitte gib einen Betreff ein.', 'OK', 'btn-primary', null, null, function() {});
+        return;
+    }
+    
+    if (!body.trim()) {
+        showTemplateModal('Fehler', 'Bitte gib eine Nachricht ein.', 'OK', 'btn-primary', null, null, function() {});
+        return;
+    }
+    
+    const btn = $(this);
+    btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> Sende...');
+    
+    api_call('/api/manual_mail/send', {
+        template_key: templateKey,
+        recipient_username: currentUsername,
+        subject: subject,
+        body: body
+    }, function(data) {
+        btn.prop('disabled', false).html('<i class="bi bi-send"></i> E-Mail senden');
+        
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('userManualMailModal')).hide();
+            showTemplateModal('Erfolg', 'E-Mail wurde erfolgreich gesendet.', 'OK', 'btn-success', null, null, function() {
+                // Reload counters and log
+                loadUserMailCounters();
+                loadUserMailLog();
+            });
+        } else {
+            showTemplateModal('Fehler', data.error || 'Fehler beim Senden der E-Mail.', 'OK', 'btn-primary', null, null, function() {});
+        }
+    }, function() {
+        btn.prop('disabled', false).html('<i class="bi bi-send"></i> E-Mail senden');
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Senden der E-Mail.', 'OK', 'btn-primary', null, null, function() {});
+    });
+});
+
+// Initialize mail section when user is loaded
+function initializeUserMailSection() {
+    if ($('#manual_mail_section').is(':visible') && currentUsername) {
+        loadUserMailCounters();
+        loadUserMailLog();
+    }
 }
 
 </script>
