@@ -1,6 +1,7 @@
 class Main < Sinatra::Base
     # Manual Email Templates
     # Each template has a key, default subject, default body with placeholders
+    support_email = "<a href='mailto:#{SUPPORT_EMAIL}'>#{SUPPORT_EMAIL}</a>"
     MANUAL_MAIL_TEMPLATES = {
         # Order-related templates (for order_detail.html)
         'order_accepted_cash' => {
@@ -11,7 +12,7 @@ class Main < Sinatra::Base
                 <p>deine Bestellung #[ORDER_ID] ([REFERENCE]) wurde angenommen.</p>
                 <p>Du hast die Zahlungsoption <strong>Barzahlung vor Ort</strong> gewählt.</p>
                 <p>Bitte bringe den Betrag von <strong>[TOTAL_PRICE] €</strong> zum Event mit.</p>
-                <p>Bei Fragen stehen wir dir gerne zur Verfügung.</p>
+                <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>
             BODY
             category: 'order',
             label: 'Bestellung angenommen (Barzahlung)'
@@ -35,7 +36,7 @@ class Main < Sinatra::Base
             body: <<~BODY,
                 <p>Hallo [NAME],</p>
                 <p>deine Bestellung #[ORDER_ID] ([REFERENCE]) wurde storniert.</p>
-                <p>Falls du Fragen dazu hast, kontaktiere uns bitte.</p>
+                <p>Falls du Fragen dazu hast, kontaktiere uns bitte: #{support_email}.</p>
             BODY
             category: 'order',
             label: 'Bestellung storniert'
@@ -46,7 +47,7 @@ class Main < Sinatra::Base
             body: <<~BODY,
                 <p>Hallo [NAME],</p>
                 <p>wie von dir gewünscht, haben wir deine Bestellung #[ORDER_ID] ([REFERENCE]) storniert.</p>
-                <p>Falls dies ein Versehen war oder du Fragen hast, kontaktiere uns bitte.</p>
+                <p>Falls dies ein Versehen war oder du Fragen hast, kontaktiere uns bitte: #{support_email}.</p>
             BODY
             category: 'order',
             label: 'Bestellung storniert (auf Wunsch)'
@@ -82,7 +83,7 @@ class Main < Sinatra::Base
                 <p>Hallo [NAME],</p>
                 <p>deine Bestellung #[ORDER_ID] ([REFERENCE]) wurde angepasst.</p>
                 <p>[REASON]</p>
-                <p>Bei Fragen stehen wir dir gerne zur Verfügung.</p>
+                <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>
             BODY
             category: 'order',
             label: 'Bestellung angepasst'
@@ -94,7 +95,7 @@ class Main < Sinatra::Base
                 <p>Hallo [NAME],</p>
                 <p>wie von dir gewünscht, haben wir deine Bestellung #[ORDER_ID] ([REFERENCE]) angepasst.</p>
                 <p>[REASON]</p>
-                <p>Falls du weitere Fragen hast, kontaktiere uns bitte.</p>
+                <p>Falls du weitere Fragen hast, kontaktiere uns bitte: #{support_email}.</p>
             BODY
             category: 'order',
             label: 'Bestellung angepasst (auf Wunsch)'
@@ -106,7 +107,7 @@ class Main < Sinatra::Base
                 <p>Hallo [NAME],</p>
                 <p>leider gibt es ein Problem mit deiner Bestellung #[ORDER_ID] ([REFERENCE]).</p>
                 <p>[REASON]</p>
-                <p>Bitte kontaktiere uns unter #{SUPPORT_EMAIL}, damit wir das Problem gemeinsam lösen können.</p>
+                <p>Bitte kontaktiere uns unter #{support_email}, damit wir das Problem gemeinsam lösen können.</p>
             BODY
             category: 'order',
             label: 'Problem mit Bestellung'
@@ -120,7 +121,7 @@ class Main < Sinatra::Base
                 <p>Hallo [NAME],</p>
                 <p>leider gibt es ein Problem mit deinem Benutzerkonto ([ID]).</p>
                 <p>[REASON]</p>
-                <p>Bitte kontaktiere uns unter #{SUPPORT_EMAIL}, damit wir das Problem gemeinsam lösen können.</p>
+                <p>Bitte kontaktiere uns unter #{support_email}, damit wir das Problem gemeinsam lösen können.</p>
             BODY
             category: 'user',
             label: 'Problem mit Benutzerkonto'
@@ -131,7 +132,7 @@ class Main < Sinatra::Base
             body: <<~BODY,
                 <p>Hallo [NAME],</p>
                 <p>wir möchten dich darüber informieren, dass dein Konto ([ID]) in <strong>[X] Tagen</strong> gelöscht wird.</p>
-                <p>Falls du dein Konto behalten möchtest, melde dich bitte bei uns unter #{SUPPORT_EMAIL}.</p>
+                <p>Falls du dein Konto behalten möchtest, melde dich bitte bei uns unter #{support_email}.</p>
             BODY
             category: 'user',
             label: 'Konto wird gelöscht in [X] Tagen'
@@ -143,7 +144,7 @@ class Main < Sinatra::Base
                 <p>Hallo [NAME],</p>
                 <p>dein Konto ([ID]) wurde gelöscht.</p>
                 <p>Alle mit deinem Konto verbundenen Daten wurden entfernt.</p>
-                <p>Falls dies ein Fehler war, kontaktiere uns bitte umgehend unter #{SUPPORT_EMAIL}.</p>
+                <p>Falls dies ein Fehler war, kontaktiere uns bitte umgehend unter #{support_email}.</p>
             BODY
             category: 'user',
             label: 'Konto gelöscht'
@@ -155,7 +156,7 @@ class Main < Sinatra::Base
                 <p>Hallo [NAME],</p>
                 <p>wir möchten dich darüber informieren, dass deine Adresse durch ein Mitglied des Abikomitees eingesehen wurde.</p>
                 <p>Grund: <strong>[REASON]</strong></p>
-                <p>Falls du Fragen dazu hast, kontaktiere uns bitte.</p>
+                <p>Falls du Fragen dazu hast, kontaktiere uns bitte: #{support_email}.</p>
             BODY
             category: 'user',
             label: 'Adresse eingesehen'
@@ -167,7 +168,7 @@ class Main < Sinatra::Base
                 <p>Hallo [NAME],</p>
                 <p>dein Benutzerkonto wurde aktualisiert.</p>
                 <p>[REASON]</p>
-                <p>Falls du diese Änderung nicht angefordert hast, kontaktiere uns bitte umgehend.</p>
+                <p>Falls du diese Änderung nicht angefordert hast, kontaktiere uns bitte umgehend: #{support_email}.</p>
             BODY
             category: 'user',
             label: 'Benutzerkonto aktualisiert'
@@ -179,7 +180,7 @@ class Main < Sinatra::Base
                 <p>Hallo [NAME],</p>
                 <p>wie von dir gewünscht, haben wir dein Benutzerkonto aktualisiert.</p>
                 <p>[REASON]</p>
-                <p>Falls du Fragen hast, kontaktiere uns bitte.</p>
+                <p>Falls du Fragen hast, kontaktiere uns bitte: #{support_email}.</p>
             BODY
             category: 'user',
             label: 'Benutzerkonto aktualisiert (auf Wunsch)'
@@ -192,6 +193,7 @@ class Main < Sinatra::Base
                 <p>wie von dir gewünscht, haben wir dein Benutzerkonto gelöscht.</p>
                 <p>Alle mit deinem Konto verbundenen Daten wurden entfernt.</p>
                 <p>Wir bedanken uns für dein Vertrauen und wünschen dir alles Gute.</p>
+                <p>Falls du Fragen hast, kontaktiere uns bitte: #{support_email}.</p>
             BODY
             category: 'user',
             label: 'Benutzerkonto gelöscht (auf Wunsch)'
