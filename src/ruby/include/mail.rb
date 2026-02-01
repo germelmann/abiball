@@ -130,7 +130,7 @@ class Main < Sinatra::Base
             subject: 'Dein Konto wird in [X] Tagen gelöscht',
             body: <<~BODY,
                 <p>Hallo [NAME],</p>
-                <p>wir möchten dich darüber informieren, dass dein Konto in <strong>[X] Tagen</strong> gelöscht wird.</p>
+                <p>wir möchten dich darüber informieren, dass dein Konto ([ID]) in <strong>[X] Tagen</strong> gelöscht wird.</p>
                 <p>Falls du dein Konto behalten möchtest, melde dich bitte bei uns unter #{SUPPORT_EMAIL}.</p>
             BODY
             category: 'user',
@@ -141,7 +141,7 @@ class Main < Sinatra::Base
             subject: 'Dein Konto wurde gelöscht',
             body: <<~BODY,
                 <p>Hallo [NAME],</p>
-                <p>dein Konto wurde gelöscht.</p>
+                <p>dein Konto ([ID]) wurde gelöscht.</p>
                 <p>Alle mit deinem Konto verbundenen Daten wurden entfernt.</p>
                 <p>Falls dies ein Fehler war, kontaktiere uns bitte umgehend unter #{SUPPORT_EMAIL}.</p>
             BODY

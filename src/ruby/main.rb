@@ -117,7 +117,7 @@ def format_email_with_template(title, content)
         io.puts "            <p>Viele Grüße<br>Das #{EVENT_NAME} Team</p>"
         io.puts "        </div>"
         io.puts "        <div class=\"footer\">"
-        io.puts "            <p>Diese E-Mail wurde automatisch generiert. Bitte antworte nicht auf diese E-Mail.</p>"
+        io.puts "            <p>Diese E-Mail wurde automatisch generiert. Antworte bei Fragen auf diese E-Mail.</p>"
         io.puts "        </div>"
         io.puts "    </div>"
         io.puts "</body>"
