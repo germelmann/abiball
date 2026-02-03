@@ -337,7 +337,8 @@ function getSalesStatus(event) {
     if (event.ticket_sale_end_datetime) {
         const endDate = new Date(event.ticket_sale_end_datetime);
         const timeUntilEnd = endDate.getTime() - now.getTime();
-        if (timeUntilEnd <= 24 * 60 * 60 * 1000) { // Less than 24 hours
+        // if (timeUntilEnd <= 24 * 60 * 60 * 1000) { // Less than 24 hours
+        if (timeUntilEnd <= 30 * 24 * 60 * 60 * 1000) { // Less than 30 days
             return {
                 status: 'ending_soon',
                 message: 'Verkauf endet am ' + formatDateShort(event.ticket_sale_end_datetime),
