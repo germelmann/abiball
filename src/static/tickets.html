@@ -523,11 +523,15 @@ function displayEvents() {
                 statusBadge = $('<span>').addClass('badge bg-danger').text('Verkauf beendet');
                 break;
             case 'ending_soon':
-                statusBadge = $('<span>').addClass('badge bg-warning text-dark').text('Verkauf endet bald');
+                statusBadge = $('<span>').addClass('badge bg-success').text('Tickets verfügbar, Verkauf endet bald');
                 orderButton = $('<button>')
                     .addClass('btn btn-primary')
-                    .text('Tickets bestellen')
                     .on('click', function() { openOrderModal(event.id); });
+                if (!event.payment_required) {
+                    orderButton.text('Anmelden (Zahlung vor Ort)');
+                } else {
+                    orderButton.text('Tickets bestellen');
+                }
                 countdownHtml = $('<div>')
                     .addClass('alert alert-warning mt-3')
                     .append($('<i>').addClass('bi bi-clock'))
