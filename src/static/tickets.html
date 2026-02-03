@@ -274,7 +274,7 @@ function updateCountdown(targetDate, elementId) {
     let countdownText = "";
     if (days > 0) countdownText += days + "d ";
     if (hours > 0) countdownText += hours + "h ";
-    if (minutes > 0) countdownText += minutes + "m ";
+    if (minutes > 0) countdownText += minutes + "min ";
     countdownText += seconds + "s";
     
     document.getElementById(elementId).innerHTML = countdownText;
