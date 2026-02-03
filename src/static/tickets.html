@@ -523,7 +523,7 @@ function displayEvents() {
                 statusBadge = $('<span>').addClass('badge bg-danger').text('Verkauf beendet');
                 break;
             case 'ending_soon':
-                statusBadge = $('<span>').addClass('badge bg-success').text('Tickets verfügbar, Verkauf endet bald');
+                statusBadge = $('<span>').addClass('badge bg-success').text('Tickets verfügbar');
                 orderButton = $('<button>')
                     .addClass('btn btn-primary')
                     .on('click', function() { openOrderModal(event.id); });
