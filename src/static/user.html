@@ -424,8 +424,18 @@ function loadUserDetails() {
             // Basic information
             $('#user_name').text(user.name || '-');
             $('#user_username').text(user.username || '-');
-            $('#user_email').text(user.email || '-');
-            $('#user_phone').text(user.phone || '-');
+            if (user.email) {
+                $('#user_email').html(`<a href="mailto:${user.email}">${user.email}</a>`);
+                $('#user_email_input').val(user.email);
+            } else {
+                $('#user_email').text('-');
+            }
+            if (user.phone) {
+                $('#user_phone').html(`<a href="tel:${user.phone}">${user.phone}</a>`);
+                $('#user_phone_input').val(user.phone);
+            } else {
+                $('#user_phone').text('-');
+            }
             
             // Email verification status
             const emailStatus = $('#user_email_status');
@@ -609,8 +619,8 @@ function enterEditMode() {
     
     // Populate edit fields with current values
     $('#user_name_input').val($('#user_name').text());
-    $('#user_email_input').val($('#user_email').text());
-    $('#user_phone_input').val($('#user_phone').text());
+    // $('#user_email_input').val($('#user_email').text());
+    // $('#user_phone_input').val($('#user_phone').text());
     
     // Scanner-only mode
     const scannerOnly = $('#user_scanner_only').text() === 'Ja';
