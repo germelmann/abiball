@@ -126,6 +126,15 @@ class Main < Sinatra::Base
             return
         end
         
+        # Check if user has bypass_restrictions enabled for this event
+        bypass_result = neo4j_query(<<~END_OF_QUERY, {email: user_email, event_id: event_id})
+            MATCH (u:User {email: $email})
+            MATCH (e:Event {id: $event_id})
+            OPTIONAL MATCH (u)-[r:HAS_EVENT_LIMIT]->(e)
+            RETURN COALESCE(r.bypass_restrictions, false) AS bypass_restrictions
+        END_OF_QUERY
+        user_bypass_restrictions = bypass_result.first&.dig('bypass_restrictions') || false
+        
         # Check if ticket sales are within the allowed time window
         current_time = Time.now
         if event[:ticket_sale_start_datetime] && !event[:ticket_sale_start_datetime].empty?
@@ -136,7 +145,7 @@ class Main < Sinatra::Base
             end
         end
 
-        if event[:ticket_sale_end_datetime] && !event[:ticket_sale_end_datetime].empty?
+        if event[:ticket_sale_end_datetime] && !event[:ticket_sale_end_datetime].empty? && !user_bypass_restrictions
             sale_end_time = Time.parse(event[:ticket_sale_end_datetime])
             if current_time > sale_end_time
                 respond(success: false, error: "Ticket-Verkauf ist bereits beendet. Verkaufsende war: #{sale_end_time.strftime('%d.%m.%Y um %H:%M Uhr')}")
@@ -179,7 +188,7 @@ class Main < Sinatra::Base
         END_OF_QUERY
         event_sold = event_sold_result.first&.dig('total') || 0
 
-        if event_sold + ticket_count > event[:max_tickets]
+        if event_sold + ticket_count > event[:max_tickets] && !user_bypass_restrictions
             respond(success: false, error: "Nicht genügend Tickets für dieses Event verfügbar.")
             return
         end
@@ -1108,10 +1117,12 @@ class Main < Sinatra::Base
             MATCH (e:Event {id: $event_id})
             OPTIONAL MATCH (u)-[r:HAS_EVENT_LIMIT]->(e)
             RETURN COALESCE(r.ticket_limit, e.max_tickets_per_user, $default_limit) AS limit, 
-                   COALESCE(r.ticket_price, e.ticket_price) AS price
+                   COALESCE(r.ticket_price, e.ticket_price) AS price,
+                   COALESCE(r.bypass_restrictions, false) AS bypass_restrictions
         END_OF_QUERY
         user_limit = user_limit_result.first&.dig('limit') || TICKETS_PER_USER
         ticket_price = user_limit_result.first&.dig('price')&.to_f || event['ticket_price'].to_f
+        bypass_restrictions = user_limit_result.first&.dig('bypass_restrictions') || false
         
         # Check if user is blocked (limit = 0)
         if user_limit == 0
@@ -1136,8 +1147,10 @@ class Main < Sinatra::Base
         current_tickets = user_orders.sum { |o| o['ticket_count'] }
         
         available_event = event['max_tickets'] - event_sold
+        # If user has bypass_restrictions, don't limit by event availability
+        effective_available_event = bypass_restrictions ? Float::INFINITY : available_event
         available_user = user_limit - current_tickets
-        max_order = [available_event, available_user].min
+        max_order = [effective_available_event, available_user].min.to_i
         
         respond(success: true, 
                 user_limit: user_limit, 
@@ -1148,7 +1161,8 @@ class Main < Sinatra::Base
                 max_tickets_event: event['max_tickets'],
                 event_sold: event_sold,
                 max_order: max_order > 0 ? max_order : 0,
-                payment_required: event['payment_required'] != false)
+                payment_required: event['payment_required'] != false,
+                bypass_restrictions: bypass_restrictions)
     end
 
     # Get current user's ticket orders

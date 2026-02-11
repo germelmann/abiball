@@ -175,8 +175,28 @@ class Main < Sinatra::Base
             # Event creators and admins can see all events
             events = get_filtered_events
         else
-            # Regular users and non-logged-in users only see public events
+            # Regular users only see public events
             events = get_filtered_events(:public_only)
+        end
+        
+        # Get user's bypass_restrictions for each event (user is guaranteed to be logged in by require_user!)
+        user_email = @session_user[:email]
+        bypass_settings = neo4j_query(<<~END_OF_QUERY, {email: user_email})
+            MATCH (u:User {email: $email})
+            MATCH (e:Event)
+            WHERE e.active = true
+            OPTIONAL MATCH (u)-[r:HAS_EVENT_LIMIT]->(e)
+            RETURN e.id AS event_id, COALESCE(r.bypass_restrictions, false) AS bypass_restrictions
+        END_OF_QUERY
+        
+        # Create a hash for quick lookup
+        bypass_map = bypass_settings.each_with_object({}) do |setting, hash|
+            hash[setting['event_id']] = setting['bypass_restrictions']
+        end
+        
+        # Add bypass_restrictions to each event
+        events.each do |event|
+            event['bypass_restrictions'] = bypass_map[event['id']] || false
         end
         
         respond(success: true, events: events)
@@ -512,7 +532,8 @@ class Main < Sinatra::Base
                    e.ticket_price AS default_price,
                    e.max_tickets_per_user AS default_limit,
                    r.ticket_price AS custom_price,
-                   r.ticket_limit AS custom_limit
+                   r.ticket_limit AS custom_limit,
+                   COALESCE(r.bypass_restrictions, false) AS bypass_restrictions
             ORDER BY e.name ASC
         END_OF_QUERY
         
@@ -524,14 +545,15 @@ class Main < Sinatra::Base
         require_user_with_permission!("edit_users")
         data = parse_request_data(
             required_keys: [:username, :event_id],
-            optional_keys: [:custom_price, :custom_limit],
-            types: {custom_price: Float, custom_limit: Integer}
+            optional_keys: [:custom_price, :custom_limit, :bypass_restrictions],
+            types: {custom_price: Float, custom_limit: Integer, bypass_restrictions: :boolean}
         )
         
         username = data[:username]
         event_id = data[:event_id]
         custom_price = data[:custom_price]
         custom_limit = data[:custom_limit]
+        bypass_restrictions = data[:bypass_restrictions] == true
         
         # Verify user and event exist
         user_exists = neo4j_query(<<~END_OF_QUERY, {username: username})
@@ -555,8 +577,8 @@ class Main < Sinatra::Base
             return
         end
         
-        # If both custom_price and custom_limit are nil, remove the relationship
-        if custom_price.nil? && custom_limit.nil?
+        # If all custom settings are nil/false, remove the relationship
+        if custom_price.nil? && custom_limit.nil? && !bypass_restrictions
             neo4j_query(<<~END_OF_QUERY, {username: username, event_id: event_id})
                 MATCH (u:User {username: $username})-[r:HAS_EVENT_LIMIT]->(e:Event {id: $event_id})
                 DELETE r
@@ -568,7 +590,8 @@ class Main < Sinatra::Base
                 username: username,
                 event_id: event_id,
                 custom_price: custom_price,
-                custom_limit: custom_limit
+                custom_limit: custom_limit,
+                bypass_restrictions: bypass_restrictions
             }
             
             neo4j_query(<<~END_OF_QUERY, params)
@@ -577,6 +600,7 @@ class Main < Sinatra::Base
                 MERGE (u)-[r:HAS_EVENT_LIMIT]->(e)
                 SET r.ticket_price = $custom_price,
                     r.ticket_limit = $custom_limit,
+                    r.bypass_restrictions = $bypass_restrictions,
                     r.updated_at = datetime()
             END_OF_QUERY
             

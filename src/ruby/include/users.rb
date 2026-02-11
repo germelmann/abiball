@@ -882,7 +882,8 @@ class Main < Sinatra::Base
         username = data[:username]
         name = data[:name]
         email = data[:email].downcase
-        address = data[:address] || ""
+        address_provided = data.key?(:address)
+        address = address_provided ? (data[:address] || "") : nil
         phone = data[:phone] || ""
         scanner_only = data[:scanner_only] == 1 ? true : false
         
@@ -915,14 +916,25 @@ class Main < Sinatra::Base
             log("Benutzer #{username} erstellt")
         else
             # Update existing user (permissions are NOT modified here)
-            neo4j_query(<<~END_OF_QUERY, {username: username, name: name, email: email, address: address, phone: phone, scanner_only: scanner_only})
-                MATCH (u:User {username: $username})
-                SET u.name = $name,
-                    u.email = $email,
-                    u.address = $address,
-                    u.phone = $phone,
-                    u.scanner_only = $scanner_only
-            END_OF_QUERY
+            # Only update address if it was explicitly provided
+            if address_provided
+                neo4j_query(<<~END_OF_QUERY, {username: username, name: name, email: email, address: address, phone: phone, scanner_only: scanner_only})
+                    MATCH (u:User {username: $username})
+                    SET u.name = $name,
+                        u.email = $email,
+                        u.address = $address,
+                        u.phone = $phone,
+                        u.scanner_only = $scanner_only
+                END_OF_QUERY
+            else
+                neo4j_query(<<~END_OF_QUERY, {username: username, name: name, email: email, phone: phone, scanner_only: scanner_only})
+                    MATCH (u:User {username: $username})
+                    SET u.name = $name,
+                        u.email = $email,
+                        u.phone = $phone,
+                        u.scanner_only = $scanner_only
+                END_OF_QUERY
+            end
             log("Benutzer #{username} aktualisiert")
         end
         

@@ -204,12 +204,13 @@
                                     <th>Individueller Preis</th>
                                     <th>Standard-Limit</th>
                                     <th>Individuelles Limit</th>
+                                    <th>Kauf immer erlaubt</th>
                                     <th>Aktionen</th>
                                 </tr>
                             </thead>
                             <tbody id='event_settings_tbody'>
                                 <tr>
-                                    <td colspan='6' class='text-center text-muted'><em>Lade Event-Einstellungen...</em></td>
+                                    <td colspan='7' class='text-center text-muted'><em>Lade Event-Einstellungen...</em></td>
                                 </tr>
                             </tbody>
                         </table>
@@ -375,6 +376,15 @@
                     <label for="edit_settings_custom_limit" class="form-label">Individuelles Limit</label>
                     <input type="number" class="form-control" id="edit_settings_custom_limit" min="0" placeholder="Leer lassen für Standard">
                     <div class="form-text">Bei 0 wird der Benutzer vom Ticketkauf ausgeschlossen. Leer lassen für Standard-Limit.</div>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="edit_settings_bypass_restrictions">
+                        <label class="form-check-label" for="edit_settings_bypass_restrictions">
+                            Kauf immer erlaubt
+                        </label>
+                    </div>
+                    <div class="form-text">Wenn aktiviert, kann dieser Benutzer auch nach Verkaufsende oder bei ausverkauftem Event Tickets kaufen.</div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -810,10 +820,10 @@ function loadEventSettings() {
         if (response.success) {
             displayEventSettings(response.settings);
         } else {
-            $('#event_settings_tbody').html('<tr><td colspan="6" class="text-center text-danger"><em>Fehler beim Laden: ' + (response.error || 'Unbekannter Fehler') + '</em></td></tr>');
+            $('#event_settings_tbody').html('<tr><td colspan="7" class="text-center text-danger"><em>Fehler beim Laden: ' + (response.error || 'Unbekannter Fehler') + '</em></td></tr>');
         }
     }, function() {
-        $('#event_settings_tbody').html('<tr><td colspan="6" class="text-center text-danger"><em>Netzwerkfehler beim Laden</em></td></tr>');
+        $('#event_settings_tbody').html('<tr><td colspan="7" class="text-center text-danger"><em>Netzwerkfehler beim Laden</em></td></tr>');
     });
 }
 
@@ -822,7 +832,7 @@ function displayEventSettings(settings) {
     tbody.empty();
     
     if (settings.length === 0) {
-        tbody.append('<tr><td colspan="6" class="text-center text-muted"><em>Keine Events gefunden</em></td></tr>');
+        tbody.append('<tr><td colspan="7" class="text-center text-muted"><em>Keine Events gefunden</em></td></tr>');
         return;
     }
     
@@ -863,6 +873,16 @@ function displayEventSettings(settings) {
             customLimitCell.html('<span class="text-muted">-</span>');
         }
         row.append(customLimitCell);
+        
+        // Bypass restrictions
+        const bypassRestrictions = setting.bypass_restrictions === true;
+        const bypassCell = $('<td>');
+        if (bypassRestrictions) {
+            bypassCell.html('<span class="badge bg-success"><i class="bi bi-check-circle"></i> Ja</span>');
+        } else {
+            bypassCell.html('<span class="text-muted">-</span>');
+        }
+        row.append(bypassCell);
         
         // Actions
         const actionsCell = $('<td>');
@@ -907,6 +927,9 @@ function openEditSettingsModal(setting) {
         $('#edit_settings_custom_limit').val('');
     }
     
+    // Set bypass restrictions checkbox
+    $('#edit_settings_bypass_restrictions').prop('checked', setting.bypass_restrictions === true);
+    
     // Show modal
     const modal = new bootstrap.Modal(document.getElementById('editEventSettingsModal'));
     modal.show();
@@ -916,10 +939,12 @@ $('#save_settings_btn').on('click', function() {
     const eventId = $('#edit_settings_event_id').val();
     const customPrice = $('#edit_settings_custom_price').val();
     const customLimit = $('#edit_settings_custom_limit').val();
+    const bypassRestrictions = $('#edit_settings_bypass_restrictions').is(':checked');
     
     const data = {
         username: currentUsername,
-        event_id: eventId
+        event_id: eventId,
+        bypass_restrictions: bypassRestrictions
     };
     
     // Only include values if they are set
@@ -931,9 +956,9 @@ $('#save_settings_btn').on('click', function() {
         data.custom_limit = parseInt(customLimit);
     }
     
-    // If both are empty, we're removing the settings
-    if (customPrice === '' && customLimit === '') {
-        showTemplateModal('Info', 'Beide Felder sind leer. Möchtest du die individuellen Einstellungen entfernen?', 'Ja, entfernen', 'btn-warning', 'Abbrechen', 'btn-secondary', function() {
+    // If all are empty/false, we're removing the settings
+    if (customPrice === '' && customLimit === '' && !bypassRestrictions) {
+        showTemplateModal('Info', 'Alle Felder sind leer. Möchtest du die individuellen Einstellungen entfernen?', 'Ja, entfernen', 'btn-warning', 'Abbrechen', 'btn-secondary', function() {
             removeEventSettings(eventId);
         });
         return;

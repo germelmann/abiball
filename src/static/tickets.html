@@ -285,6 +285,9 @@ function updateCountdown(targetDate, elementId) {
 function isTicketSalesOpen(event) {
     if (!event.ticket_generation_enabled) return false;
     
+    // If user has bypass_restrictions, skip time-based checks
+    if (event.bypass_restrictions) return true;
+    
     const now = new Date();
     
     // Check if sales have started
@@ -310,7 +313,7 @@ function getSalesStatus(event) {
     
     const now = new Date();
     
-    // Check if sales haven't started yet
+    // Check if sales haven't started yet (bypass doesn't apply to start time)
     if (event.ticket_sale_start_datetime) {
         const startDate = new Date(event.ticket_sale_start_datetime);
         if (now < startDate) {
@@ -322,13 +325,24 @@ function getSalesStatus(event) {
         }
     }
     
-    // Check if sales have ended
-    if (event.ticket_sale_end_datetime) {
+    // Check if sales have ended (skip if user has bypass_restrictions)
+    if (event.ticket_sale_end_datetime && !event.bypass_restrictions) {
         const endDate = new Date(event.ticket_sale_end_datetime);
         if (now > endDate) {
             return { 
                 status: 'ended', 
                 message: 'Verkauf endete am ' + formatDateShort(event.ticket_sale_end_datetime)
+            };
+        }
+    }
+    
+    // If user has bypass and sale has ended, show special status
+    if (event.ticket_sale_end_datetime && event.bypass_restrictions) {
+        const endDate = new Date(event.ticket_sale_end_datetime);
+        if (now > endDate) {
+            return { 
+                status: 'bypass_active', 
+                message: 'Sonderberechtigung aktiv'
             };
         }
     }
@@ -521,6 +535,22 @@ function displayEvents() {
                 break;
             case 'ended':
                 statusBadge = $('<span>').addClass('badge bg-danger').text('Verkauf beendet');
+                break;
+            case 'bypass_active':
+                statusBadge = $('<span>').addClass('badge bg-info').text('Sonderberechtigung');
+                orderButton = $('<button>')
+                    .addClass('btn btn-primary')
+                    .on('click', function() { openOrderModal(event.id); });
+                if (!event.payment_required) {
+                    orderButton.text('Anmelden (Zahlung vor Ort)');
+                } else {
+                    orderButton.text('Tickets bestellen');
+                }
+                countdownHtml = $('<div>')
+                    .addClass('alert alert-info mt-3')
+                    .append($('<i>').addClass('bi bi-shield-check'))
+                    .append(' <strong>Sonderberechtigung aktiv</strong><br>')
+                    .append($('<small>').text('Du kannst trotz Verkaufsende Tickets bestellen.'));
                 break;
             case 'ending_soon':
                 statusBadge = $('<span>').addClass('badge bg-success').text('Tickets verfügbar');
