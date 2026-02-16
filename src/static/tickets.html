@@ -438,7 +438,7 @@ function displayPreviousOrders(orders) {
                         <i class="bi bi-check-circle"></i>&nbsp;&nbsp;<strong>Zahlung eingegangen</strong>
                         <p class="mb-0">Deine Zahlung wurde verarbeitet.</p>
                     </div>`;
-            } else if (order.status === 'cancelled' || order.status === 'rejected') {
+            } else if (order.status === 'cancelled' || order.status === 'cancelled_by_user') {
                 paymentStatusHtml = `
                     <div class="alert alert-danger mt-3 mb-0">
                         <i class="bi bi-x-circle"></i>&nbsp;&nbsp;<strong>Storniert</strong>
@@ -587,7 +587,7 @@ function displayEvents() {
                     orderButton.text('Tickets bestellen');
                 }
                 countdownHtml = $('<div>')
-                    .addClass('alert alert-warning mt-3')
+                    .addClass('alert alert-primary mt-3')
                     .append($('<i>').addClass('bi bi-clock'))
                     .append(' <strong>Verkaufsende in:</strong><br>')
                     .append($('<span>').attr('id', `countdown_end_${event.id}`).addClass('h5'))
