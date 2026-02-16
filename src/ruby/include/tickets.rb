@@ -1249,7 +1249,9 @@ class Main < Sinatra::Base
             types: {
                 ticket_count: Integer,
                 participants: Array
-            }
+            },
+            max_body_length: 10 * 1024 * 1024,
+            max_string_length: 5 * 1024 * 1024,
         )
         
         order_id = data[:order_id]
