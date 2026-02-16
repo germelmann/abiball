@@ -438,6 +438,25 @@ function displayPreviousOrders(orders) {
                         <i class="bi bi-check-circle"></i>&nbsp;&nbsp;<strong>Zahlung eingegangen</strong>
                         <p class="mb-0">Deine Zahlung wurde verarbeitet.</p>
                     </div>`;
+            } else if (order.status === 'cancelled' || order.status === 'rejected') {
+                paymentStatusHtml = `
+                    <div class="alert alert-danger mt-3 mb-0">
+                        <i class="bi bi-x-circle"></i>&nbsp;&nbsp;<strong>Storniert</strong>
+                        <p class="mb-0">Deine Bestellung wurde storniert. Bitte <a href="#{get_support_mailto('order')}">kontaktiere den Support</a> für weitere Informationen.</p>
+                    </div>`;
+            } else if (order.status === 'in_review' || order.status === 'on_hold' || order.status === 'issue') {
+                paymentStatusHtml = `
+                    <div class="alert alert-warning mt-3 mb-0">
+                        <i class="bi bi-exclamation-triangle"></i>&nbsp;&nbsp;<strong>Manuelle Bearbeitung</strong>
+                        <p class="mb-0">Deine Bestellung wird derzeit überprüft. Du erhältst eine E-Mail, sobald eine Entscheidung getroffen wurde.</p>
+                        <p class="mb-0">Bei Fragen kannst du dich jederzeit an den Support wenden: <a href="#{get_support_mailto('order')}">#{SUPPORT_EMAIL}</a></p>
+                    </div>`;
+            } else if (order.status === 'contact_required') {
+                paymentStatusHtml = `
+                    <div class="alert alert-warning mt-3 mb-0">
+                        <i class="bi bi-exclamation-triangle"></i>&nbsp;&nbsp;<strong>Kontaktaufnahme erforderlich</strong>
+                        <p class="mb-0">Bitte kontaktiere den Support, um deine Bestellung abzuschließen: <a href="#{get_support_mailto('order')}">#{SUPPORT_EMAIL}</a></p>
+                    </div>`;
             } else {
                 paymentStatusHtml = `
                     <div class="alert alert-secondary mt-3 mb-0">
@@ -489,6 +508,11 @@ function displayPreviousOrders(orders) {
                                 );
                             })
                         )
+                    ) : '',
+                order.notes && order.notes.length > 0 ?
+                    $('<div>').addClass('alert alert-light mt-3 mb-0').append(
+                        $('<strong>').html('<i class="bi bi-sticky"></i>&nbsp;&nbsp;Anmerkung vom Abikomitee: '),
+                        order.notes
                     ) : '',
                 paymentStatusHtml
             )

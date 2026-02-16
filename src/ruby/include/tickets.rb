@@ -13,7 +13,11 @@ class Main < Sinatra::Base
             'pending_payment' => 'Zahlung ausstehend',
             'offline_payment' => 'Barzahlung',
             'cancelled' => 'Storniert',
-            'cancelled_by_user' => 'Storniert durch Käufer'
+            'cancelled_by_user' => 'Storniert durch Käufer',
+            'in_review' => 'Manuelle Prüfung',
+            'on_hold' => 'Pausiert',
+            'issue' => 'Problem/Fehler',
+            'contact_required' => 'Kontakt erforderlich'
         }
     end
     
@@ -314,12 +318,35 @@ class Main < Sinatra::Base
             tier_name = 'Standard'
         end
         
-        # Get next order count for this user
-        order_count = existing_orders.size + 1
+        # Get next order count for this user (across ALL events, to avoid duplicate payment references)
+        all_user_orders_result = neo4j_query(<<~END_OF_QUERY, {email: user_email})
+            MATCH (u:User {email: $email})-[:PLACED]->(o:TicketOrder)
+            RETURN COUNT(o) AS order_count
+        END_OF_QUERY
+        order_count = (all_user_orders_result.first&.dig('order_count') || 0) + 1
         
         # Generate order ID and payment reference
         order_id = RandomTag::generate(8)
         payment_ref = generate_payment_reference(@session_user[:username] || user_email.split('@').first, order_count)
+        
+        # Check for payment reference uniqueness (protect against race conditions)
+        # If the reference already exists, increment counter until we find a unique one
+        max_attempts = 100
+        attempts = 0
+        loop do
+            existing_ref = neo4j_query(<<~END_OF_QUERY, {payment_ref: payment_ref})
+                MATCH (o:TicketOrder {payment_reference: $payment_ref})
+                RETURN o.id AS id LIMIT 1
+            END_OF_QUERY
+            break if existing_ref.empty?
+            attempts += 1
+            if attempts >= max_attempts
+                respond(success: false, error: "Fehler bei der Bestellungserstellung. Bitte versuche es erneut.")
+                return
+            end
+            order_count += 1
+            payment_ref = generate_payment_reference(@session_user[:username] || user_email.split('@').first, order_count)
+        end
         
         # NOTE: Bank account is NOT assigned at order creation time.
         # Payment requests are now a separate step and can be sent manually or in bulk.
@@ -1058,6 +1085,8 @@ class Main < Sinatra::Base
                    o.created_at AS created_at,
                    COALESCE(o.paid_at, '') AS paid_at,
                    COALESCE(o.status, '') AS status,
+                   COALESCE(o.notes, '') AS notes,
+                   COALESCE(o.admin_notes, '') AS admin_notes,
                    e.id AS event_id,
                    COALESCE(e.name, '') AS event_name,
                    COALESCE(e.year, '') AS event_year,
@@ -1198,6 +1227,7 @@ class Main < Sinatra::Base
                    o.created_at AS created_at,
                    COALESCE(o.paid_at, '') AS paid_at,
                    COALESCE(o.status, '') AS status,
+                   COALESCE(o.notes, '') AS notes,
                    COALESCE(o.tier_name, t.name, 'Standard') AS tier_name,
                    e.id AS event_id,
                    e.name AS event_name,
@@ -1215,7 +1245,7 @@ class Main < Sinatra::Base
         require_user_with_permission!("manage_orders")
         data = parse_request_data(
             required_keys: [:order_id, :ticket_count, :total_price, :payment_reference, :status],
-            optional_keys: [:participants, :user_name, :user_email, :user_address, :user_phone],
+            optional_keys: [:participants, :user_name, :user_email, :user_address, :user_phone, :notes, :admin_notes],
             types: {
                 ticket_count: Integer,
                 participants: Array
@@ -1231,6 +1261,8 @@ class Main < Sinatra::Base
         status = data[:status]
         paid_at = data[:paid_at]
         participants = data[:participants] || []
+        notes = data[:notes] || ''
+        admin_notes = data[:admin_notes] || ''
         
         # Update order basic information
         update_params = {
@@ -1238,7 +1270,9 @@ class Main < Sinatra::Base
             ticket_count: ticket_count,
             total_price: total_price,
             payment_reference: payment_reference,
-            status: status
+            status: status,
+            notes: notes,
+            admin_notes: admin_notes
         }
 
         neo4j_query(<<~END_OF_QUERY, update_params)
@@ -1246,7 +1280,9 @@ class Main < Sinatra::Base
             SET o.ticket_count = $ticket_count,
                 o.total_price = $total_price,
                 o.payment_reference = $payment_reference,
-                o.status = $status
+                o.status = $status,
+                o.notes = $notes,
+                o.admin_notes = $admin_notes
             RETURN o
         END_OF_QUERY
 

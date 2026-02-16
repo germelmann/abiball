@@ -177,6 +177,40 @@ class SetupDatabase
                 delay += 1
             end
         end
+        
+        # Create Neo4j constraints for unique identifiers
+        create_constraints
+    end
+    
+    def create_constraints
+        constraints = [
+            # User constraints
+            { name: 'user_username_unique', query: 'CREATE CONSTRAINT user_username_unique IF NOT EXISTS FOR (u:User) REQUIRE u.username IS UNIQUE' },
+            { name: 'user_email_unique', query: 'CREATE CONSTRAINT user_email_unique IF NOT EXISTS FOR (u:User) REQUIRE u.email IS UNIQUE' },
+            # TicketOrder constraints
+            { name: 'ticket_order_id_unique', query: 'CREATE CONSTRAINT ticket_order_id_unique IF NOT EXISTS FOR (o:TicketOrder) REQUIRE o.id IS UNIQUE' },
+            { name: 'ticket_order_payment_reference_unique', query: 'CREATE CONSTRAINT ticket_order_payment_reference_unique IF NOT EXISTS FOR (o:TicketOrder) REQUIRE o.payment_reference IS UNIQUE' },
+            # Event constraints
+            { name: 'event_id_unique', query: 'CREATE CONSTRAINT event_id_unique IF NOT EXISTS FOR (e:Event) REQUIRE e.id IS UNIQUE' },
+            # Session constraints
+            { name: 'session_sid_unique', query: 'CREATE CONSTRAINT session_sid_unique IF NOT EXISTS FOR (s:Session) REQUIRE s.sid IS UNIQUE' },
+            # BankAccount constraints
+            { name: 'bank_account_id_unique', query: 'CREATE CONSTRAINT bank_account_id_unique IF NOT EXISTS FOR (b:BankAccount) REQUIRE b.id IS UNIQUE' },
+            # Permission constraints
+            { name: 'permission_name_unique', query: 'CREATE CONSTRAINT permission_name_unique IF NOT EXISTS FOR (p:Permission) REQUIRE p.name IS UNIQUE' },
+            # TicketTier constraints
+            { name: 'ticket_tier_id_unique', query: 'CREATE CONSTRAINT ticket_tier_id_unique IF NOT EXISTS FOR (t:TicketTier) REQUIRE t.id IS UNIQUE' }
+        ]
+        
+        constraints.each do |constraint|
+            begin
+                neo4j_query(constraint[:query])
+                debug "Created/verified constraint: #{constraint[:name]}"
+            rescue => e
+                # Constraint might already exist or might not be supported by Neo4j version
+                debug "Warning: Could not create constraint #{constraint[:name]}: #{e.message}"
+            end
+        end
     end
 end
 

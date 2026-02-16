@@ -353,6 +353,10 @@
                                 <option value="pending">Ausstehend</option>
                                 <option value="paid">Bezahlt</option>
                                 <option value="offline_payment">Barzahlung</option>
+                                <option value="in_review">Manuelle Prüfung</option>
+                                <option value="on_hold">Pausiert</option>
+                                <option value="issue">Problem/Fehler</option>
+                                <option value="contact_required">Kontakt erforderlich</option>
                                 <option value="cancelled">Storniert</option>
                                 <option value="cancelled_by_user">Storniert durch Käufer</option>
                             </select>
@@ -382,6 +386,21 @@
                                     </small>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                    <!-- Notes Section -->
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="notes_input" class="form-label">
+                                Notiz <small class="text-muted">(sichtbar für Kunde und Admin)</small>
+                            </label>
+                            <textarea class="form-control" id="notes_input" rows="2"></textarea>
+                        </div>
+                        <div class="col-md-6" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                            <label for="admin_notes_input" class="form-label">
+                                Admin-Notiz <small class="text-danger">(nur für Admins sichtbar)</small>
+                            </label>
+                            <textarea class="form-control" id="admin_notes_input" rows="2"></textarea>
                         </div>
                     </div>
                 </form>
@@ -456,9 +475,19 @@
                     row.append($('<td>').text(order.payment_reference || '-'));
                     
                     let statusClass, statusText;
-                    if (['paid', 'pending', 'pending_payment', 'offline_payment', 'cancelled', 'cancelled_by_user'].includes(order.status)) {
+                    if (['paid', 'pending', 'pending_payment', 'offline_payment', 'cancelled', 'cancelled_by_user', 'in_review', 'on_hold', 'issue', 'contact_required'].includes(order.status)) {
                         statusText = getOrderStatusText(order.status);
-                        statusClass = (order.status === 'paid' || order.status === 'offline_payment') ? 'text-success' : 'text-warning';
+                        if (order.status === 'paid' || order.status === 'offline_payment') {
+                            statusClass = 'text-success';
+                        } else if (order.status === 'cancelled' || order.status === 'cancelled_by_user' || order.status === 'issue') {
+                            statusClass = 'text-danger';
+                        } else if (order.status === 'contact_required' || order.status === 'in_review') {
+                            statusClass = 'text-info';
+                        } else if (order.status === 'on_hold') {
+                            statusClass = 'text-secondary';
+                        } else {
+                            statusClass = 'text-warning';
+                        }
                     } else if (order.status === 'error') {
                         statusClass = 'text-danger';
                         statusText = 'Fehler';
@@ -636,6 +665,8 @@
             total_price: $('#total_price_input').val(),
             payment_reference: $('#payment_reference_input').val(),
             status: $('#status_input').val(),
+            notes: $('#notes_input').val(),
+            admin_notes: $('#admin_notes_input').val(),
             paid_at: $('#paid_at_input').val() || null,
             // Include user information for updating
             user_name: $('#user_name_input').val(),

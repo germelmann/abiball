@@ -123,7 +123,11 @@ function getOrderStatusText(status) {
         'pending_payment': 'Zahlung ausstehend',
         'offline_payment': 'Barzahlung',
         'cancelled': 'Storniert',
-        'cancelled_by_user': 'Storniert durch Käufer'
+        'cancelled_by_user': 'Storniert durch Käufer',
+        'in_review': 'Manuelle Prüfung',
+        'on_hold': 'Pausiert',
+        'issue': 'Problem/Fehler',
+        'contact_required': 'Kontakt erforderlich'
     };
     return statusMap[status] || status;
 }
@@ -135,7 +139,11 @@ function getOrderStatusBadgeClass(status) {
         'pending_payment': 'bg-info',
         'offline_payment': 'bg-info',
         'cancelled': 'bg-danger',
-        'cancelled_by_user': 'bg-danger'
+        'cancelled_by_user': 'bg-danger',
+        'in_review': 'bg-primary',
+        'on_hold': 'bg-secondary',
+        'issue': 'bg-danger',
+        'contact_required': 'bg-warning'
     };
     return classMap[status] || 'bg-secondary';
 }
