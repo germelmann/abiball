@@ -3161,4 +3161,87 @@ class Main < Sinatra::Base
             last_updated: DateTime.now.to_s
         )
     end
+
+    # All participants endpoint for participants management page
+    post "/api/all_participants" do
+        require_user_with_permission!("view_users")
+        data = parse_request_data(optional_keys: [:event_id])
+
+        event_id = data[:event_id]
+
+        # Build optional event filter
+        event_filter = (event_id && !event_id.to_s.empty?) ? "WHERE e.id = $event_id" : ""
+        query_params = (event_id && !event_id.to_s.empty?) ? { event_id: event_id } : {}
+
+        # Fetch all participants with related order and event info (no N+1)
+        rows = neo4j_query(<<~END_OF_QUERY, query_params)
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event)
+            #{event_filter}
+            MATCH (o)-[:INCLUDES]->(p:Participant)
+            WHERE p.name IS NOT NULL AND p.name <> ''
+            RETURN
+                p.name          AS name,
+                p.birthdate     AS birthdate,
+                p.ticket_number AS ticket_number,
+                o.id            AS order_id,
+                o.payment_reference AS payment_reference,
+                COALESCE(o.status, '') AS order_status,
+                COALESCE(o.tier_name, '') AS tier_name,
+                e.id            AS event_id,
+                COALESCE(e.name, '') AS event_name
+            ORDER BY p.name
+        END_OF_QUERY
+
+        # Reference date for age calculation (today)
+        reference_date = Date.today.to_s
+
+        participants = rows.map do |row|
+            birthdate = row['birthdate']
+            age = begin
+                birthdate ? calculate_age(birthdate, reference_date) : nil
+            rescue ArgumentError
+                nil
+            end
+            age_status = get_age_status(birthdate, reference_date)
+            {
+                name:             row['name'],
+                birthdate:        birthdate,
+                age:              age,
+                age_category:     age_status ? age_status[:category] : nil,
+                age_color:        age_status ? age_status[:color]    : nil,
+                ticket_number:    row['ticket_number'],
+                tier_name:        row['tier_name'],
+                order_id:         row['order_id'],
+                payment_reference: row['payment_reference'],
+                order_status:     row['order_status'],
+                event_id:         row['event_id'],
+                event_name:       row['event_name']
+            }
+        end
+
+        # Compute statistics
+        ages_with_value = participants.map { |p| p[:age] }.compact
+        total_participants = participants.size
+        avg_age = ages_with_value.empty? ? nil : (ages_with_value.sum.to_f / ages_with_value.size).round(1)
+
+        age_group_counts = {
+            "<14" => 0,
+            "<16" => 0,
+            "<18" => 0,
+            "18+"  => 0,
+            "unbekannt" => 0
+        }
+        participants.each do |p|
+            key = p[:age_category] || "unbekannt"
+            age_group_counts[key] = (age_group_counts[key] || 0) + 1
+        end
+
+        statistics = {
+            total_participants: total_participants,
+            avg_age: avg_age,
+            age_group_counts: age_group_counts
+        }
+
+        respond(success: true, participants: participants, statistics: statistics)
+    end
 end

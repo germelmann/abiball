@@ -116,7 +116,11 @@ class Main < Sinatra::Base
             end
             
             if user_has_permission?("view_users")
-                admin_items << {label: 'Ticket-Bestellungen', icon: 'bi-ticket-detailed', url: '/order_management'}
+                admin_items << {label: 'Bestellungsmanagement', icon: 'bi-list-check', url: '/order_management'}
+            end
+
+            if user_has_permission?("view_users")
+                admin_items << {label: 'Teilnehmerverwaltung', icon: 'bi-people', url: '/participants_management'}
             end
             
             if user_has_permission?("manage_orders")

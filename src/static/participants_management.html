@@ -1,0 +1,366 @@
+#{site_for_user_with_permission!("view_users")}
+<div class='container'>
+    <h1>Teilnehmerverwaltung</h1>
+
+    <!-- Quick Navigation -->
+    <div class="mb-3">
+        <a href="/order_management" class="btn btn-outline-info btn-sm">
+            <i class="bi bi-list-check"></i> Bestellungsmanagement
+        </a>
+    </div>
+
+    <!-- Event Filter Dropdown -->
+    <div class='row mb-3'>
+        <div class='col-md-6'>
+            <label for="event_filter_select" class="form-label"><i class="bi bi-calendar-event"></i> Event-Filter:</label>
+            <select class="form-select" id="event_filter_select">
+                <option value="">Alle Events</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Statistics Dashboard -->
+    <div class='row mb-4'>
+        <div class='col-md-12'>
+            <h3><i class="bi bi-bar-chart"></i> Statistiken</h3>
+            <div class="row" id="statistics_cards">
+                <!-- Total participants -->
+                <div class="col-md-3">
+                    <div class="card bg-primary text-white statistics-card">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title" id="stat_total">-</h4>
+                                    <p class="card-text">Teilnehmer gesamt</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="bi bi-people" style="font-size: 2rem;"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Average age -->
+                <div class="col-md-3">
+                    <div class="card bg-info text-white statistics-card">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title" id="stat_avg_age">-</h4>
+                                    <p class="card-text">Ø Alter</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="bi bi-calendar3" style="font-size: 2rem;"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Under 18 -->
+                <div class="col-md-3">
+                    <div class="card bg-warning text-white statistics-card">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title" id="stat_under18">-</h4>
+                                    <p class="card-text">unter 18</p>
+                                    <small class="opacity-75" id="stat_under18_detail"></small>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- 18+ -->
+                <div class="col-md-3">
+                    <div class="card bg-success text-white statistics-card">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title" id="stat_18plus">-</h4>
+                                    <p class="card-text">18+</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="bi bi-check-circle" style="font-size: 2rem;"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Age group breakdown -->
+            <div class="row mt-3">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title"><i class="bi bi-bar-chart-steps"></i> Altersgruppen</h6>
+                            <div class="row text-center" id="age_group_breakdown">
+                                <div class="col-3">
+                                    <span class="badge bg-danger fs-6" id="group_u14">-</span>
+                                    <div class="small text-muted mt-1">&lt;14</div>
+                                </div>
+                                <div class="col-3">
+                                    <span class="badge bg-warning text-dark fs-6" id="group_u16">-</span>
+                                    <div class="small text-muted mt-1">&lt;16</div>
+                                </div>
+                                <div class="col-3">
+                                    <span class="badge bg-info text-dark fs-6" id="group_u18">-</span>
+                                    <div class="small text-muted mt-1">&lt;18</div>
+                                </div>
+                                <div class="col-3">
+                                    <span class="badge bg-success fs-6" id="group_18plus">-</span>
+                                    <div class="small text-muted mt-1">18+</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title"><i class="bi bi-question-circle"></i> Unbekanntes Alter</h6>
+                            <div>
+                                <strong id="group_unknown">-</strong> ohne Geburtsdatum
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6 class="card-title">Aktionen</h6>
+                            <button class="btn btn-secondary btn-sm" onclick="refresh()" title="Aktualisieren">
+                                <i class="bi bi-arrow-clockwise"></i> Aktualisieren
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Participants Table -->
+    <div class='row'>
+        <div class='col-md-12'>
+            <h3><i class="bi bi-people"></i> Teilnehmer</h3>
+
+            <div class="table-responsive">
+                <table class='table table-striped table-hover table-sm' style="table-layout: fixed; min-width: 900px;">
+                    <colgroup>
+                        <col style="width: 20%;"><!-- Name -->
+                        <col style="width: 6%;"><!-- Alter -->
+                        <col style="width: 8%;"><!-- Alterskategorie -->
+                        <!-- <col style="width: 18%;">Veranstaltung -->
+                        <col style="width: 13%;"><!-- Bestellnummer -->
+                        <col style="width: 10%;"><!-- Bestellstatus -->
+                        <col style="width: 10%;"><!-- Tickettyp -->
+                        <!-- <col style="width: 15%;">Ticketnr. / Aktion -->
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th class="text-nowrap text-truncate">Name</th>
+                            <th class="text-nowrap">Alter</th>
+                            <th class="text-nowrap">Kategorie</th>
+                            <!-- <th class="text-nowrap text-truncate">Veranstaltung</th> -->
+                            <th class="text-nowrap text-truncate">Bestellnummer</th>
+                            <th class="text-nowrap">Status</th>
+                            <th class="text-nowrap text-truncate">Tickettyp</th>
+                            <!-- <th class="text-nowrap">Ticket#</th> -->
+                        </tr>
+                    </thead>
+                    <tbody id='participants_list'>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Map order status values to human-readable text (consistent with order_management.html)
+    function getOrderStatusText(status) {
+        const statusMap = {
+            'pending': 'Ausstehend',
+            'paid': 'Bezahlt',
+            'offline_payment': 'Barzahlung',
+            'in_review': 'In Prüfung',
+            'on_hold': 'Pausiert',
+            'issue': 'Problem',
+            'contact_required': 'Kontakt nötig',
+            'cancelled': 'Storniert',
+            'cancelled_by_user': 'Storniert (Käufer)'
+        };
+        return statusMap[status] || status || 'Ausstehend';
+    }
+
+    // Return Bootstrap color class for order status
+    function getOrderStatusClass(status) {
+        if (status === 'paid' || status === 'offline_payment') return 'text-success';
+        if (status === 'cancelled' || status === 'cancelled_by_user' || status === 'issue') return 'text-danger';
+        if (status === 'contact_required' || status === 'in_review') return 'text-info';
+        if (status === 'on_hold') return 'text-secondary';
+        return 'text-warning';
+    }
+
+    // Return Bootstrap badge class matching ticket_scanner.html age color logic
+    function getAgeBadgeClass(color) {
+        switch (color) {
+            case 'danger':  return 'bg-danger';
+            case 'warning': return 'bg-warning text-dark';
+            case 'info':    return 'bg-info text-dark';
+            case 'success': return 'bg-success';
+            default:        return 'bg-secondary';
+        }
+    }
+
+    function refresh() {
+        let eventId = $('#event_filter_select').val();
+        let params = {};
+        if (eventId) {
+            params.event_id = eventId;
+        }
+
+        api_call('/api/all_participants', params, function(data) {
+            if (!data.success) {
+                showTemplateModal('Fehler', 'Fehler beim Laden: ' + (data.error || 'Unbekannter Fehler'), 'OK', 'btn-primary', null, null, function() {});
+                return;
+            }
+
+            // Update statistics
+            const s = data.statistics;
+            $('#stat_total').text(s.total_participants || 0);
+            $('#stat_avg_age').text(s.avg_age != null ? s.avg_age : '-');
+
+            const groups = s.age_group_counts || {};
+            const under18 = (groups['<14'] || 0) + (groups['<16'] || 0) + (groups['<18'] || 0);
+            $('#stat_under18').text(under18);
+            $('#stat_under18_detail').text(
+                '<14: ' + (groups['<14'] || 0) + '  <16: ' + (groups['<16'] || 0) + '  <18: ' + (groups['<18'] || 0)
+            );
+            $('#stat_18plus').text(groups['18+'] || 0);
+            $('#group_u14').text(groups['<14'] || 0);
+            $('#group_u16').text(groups['<16'] || 0);
+            $('#group_u18').text(groups['<18'] || 0);
+            $('#group_18plus').text(groups['18+'] || 0);
+            $('#group_unknown').text(groups['unbekannt'] || 0);
+
+            // Populate table
+            $('#participants_list').empty();
+            for (let p of data.participants) {
+                let row = $('<tr>');
+                row.css('cursor', 'pointer').on('click', function() {
+                    // Navigate to order detail page in a new tab
+                    window.open('/order_detail/' + encodeURIComponent(p.order_id), '_blank');
+                });
+
+                // Name column
+                row.append($('<td class="text-truncate">').text(p.name || '-').attr('title', p.name || '-'));
+
+                // Age column with color badge
+                if (p.age != null) {
+                    let badgeClass = getAgeBadgeClass(p.age_color);
+                    row.append($('<td>').html('<span class="badge ' + badgeClass + '">' + p.age + '</span>'));
+                } else {
+                    row.append($('<td>').html('<span class="badge bg-secondary">?</span>'));
+                }
+
+                // Age category
+                if (p.age_category) {
+                    let badgeClass = getAgeBadgeClass(p.age_color);
+                    row.append($('<td>').html('<span class="badge ' + badgeClass + '">' + p.age_category + '</span>'));
+                } else {
+                    row.append($('<td>').html('<span class="badge bg-secondary">unbekannt</span>'));
+                }
+
+                // Payment reference (order number)
+                row.append($('<td class="text-truncate">').text(p.payment_reference || p.order_id || '-').attr('title', p.payment_reference || p.order_id || '-'));
+
+                // Order status
+                let statusClass = getOrderStatusClass(p.order_status);
+                let statusText  = getOrderStatusText(p.order_status);
+                row.append($('<td>').html('<span class="' + statusClass + '"><strong>' + statusText + '</strong></span>'));
+
+                // Ticket type (tier)
+                row.append($('<td class="text-truncate">').text(p.tier_name || 'Standard').attr('title', p.tier_name || 'Standard'));
+
+                // Ticket number with link to order detail
+
+                $('#participants_list').append(row);
+            }
+
+            if (data.participants.length === 0) {
+                $('#participants_list').append(
+                    '<tr><td colspan="8" class="text-center text-muted">Keine Teilnehmer gefunden</td></tr>'
+                );
+            }
+        });
+    }
+
+    $(document).ready(function() {
+        // Load events for filter dropdown
+        api_call('/api/get_events', {}, function(data) {
+            if (data.success && data.events) {
+                data.events.forEach(function(event) {
+                    $('#event_filter_select').append(
+                        $('<option>').val(event.id).text(event.name || event.id)
+                    );
+                });
+            }
+            // Check for event_id in URL query string
+            const urlParams = new URLSearchParams(window.location.search);
+            const eventIdParam = urlParams.get('event_id');
+            if (eventIdParam) {
+                $('#event_filter_select').val(eventIdParam);
+            }
+            // Initial load
+            refresh();
+        });
+
+        // Reload on filter change
+        $('#event_filter_select').on('change', function() {
+            refresh();
+        });
+    });
+</script>
+
+<style>
+    .card {
+        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+        border: 1px solid rgba(0, 0, 0, 0.125);
+    }
+
+    .card-body h4 {
+        font-size: 1.5rem;
+        font-weight: bold;
+        margin-bottom: 0.25rem;
+    }
+
+    .table th {
+        border-top: none;
+        font-weight: 600;
+    }
+
+    /* Prevent long content from breaking table layout */
+    .table td.text-truncate {
+        max-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .btn-sm {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+    }
+
+    .statistics-card {
+        transition: transform 0.2s;
+    }
+
+    .statistics-card:hover {
+        transform: translateY(-2px);
+    }
+</style>

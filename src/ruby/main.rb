@@ -536,10 +536,11 @@ class Main < Sinatra::Base
                     <p class='mt-2 text-muted'>Bestelle deine Tickets für den Abiball 2026</p>
                 </div>
                 #{user_has_permission?("view_users") || user_has_permission?("admin") ? 
-                "<div class='col-md-4'>
+                "<div class='col-md-8'>
                     <h2>Administration</h2>
                     <a class='#{user_has_permission?("view_users") ? '' : 'disabled'} btn btn-primary' href='users'><i class='bi bi-people'></i>&nbsp;&nbsp;Benutzer verwalten</a>
                     <a class='#{user_has_permission?("view_users") ? '' : 'disabled'} btn btn-info' href='order_management'><i class='bi bi-list-check'></i>&nbsp;&nbsp;Bestellungsmanagement</a>
+                    <a class='#{user_has_permission?("view_users") ? '' : 'disabled'} btn btn-success' href='participants_management'><i class='bi bi-people'></i>&nbsp;&nbsp;Teilnehmer</a>
                     <a class='#{user_has_permission?("admin") ? '' : 'disabled'} btn btn-danger' href='admin'><i class='bi bi-gear'></i>&nbsp;&nbsp;Administration</a>
                 </div>" : ""}
             </div>
