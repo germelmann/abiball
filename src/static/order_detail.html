@@ -363,7 +363,7 @@ function enableEditMode() {
     // Enable all editable fields
     $('#ticket_count_input, #total_price_input, #payment_reference_input, #status_input').prop('disabled', false);
     $('#notes_input, #admin_notes_input').prop('disabled', false);
-    $('.participant-name, .participant-email, .participant-phone').prop('disabled', false);
+    $('.participant-name, .participant-email, .participant-phone, .participant-birthdate').prop('disabled', false);
     
     // Show add/remove participant buttons
     $('#add_participant_btn').show();
@@ -383,7 +383,7 @@ function cancelEditMode() {
     // Disable all editable fields
     $('#ticket_count_input, #total_price_input, #payment_reference_input, #status_input').prop('disabled', true);
     $('#notes_input, #admin_notes_input').prop('disabled', true);
-    $('.participant-name, .participant-email, .participant-phone').prop('disabled', true);
+    $('.participant-name, .participant-email, .participant-phone, .participant-birthdate').prop('disabled', true);
     
     // Hide add/remove participant buttons
     $('#add_participant_btn').hide();
@@ -408,13 +408,17 @@ function addNewParticipant() {
                         <label class="form-label">Ticket #${newIndex + 1} - Name</label>
                         <input type="text" class="form-control participant-name" data-index="${newIndex}" value="" placeholder="Name des Teilnehmers">
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <label class="form-label">E-Mail</label>
                         <input type="email" class="form-control participant-email" data-index="${newIndex}" value="" placeholder="E-Mail (optional)">
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <label class="form-label">Telefon</label>
                         <input type="tel" class="form-control participant-phone" data-index="${newIndex}" value="" placeholder="Telefon (optional)">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Geburtsdatum</label>
+                        <input type="date" class="form-control participant-birthdate" data-index="${newIndex}" value="">
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">&nbsp;</label>
@@ -443,6 +447,7 @@ function renumberParticipants() {
         $(this).find('.participant-name').attr('data-index', newIndex);
         $(this).find('.participant-email').attr('data-index', newIndex);
         $(this).find('.participant-phone').attr('data-index', newIndex);
+        $(this).find('.participant-birthdate').attr('data-index', newIndex);
         $(this).find('.remove-participant-btn').attr('data-index', newIndex);
         $(this).find('label:first').text(`Ticket #${newIndex + 1} - Name`);
     });
@@ -617,13 +622,17 @@ function renderParticipants(participants) {
                             <label class="form-label">E-Mail</label>
                             <input type="email" class="form-control participant-email" data-index="${i}" value="${escapeHtml(participant.email || '')}" placeholder="E-Mail (optional)" disabled>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <label class="form-label">Telefon</label>
                             <input type="tel" class="form-control participant-phone" data-index="${i}" value="${escapeHtml(participant.phone || '')}" placeholder="Telefon (optional)" disabled>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
+                            <label class="form-label">Geburtsdatum</label>
+                            <input type="date" class="form-control participant-birthdate" data-index="${i}" value="${escapeHtml(participant.birthdate || '')}" disabled>
+                        </div>
+                        <div class="col-md-2">
                             <label class="form-label">&nbsp;</label>
-                            <button type="button" class="btn btn-sm btn-outline-danger w-100 remove-participant-btn" data-index="${i}" style="display: none;">
+                            <button type="button" class="btn btn-outline-danger w-100 remove-participant-btn" data-index="${i}" style="display: none;">
                                 <i class="bi bi-trash"></i> Entfernen
                             </button>
                         </div>
@@ -666,7 +675,8 @@ function saveOrderChanges() {
         participants.push({
             name: $(`.participant-name[data-index="${i}"]`).val(),
             email: $(`.participant-email[data-index="${i}"]`).val(),
-            phone: $(`.participant-phone[data-index="${i}"]`).val()
+            phone: $(`.participant-phone[data-index="${i}"]`).val(),
+            birthdate: $(`.participant-birthdate[data-index="${i}"]`).val()
         });
     });
     
