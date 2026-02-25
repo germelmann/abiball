@@ -3188,15 +3188,20 @@ class Main < Sinatra::Base
                 COALESCE(o.status, '') AS order_status,
                 COALESCE(o.tier_name, '') AS tier_name,
                 e.id            AS event_id,
-                COALESCE(e.name, '') AS event_name
+                COALESCE(e.name, '') AS event_name,
+                e.start_datetime AS event_start_datetime
             ORDER BY p.name
         END_OF_QUERY
 
-        # Reference date for age calculation (today)
-        reference_date = Date.today.to_s
-
         participants = rows.map do |row|
             birthdate = row['birthdate']
+            # Use event start date as reference (like ticket generation), fall back to today
+            reference_date = begin
+                event_start = row['event_start_datetime']
+                (event_start && !event_start.empty?) ? DateTime.parse(event_start).to_date : Date.today
+            rescue ArgumentError
+                Date.today
+            end
             age = begin
                 birthdate ? calculate_age(birthdate, reference_date) : nil
             rescue ArgumentError
