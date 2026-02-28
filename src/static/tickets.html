@@ -351,8 +351,8 @@ function getSalesStatus(event) {
     if (event.ticket_sale_end_datetime) {
         const endDate = new Date(event.ticket_sale_end_datetime);
         const timeUntilEnd = endDate.getTime() - now.getTime();
-        // if (timeUntilEnd <= 24 * 60 * 60 * 1000) { // Less than 24 hours
-        if (timeUntilEnd <= 30 * 24 * 60 * 60 * 1000) { // Less than 30 days
+        if (timeUntilEnd <= 24 * 60 * 60 * 1000) { // Less than 24 hours
+        // if (timeUntilEnd <= 30 * 24 * 60 * 60 * 1000) { // Less than 30 days
             return {
                 status: 'ending_soon',
                 message: 'Verkauf endet am ' + formatDateShort(event.ticket_sale_end_datetime),
@@ -577,7 +577,7 @@ function displayEvents() {
                     .append($('<small>').text('Du kannst trotz Verkaufsende Tickets bestellen.'));
                 break;
             case 'ending_soon':
-                statusBadge = $('<span>').addClass('badge bg-success').text('Tickets verfügbar');
+                statusBadge = $('<span>').addClass('badge bg-warning text-dark').text('Verkauf endet bald');
                 orderButton = $('<button>')
                     .addClass('btn btn-primary')
                     .on('click', function() { openOrderModal(event.id); });
@@ -587,7 +587,7 @@ function displayEvents() {
                     orderButton.text('Tickets bestellen');
                 }
                 countdownHtml = $('<div>')
-                    .addClass('alert alert-primary mt-3')
+                    .addClass('alert alert-warning mt-3')
                     .append($('<i>').addClass('bi bi-clock'))
                     .append(' <strong>Verkaufsende in:</strong><br>')
                     .append($('<span>').attr('id', `countdown_end_${event.id}`).addClass('h5'))
