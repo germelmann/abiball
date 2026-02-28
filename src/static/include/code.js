@@ -135,7 +135,7 @@ function getOrderStatusText(status) {
 function getOrderStatusBadgeClass(status) {
     const classMap = {
         'paid': 'bg-success',
-        'pending': 'bg-warning',
+        'pending': 'bg-warning text-dark',
         'pending_payment': 'bg-info',
         'offline_payment': 'bg-info',
         'cancelled': 'bg-danger',
@@ -143,7 +143,7 @@ function getOrderStatusBadgeClass(status) {
         'in_review': 'bg-primary',
         'on_hold': 'bg-secondary',
         'issue': 'bg-danger',
-        'contact_required': 'bg-warning'
+        'contact_required': 'bg-warning text-dark'
     };
     return classMap[status] || 'bg-secondary';
 }
