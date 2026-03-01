@@ -371,7 +371,7 @@
                             <select class="form-control" id="status_input">
                                 <option value="pending">Ausstehend</option>
                                 <option value="paid">Bezahlt</option>
-                                <option value="offline_payment">Barzahlung</option>
+                                <option value="offline_payment">Barzahlung vor Ort</option>
                                 <option value="in_review">Manuelle Prüfung</option>
                                 <option value="on_hold">Pausiert</option>
                                 <option value="issue">Problem/Fehler</option>
@@ -492,29 +492,9 @@
                     row.append($('<td>').text(formatPrice(order.individual_ticket_price)));
                     row.append($('<td>').text(formatPrice(order.total_price)));
                     row.append($('<td class="text-truncate">').text(order.payment_reference || '-').attr('title', order.payment_reference || '-'));
-                    
-                    let statusClass, statusText;
-                    if (['paid', 'pending', 'pending_payment', 'offline_payment', 'cancelled', 'cancelled_by_user', 'in_review', 'on_hold', 'issue', 'contact_required'].includes(order.status)) {
-                        statusText = getOrderStatusText(order.status);
-                        if (order.status === 'paid' || order.status === 'offline_payment') {
-                            statusClass = 'text-success';
-                        } else if (order.status === 'cancelled' || order.status === 'cancelled_by_user' || order.status === 'issue') {
-                            statusClass = 'text-danger';
-                        } else if (order.status === 'contact_required' || order.status === 'in_review') {
-                            statusClass = 'text-info';
-                        } else if (order.status === 'on_hold') {
-                            statusClass = 'text-secondary';
-                        } else {
-                            statusClass = 'text-warning';
-                        }
-                    } else if (order.status === 'error') {
-                        statusClass = 'text-danger';
-                        statusText = 'Fehler';
-                    } else {
-                        statusClass = 'text-warning';
-                        statusText = 'Ausstehend';
-                    }
-                    row.append($('<td>').html(`<span class="${statusClass}"><strong>${statusText}</strong></span>`));
+                    let statusClass = getOrderStatusBadgeClass(order.status);
+                    let statusText = getOrderStatusText(order.status);
+                    row.append($('<td>').html(`<span class="badge ${statusClass}">${statusText}</span>`));
                     
                     // Payment request status column
                     row.append($('<td>').html(getPaymentRequestStatusBadge(order.latest_payment_request)));

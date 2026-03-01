@@ -180,31 +180,6 @@
 </div>
 
 <script>
-    // Map order status values to human-readable text (consistent with order_management.html)
-    function getOrderStatusText(status) {
-        const statusMap = {
-            'pending': 'Ausstehend',
-            'paid': 'Bezahlt',
-            'offline_payment': 'Barzahlung',
-            'in_review': 'In Prüfung',
-            'on_hold': 'Pausiert',
-            'issue': 'Problem',
-            'contact_required': 'Kontakt nötig',
-            'cancelled': 'Storniert',
-            'cancelled_by_user': 'Storniert (Käufer)'
-        };
-        return statusMap[status] || status || 'Ausstehend';
-    }
-
-    // Return Bootstrap color class for order status
-    function getOrderStatusClass(status) {
-        if (status === 'paid' || status === 'offline_payment') return 'text-success';
-        if (status === 'cancelled' || status === 'cancelled_by_user' || status === 'issue') return 'text-danger';
-        if (status === 'contact_required' || status === 'in_review') return 'text-info';
-        if (status === 'on_hold') return 'text-secondary';
-        return 'text-warning';
-    }
-
     // Return Bootstrap badge class matching ticket_scanner.html age color logic
     function getAgeBadgeClass(color) {
         switch (color) {
@@ -279,9 +254,9 @@
                 row.append($('<td class="text-truncate">').text(p.payment_reference || p.order_id || '-').attr('title', p.payment_reference || p.order_id || '-'));
 
                 // Order status
-                let statusClass = getOrderStatusClass(p.order_status);
+                let statusClass = getOrderStatusBadgeClass(p.order_status);
                 let statusText  = getOrderStatusText(p.order_status);
-                row.append($('<td>').html('<span class="' + statusClass + '"><strong>' + statusText + '</strong></span>'));
+                row.append($('<td>').html('<span class="badge ' + statusClass + '">' + statusText + '</span>'));
 
                 // Ticket type (tier)
                 row.append($('<td class="text-truncate">').text(p.tier_name || 'Standard').attr('title', p.tier_name || 'Standard'));

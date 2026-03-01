@@ -11,7 +11,7 @@ class Main < Sinatra::Base
             'paid' => 'Bezahlt',
             'pending' => 'Ausstehend',
             'pending_payment' => 'Zahlung ausstehend',
-            'offline_payment' => 'Barzahlung',
+            'offline_payment' => 'Barzahlung vor Ort',
             'cancelled' => 'Storniert',
             'cancelled_by_user' => 'Storniert durch Käufer',
             'in_review' => 'Manuelle Prüfung',

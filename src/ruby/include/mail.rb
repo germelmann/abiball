@@ -15,7 +15,7 @@ class Main < Sinatra::Base
                 <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>
             BODY
             category: 'order',
-            label: 'Bestellung angenommen (Barzahlung)'
+            label: 'Bestellung angenommen (Barzahlung vor Ort)'
         },
         'payment_received' => {
             key: 'payment_received',
