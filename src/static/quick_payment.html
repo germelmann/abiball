@@ -8,25 +8,44 @@
                     <h5 class='card-title mb-0'>Zahlung bearbeiten</h5>
                 </div>
                 <div class='card-body'>
-                    <div class='mb-3'>
-                        <label for="payment_reference_input" class="form-label">Verwendungszweck</label>
-                        <div class="input-group">
-                            <input type="text" class="form-control" id="payment_reference_input" 
-                                   placeholder="Verwendungszweck eingeben..." 
+                    <!-- Step 1: Reference + Amount -->
+                    <div class='row mb-3'>
+                        <div class='col-md-6'>
+                            <label for="payment_reference_input" class="form-label">Verwendungszweck</label>
+                            <input type="text" class="form-control form-control-lg" id="payment_reference_input" 
+                                   placeholder="Verwendungszweck..." 
+                                   onkeypress="handleEnterKey(event)" autofocus>
+                        </div>
+                        <div class='col-md-3'>
+                            <label for="payment_amount_input" class="form-label">Betrag (€)</label>
+                            <input type="number" class="form-control form-control-lg" id="payment_amount_input" 
+                                   min="0.01" step="0.01" placeholder="0,00"
                                    onkeypress="handleEnterKey(event)">
-                            <button class="btn btn-primary" type="button" onclick="searchPayment()">
+                        </div>
+                        <div class='col-md-3 d-flex align-items-end'>
+                            <button class="btn btn-primary btn-lg w-100" type="button" onclick="searchAndProcess()">
                                 <i class="bi bi-search"></i> Suchen
                             </button>
                         </div>
-                        <div class="form-text">Verwendungszweck eingeben und Enter drücken oder auf Suchen klicken</div>
                     </div>
+                    <div class="row mb-2">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="send_email_check" checked>
+                                <label class="form-check-label" for="send_email_check">E-Mails für diese Buchung senden</label>
+                                <small class="form-text text-muted d-block">E-Mail wird nur bei vollständiger Bezahlung gesendet</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-text mb-3">Verwendungszweck + Betrag eingeben → Enter drücken → Bestätigen mit Enter</div>
                     
+                    <!-- Search Result: Order Found -->
                     <div id="search_result" style="display: none;">
                         <hr>
                         <div id="order_details"></div>
-                        <div class="mt-3">
-                            <button class="btn btn-success me-2" onclick="markAsPaid()" id="mark_paid_btn">
-                                <i class="bi bi-check-circle"></i> Als bezahlt markieren
+                        <div class="mt-3" id="action_buttons">
+                            <button class="btn btn-success btn-lg me-2" onclick="confirmPayment()" id="confirm_btn">
+                                <i class="bi bi-check-circle"></i> Zahlung verbuchen
                             </button>
                             <button class="btn btn-secondary" onclick="clearSearch()">
                                 <i class="bi bi-x-circle"></i> Zurücksetzen
@@ -34,6 +53,7 @@
                         </div>
                     </div>
                     
+                    <!-- No Result: Order Not Found -->
                     <div id="no_result" style="display: none;">
                         <hr>
                         <div class="alert alert-warning">
@@ -58,11 +78,29 @@
                 <div class='card-body'>
                     <h6 class='card-title'>Anleitung</h6>
                     <ol class='mb-0'>
-                        <li>Verwendungszweck in das Eingabefeld eingeben</li>
-                        <li>Enter drücken oder auf "Suchen" klicken</li>
-                        <li>Bei gefundener Bestellung: Details prüfen und "Als bezahlt markieren" klicken</li>
-                        <li>Bei nicht gefundener Bestellung: "Als Fehler markieren" klicken</li>
+                        <li>Verwendungszweck eingeben</li>
+                        <li>Eingegangenen Betrag eingeben</li>
+                        <li>Enter drücken → Bestellung wird gesucht</li>
+                        <li>Details prüfen, nochmal Enter → Zahlung wird verbucht</li>
+                        <li>Bei Überzahlung: Bestellung wird bezahlt, Differenz als Fehler gespeichert</li>
                     </ol>
+                    <hr>
+                    <div class="text-muted small">
+                        <strong>Überzahlung:</strong> Wenn der eingezahlte Betrag höher ist als der offene Betrag, 
+                        wird die Bestellung vollständig bezahlt und die Differenz als Fehlereintrag gespeichert.
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Recent Activity -->
+            <div class='card mt-3'>
+                <div class='card-header'>
+                    <h6 class='card-title mb-0'><i class="bi bi-clock-history"></i> Letzte Buchungen</h6>
+                </div>
+                <div class='card-body p-0'>
+                    <div class="list-group list-group-flush" id="recent_activity">
+                        <div class="list-group-item text-center text-muted"><em>Keine Buchungen</em></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -71,6 +109,7 @@
 
 <script>
 let currentPaymentReference = '';
+let currentOrder = null;
 
 $(document).ready(function() {
     $('#payment_reference_input').focus();
@@ -80,22 +119,33 @@ function handleEnterKey(event) {
     if (event.key === 'Enter') {
         event.preventDefault();
         
-        // If search result is already shown, mark as paid
         if ($('#search_result').is(':visible')) {
-            markAsPaid();
+            // Step 2: Confirm the payment
+            confirmPayment();
         } else if ($('#no_result').is(':visible')) {
             markAsError();
         } else {
-            searchPayment();
+            // Step 1: Search
+            searchAndProcess();
         }
     }
 }
 
-function searchPayment() {
+function searchAndProcess() {
     const paymentRef = $('#payment_reference_input').val().trim().toUpperCase();
+    const amount = parseFloat($('#payment_amount_input').val());
     
     if (!paymentRef) {
-        showTemplateModal('Fehler', 'Bitte geben Sie einen Verwendungszweck ein.', 'OK', 'btn-secondary', '', '', function() {});
+        showTemplateModal('Fehler', 'Bitte Verwendungszweck eingeben.', 'OK', 'btn-secondary', '', '', function() {
+            $('#payment_reference_input').focus();
+        });
+        return;
+    }
+    
+    if (!amount || amount <= 0) {
+        showTemplateModal('Fehler', 'Bitte einen gültigen Betrag eingeben.', 'OK', 'btn-secondary', '', '', function() {
+            $('#payment_amount_input').focus();
+        });
         return;
     }
     
@@ -107,8 +157,10 @@ function searchPayment() {
     
     api_call('/api/search_payment_reference', {payment_reference: paymentRef}, function(response) {
         if (response.success && response.order) {
-            showOrderFound(response.order);
+            currentOrder = response.order;
+            showOrderFound(response.order, amount);
         } else {
+            currentOrder = null;
             showOrderNotFound();
         }
     }, function() {
@@ -116,142 +168,197 @@ function searchPayment() {
     });
 }
 
-function showOrderFound(order) {
-    let statusClass = '';
-    let statusText = '';
+function showOrderFound(order, incomingAmount) {
+    const paymentStatus = order.payment_status || order.status;
+    const statusText = getOrderStatusText(paymentStatus);
+    const statusClass = getOrderStatusBadgeClass(paymentStatus);
     
-    // Use common function for known statuses
-    if (['paid', 'pending', 'cancelled', 'cancelled_by_user'].includes(order.status)) {
-        statusText = getOrderStatusText(order.status);
-        statusClass = order.status === 'paid' ? 'text-success' : 'text-warning';
-    } else if (order.status === 'error') {
-        statusClass = 'text-danger';
-        statusText = 'Fehler';
-    } else {
-        statusClass = 'text-muted';
-        statusText = order.status || 'Unbekannt';
+    const totalPrice = Number(order.total_price || 0);
+    const totalPaid = Number(order.total_paid || 0);
+    const remaining = order.remaining_balance != null ? Number(order.remaining_balance) : totalPrice;
+    const overpayment = Math.max(incomingAmount - remaining, 0);
+    const effectivePayment = Math.min(incomingAmount, remaining);
+    
+    let overpaymentHtml = '';
+    if (overpayment > 0) {
+        overpaymentHtml = `
+            <div class="alert alert-warning mt-2 mb-0">
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>Überzahlung!</strong> ${overpayment.toFixed(2)}€ über dem offenen Betrag. 
+                Die Bestellung wird als bezahlt markiert und die Differenz von <strong>${overpayment.toFixed(2)}€</strong> wird als Fehlereintrag gespeichert.
+            </div>
+        `;
     }
     
-    const createdAt = order.created_at ? new Date(order.created_at).toLocaleDateString('de-DE') : '-';
-    const paidAt = order.paid_at ? new Date(order.paid_at).toLocaleDateString('de-DE') : '-';
+    let alreadyPaidHtml = '';
+    if (paymentStatus === 'paid') {
+        alreadyPaidHtml = `
+            <div class="alert alert-info mt-2 mb-0">
+                <i class="bi bi-info-circle"></i> Diese Bestellung ist bereits vollständig bezahlt.
+            </div>
+        `;
+    }
     
     const details = `
-        <div class="alert alert-success">
-            <i class="bi bi-check-circle"></i>
-            <strong>Bestellung gefunden!</strong>
+        <div class="alert ${overpayment > 0 ? 'alert-warning' : 'alert-success'} py-2">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>${order.user_name}</strong> – ${order.ticket_count} Tickets
+                </div>
+                <span class="badge ${statusClass} fs-6">${statusText}</span>
+            </div>
         </div>
-        <div class="row">
-            <div class="col-sm-3"><strong>Kunde:</strong></div>
-            <div class="col-sm-9">${order.user_name} (${order.user_email})</div>
+        <div class="row g-2">
+            <div class="col-md-3">
+                <div class="border rounded p-2 text-center">
+                    <small class="text-muted d-block">Gesamtpreis</small>
+                    <strong>${totalPrice.toFixed(2)}€</strong>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="border rounded p-2 text-center">
+                    <small class="text-muted d-block">Bereits bezahlt</small>
+                    <strong class="text-success">${totalPaid.toFixed(2)}€</strong>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="border rounded p-2 text-center">
+                    <small class="text-muted d-block">Offen</small>
+                    <strong class="text-danger">${remaining.toFixed(2)}€</strong>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="border rounded p-2 text-center bg-light">
+                    <small class="text-muted d-block">Eingegangen</small>
+                    <strong class="text-primary">${incomingAmount.toFixed(2)}€</strong>
+                </div>
+            </div>
         </div>
-        <div class="row">
-            <div class="col-sm-3"><strong>Tickets:</strong></div>
-            <div class="col-sm-9">${order.ticket_count} Stück</div>
-        </div>
-        <div class="row">
-            <div class="col-sm-3"><strong>Einzelpreis:</strong></div>
-            <div class="col-sm-9">${Number(order.individual_ticket_price || 0).toFixed(2)}€</div>
-        </div>
-        <div class="row">
-            <div class="col-sm-3"><strong>Gesamtpreis:</strong></div>
-            <div class="col-sm-9"><strong>${Number(order.total_price || 0).toFixed(2)}€</strong></div>
-        </div>
-        <div class="row">
-            <div class="col-sm-3"><strong>Status:</strong></div>
-            <div class="col-sm-9"><span class="${statusClass}"><strong>${statusText}</strong></span></div>
-        </div>
-        <div class="row">
-            <div class="col-sm-3"><strong>Bestellt am:</strong></div>
-            <div class="col-sm-9">${createdAt}</div>
-        </div>
-        <div class="row">
-            <div class="col-sm-3"><strong>Bezahlt am:</strong></div>
-            <div class="col-sm-9">${paidAt}</div>
-        </div>
+        ${overpaymentHtml}
+        ${alreadyPaidHtml}
     `;
     
     $('#order_details').html(details);
     
-    // Disable mark as paid button if already paid
-    if (order.status === 'paid') {
-        $('#mark_paid_btn').prop('disabled', true).text('Bereits bezahlt');
+    // Disable confirm if already paid
+    if (paymentStatus === 'paid') {
+        $('#confirm_btn').prop('disabled', true).html('<i class="bi bi-check-circle"></i> Bereits bezahlt');
     } else {
-        $('#mark_paid_btn').prop('disabled', false).html('<i class="bi bi-check-circle"></i> Als bezahlt markieren');
+        $('#confirm_btn').prop('disabled', false).html(`<i class="bi bi-check-circle"></i> ${effectivePayment.toFixed(2)}€ verbuchen`);
     }
     
     $('#search_result').show();
+    $('#confirm_btn').focus();
 }
 
 function showOrderNotFound() {
     $('#no_result').show();
+    $('#mark_error_btn').focus();
 }
 
-function markAsPaid() {
-    if (!currentPaymentReference) {
-        return;
-    }
+function confirmPayment() {
+    if (!currentPaymentReference || !currentOrder) return;
     
-    showTemplateModal(
-        'Zahlung bestätigen',
-        `Soll die Bestellung mit Verwendungszweck "${currentPaymentReference}" als bezahlt markiert werden?`,
-        'Ja, als bezahlt markieren',
-        'btn-success',
-        'Abbrechen',
-        'btn-secondary',
-        function() {
-            api_call('/api/quick_mark_paid', {payment_reference: currentPaymentReference}, function(response) {
-                if (response.success) {
-                    showTemplateModal('Erfolg', 'Bestellung wurde als bezahlt markiert.', '', '', '', '', function() {});
-                    setTimeout(function() {
-                        $('#__template_modal').modal('hide');
-                        clearSearch();
-                        $('#payment_reference_input').focus();
-                    }, 1000);
-                } else {
-                    showTemplateModal('Fehler', 'Bestellung konnte nicht als bezahlt markiert werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
-                }
-            }, function() {
-                showTemplateModal('Fehler', 'Netzwerkfehler beim Markieren der Zahlung', 'OK', 'btn-secondary', '', '', function() {});
-            });
+    const incomingAmount = parseFloat($('#payment_amount_input').val());
+    if (!incomingAmount || incomingAmount <= 0) return;
+    
+    const sendEmail = $('#send_email_check').is(':checked');
+    
+    const btn = $('#confirm_btn');
+    btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> Verarbeite...');
+    
+    api_call('/api/quick_mark_paid', {
+        payment_reference: currentPaymentReference, 
+        amount: incomingAmount,
+        send_email: sendEmail
+    }, function(response) {
+        if (response.success) {
+            let msg = 'Zahlung verbucht.';
+            if (response.overpayment > 0) {
+                msg += ` Überzahlung von ${Number(response.overpayment).toFixed(2)}€ als Fehlereintrag gespeichert.`;
+            }
+            
+            // Add to recent activity
+            addRecentActivity(currentPaymentReference, incomingAmount, response.overpayment || 0);
+            
+            showTemplateModal('Erfolg', msg, '', '', '', '', function() {});
+            setTimeout(function() {
+                $('#__template_modal').modal('hide');
+                clearSearch();
+                $('#payment_reference_input').focus();
+            }, 1200);
+        } else {
+            btn.prop('disabled', false).html('<i class="bi bi-check-circle"></i> Zahlung verbuchen');
+            showTemplateModal('Fehler', response.error || 'Unbekannter Fehler', 'OK', 'btn-secondary', '', '', function() {});
         }
-    );
+    }, function() {
+        btn.prop('disabled', false).html('<i class="bi bi-check-circle"></i> Zahlung verbuchen');
+        showTemplateModal('Fehler', 'Netzwerkfehler', 'OK', 'btn-secondary', '', '', function() {});
+    });
 }
 
 function markAsError() {
-    if (!currentPaymentReference) {
-        return;
+    if (!currentPaymentReference) return;
+    
+    const btn = $('#mark_error_btn');
+    btn.prop('disabled', true);
+    
+    api_call('/api/mark_payment_error', {payment_reference: currentPaymentReference}, function(response) {
+        if (response.success) {
+            addRecentActivity(currentPaymentReference, 0, 0, true);
+            showTemplateModal('Erfolg', 'Als Fehler markiert.', '', '', '', '', function() {});
+            setTimeout(function() {
+                $('#__template_modal').modal('hide');
+                clearSearch();
+                $('#payment_reference_input').focus();
+            }, 1000);
+        } else {
+            btn.prop('disabled', false);
+            showTemplateModal('Fehler', response.error || 'Unbekannter Fehler', 'OK', 'btn-secondary', '', '', function() {});
+        }
+    }, function() {
+        btn.prop('disabled', false);
+        showTemplateModal('Fehler', 'Netzwerkfehler', 'OK', 'btn-secondary', '', '', function() {});
+    });
+}
+
+function addRecentActivity(ref, amount, overpayment, isError) {
+    const list = $('#recent_activity');
+    // Remove "no entries" placeholder
+    if (list.find('.text-muted').length) list.empty();
+    
+    const time = new Date().toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'});
+    let badge = '';
+    let text = '';
+    
+    if (isError) {
+        badge = '<span class="badge bg-danger me-1">Fehler</span>';
+        text = ref;
+    } else if (overpayment > 0) {
+        badge = '<span class="badge bg-warning text-dark me-1">Überzahlung</span>';
+        text = `${ref} – ${Number(amount).toFixed(2)}€ (+${Number(overpayment).toFixed(2)}€)`;
+    } else {
+        badge = '<span class="badge bg-success me-1">OK</span>';
+        text = `${ref} – ${Number(amount).toFixed(2)}€`;
     }
     
-    showTemplateModal(
-        'Als Fehler markieren',
-        `Soll der Verwendungszweck "${currentPaymentReference}" als Fehler markiert werden? Dies erstellt einen Fehlereintrag für weitere Untersuchungen.`,
-        'Ja, als Fehler markieren',
-        'btn-danger',
-        'Abbrechen',
-        'btn-secondary',
-        function() {
-            api_call('/api/mark_payment_error', {payment_reference: currentPaymentReference}, function(response) {
-                if (response.success) {
-                    showTemplateModal('Erfolg', 'Verwendungszweck wurde als Fehler markiert.', 'OK', 'btn-success', '', '', function() {
-                        clearSearch();
-                        $('#payment_reference_input').focus();
-                    });
-                } else {
-                    showTemplateModal('Fehler', 'Verwendungszweck konnte nicht als Fehler markiert werden: ' + (response.error || 'Unbekannter Fehler'), 'OK', 'btn-secondary', '', '', function() {});
-                }
-            }, function() {
-                showTemplateModal('Fehler', 'Netzwerkfehler beim Markieren des Fehlers', 'OK', 'btn-secondary', '', '', function() {});
-            });
-        }
-    );
+    const item = $(`<div class="list-group-item py-1 small">${badge}<span class="text-muted">${time}</span> ${text}</div>`);
+    list.prepend(item);
+    
+    // Keep only last 10
+    while (list.children().length > 10) {
+        list.children().last().remove();
+    }
 }
 
 function clearSearch() {
     $('#payment_reference_input').val('');
+    $('#payment_amount_input').val('');
     $('#search_result').hide();
     $('#no_result').hide();
     $('#order_details').empty();
     currentPaymentReference = '';
+    currentOrder = null;
     $('#payment_reference_input').focus();
 }
 </script>

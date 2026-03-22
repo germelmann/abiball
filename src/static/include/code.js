@@ -91,6 +91,7 @@ function perform_logout() {
 function getOrderStatusText(status) {
     const statusMap = {
         'paid': 'Bezahlt',
+        'partially_paid': 'Teilweise bezahlt',
         'pending': 'Ausstehend',
         'pending_payment': 'Zahlung ausstehend',
         'offline_payment': 'Barzahlung',
@@ -107,6 +108,7 @@ function getOrderStatusText(status) {
 function getOrderStatusBadgeClass(status) {
     const classMap = {
         'paid': 'bg-success',
+        'partially_paid': 'bg-info',
         'pending': 'bg-warning text-dark',
         'pending_payment': 'bg-info',
         'offline_payment': 'bg-info',

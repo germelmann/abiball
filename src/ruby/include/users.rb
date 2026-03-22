@@ -128,6 +128,10 @@ class Main < Sinatra::Base
             end
             
             if user_has_permission?("manage_orders")
+                admin_items << {label: 'Zahlungen', icon: 'bi-cash-stack', url: '/payments'}
+            end
+            
+            if user_has_permission?("manage_orders")
                 admin_items << {label: 'Ticket Scanner', icon: 'bi-qr-code-scan', url: '/ticket_scanner'}
             end
             

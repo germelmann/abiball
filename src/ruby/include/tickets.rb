@@ -9,6 +9,7 @@ class Main < Sinatra::Base
     def self.order_status_translations
         {
             'paid' => 'Bezahlt',
+            'partially_paid' => 'Teilweise bezahlt',
             'pending' => 'Ausstehend',
             'pending_payment' => 'Zahlung ausstehend',
             'offline_payment' => 'Barzahlung vor Ort',
@@ -20,6 +21,9 @@ class Main < Sinatra::Base
             'contact_required' => 'Kontakt erforderlich'
         }
     end
+
+    # Statuses that are derived from payments and cannot be set manually
+    PAYMENT_DERIVED_STATUSES = %w[paid partially_paid].freeze
     
     def self.get_order_status_text(status)
         order_status_translations[status] || status
@@ -90,6 +94,128 @@ class Main < Sinatra::Base
         
         # Fallback to first account (should not happen if percentages sum to 100)
         accounts.first['id']
+    end
+
+    # ===========================================
+    # Payment Tracking Helpers
+    # ===========================================
+
+    # Calculate the sum of all payments for an order
+    def get_payments_sum(order_id)
+        result = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+            MATCH (o:TicketOrder {id: $order_id})-[:HAS_PAYMENT]->(pay:Payment)
+            RETURN COALESCE(SUM(pay.amount), 0) AS total_paid
+        END_OF_QUERY
+        result.first&.dig('total_paid').to_f || 0.0
+    end
+
+    # Calculate payment status dynamically from payments
+    # Returns: 'pending', 'partially_paid', 'paid'
+    # Also returns overpayment amount if applicable
+    def calculate_payment_status(order_id)
+        result = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+            MATCH (o:TicketOrder {id: $order_id})
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+            RETURN o.total_price AS total_price,
+                   COALESCE(SUM(pay.amount), 0) AS total_paid
+        END_OF_QUERY
+
+        return { status: 'pending', total_paid: 0.0, total_price: 0.0, remaining: 0.0, overpayment: 0.0 } if result.empty?
+
+        row = result.first
+        total_price = (row['total_price'] || 0).to_f
+        total_paid = (row['total_paid'] || 0).to_f
+        remaining = [total_price - total_paid, 0].max
+        overpayment = [total_paid - total_price, 0].max
+
+        status = if total_paid <= 0
+            'pending'
+        elsif total_paid < total_price
+            'partially_paid'
+        else
+            'paid'
+        end
+
+        { status: status, total_paid: total_paid, total_price: total_price, remaining: remaining, overpayment: overpayment }
+    end
+
+    # Record a payment for an order, update order status accordingly, and log it
+    def record_payment_for_order(order_id, amount, recorded_by, note: nil)
+        payment_id = RandomTag::generate(12)
+        timestamp = Time.now.iso8601
+
+        neo4j_query(<<~END_OF_QUERY, {order_id: order_id, payment_id: payment_id, amount: amount.to_f, recorded_by: recorded_by, note: note, timestamp: timestamp})
+            MATCH (o:TicketOrder {id: $order_id})
+            CREATE (pay:Payment {
+                id: $payment_id,
+                amount: $amount,
+                recorded_by: $recorded_by,
+                note: $note,
+                timestamp: $timestamp
+            })
+            CREATE (o)-[:HAS_PAYMENT]->(pay)
+        END_OF_QUERY
+
+        # Recalculate and update order status
+        payment_info = calculate_payment_status(order_id)
+        new_status = payment_info[:status]
+
+        if new_status == 'paid'
+            neo4j_query(<<~END_OF_QUERY, {order_id: order_id, date: Date.today.to_s, status: new_status})
+                MATCH (o:TicketOrder {id: $order_id})
+                SET o.status = $status, o.paid_at = $date
+            END_OF_QUERY
+        else
+            neo4j_query(<<~END_OF_QUERY, {order_id: order_id, status: new_status})
+                MATCH (o:TicketOrder {id: $order_id})
+                SET o.status = $status
+            END_OF_QUERY
+        end
+
+        log("Zahlung #{payment_id} über #{sprintf('%.2f', amount)}€ für Bestellung #{order_id} verbucht. Neuer Status: #{new_status}")
+
+        { payment_id: payment_id, payment_info: payment_info }
+    end
+
+    # Revert (delete) a specific payment and recalculate order status
+    def revert_payment_for_order(payment_id, reverted_by)
+        # Get the order associated with this payment
+        result = neo4j_query(<<~END_OF_QUERY, {payment_id: payment_id})
+            MATCH (o:TicketOrder)-[:HAS_PAYMENT]->(pay:Payment {id: $payment_id})
+            RETURN o.id AS order_id, pay.amount AS amount
+        END_OF_QUERY
+
+        return nil if result.empty?
+
+        order_id = result.first['order_id']
+        amount = result.first['amount']
+
+        # Delete the payment
+        neo4j_query(<<~END_OF_QUERY, {payment_id: payment_id})
+            MATCH (o:TicketOrder)-[:HAS_PAYMENT]->(pay:Payment {id: $payment_id})
+            DETACH DELETE pay
+        END_OF_QUERY
+
+        # Recalculate and update order status
+        payment_info = calculate_payment_status(order_id)
+        new_status = payment_info[:status]
+
+        if new_status == 'pending'
+            neo4j_query(<<~END_OF_QUERY, {order_id: order_id, status: new_status})
+                MATCH (o:TicketOrder {id: $order_id})
+                SET o.status = $status
+                REMOVE o.paid_at
+            END_OF_QUERY
+        else
+            neo4j_query(<<~END_OF_QUERY, {order_id: order_id, status: new_status})
+                MATCH (o:TicketOrder {id: $order_id})
+                SET o.status = $status
+            END_OF_QUERY
+        end
+
+        log("Zahlung #{payment_id} über #{sprintf('%.2f', amount)}€ für Bestellung #{order_id} storniert von #{reverted_by}. Neuer Status: #{new_status}")
+
+        { order_id: order_id, amount: amount, payment_info: payment_info }
     end
 
     # Get or create ticket order for user
@@ -521,13 +647,15 @@ class Main < Sinatra::Base
         end
     end
 
-    # Admin: Mark order as paid (or offline_payment for non-payment events)
+    # Admin: Mark order as paid - records a payment for the remaining amount
     post "/api/mark_order_paid" do
         require_user_with_permission!("manage_orders")
         data = parse_request_data(required_keys: [:order_id])
 
+        order_id = data[:order_id]
+
         # Check if the event requires payment
-        event_result = neo4j_query(<<~END_OF_QUERY, {order_id: data[:order_id]})
+        event_result = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
             MATCH (o:TicketOrder {id: $order_id})-[:FOR]->(e:Event)
             RETURN e.payment_required AS payment_required
         END_OF_QUERY
@@ -537,29 +665,224 @@ class Main < Sinatra::Base
             return
         end
         
-        # If payment_required is false, set status to offline_payment instead of paid
         payment_required = event_result.first&.dig('payment_required') != false
-        new_status = payment_required ? 'paid' : 'offline_payment'
+
+        # For non-payment events, set offline_payment status directly
+        unless payment_required
+            neo4j_query(<<~END_OF_QUERY, {order_id: order_id, date: Date.today.to_s})
+                MATCH (o:TicketOrder {id: $order_id})
+                SET o.status = 'offline_payment', o.paid_at = $date
+            END_OF_QUERY
+            respond(success: true, new_status: 'offline_payment')
+            return
+        end
+
+        # Calculate remaining amount and record payment
+        payment_info = calculate_payment_status(order_id)
+        remaining = payment_info[:remaining]
         
-        neo4j_query(<<~END_OF_QUERY, {order_id: data[:order_id], date: Date.today.to_s, status: new_status})
-            MATCH (o:TicketOrder {id: $order_id})
-            SET o.status = $status, o.paid_at = $date
-        END_OF_QUERY
-        
-        respond(success: true, new_status: new_status)
+        if remaining <= 0
+            respond(success: false, error: "Bestellung ist bereits vollständig bezahlt")
+            return
+        end
+
+        result = record_payment_for_order(order_id, remaining, @session_user[:username])
+        respond(success: true, new_status: result[:payment_info][:status], payment_info: result[:payment_info])
     end
 
-    # Admin: Mark order as unpaid
+    # Admin: Mark order as unpaid - removes all payments
     post "/api/mark_order_unpaid" do
         require_user_with_permission!("manage_orders")
         data = parse_request_data(required_keys: [:order_id])
-        neo4j_query(<<~END_OF_QUERY, {order_id: data[:order_id]})
+        
+        order_id = data[:order_id]
+
+        # Get all payments for this order
+        payments = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+            MATCH (o:TicketOrder {id: $order_id})-[:HAS_PAYMENT]->(pay:Payment)
+            RETURN pay.id AS id, pay.amount AS amount
+        END_OF_QUERY
+
+        # Delete all payments
+        neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+            MATCH (o:TicketOrder {id: $order_id})-[:HAS_PAYMENT]->(pay:Payment)
+            DETACH DELETE pay
+        END_OF_QUERY
+
+        # Reset order status
+        neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
             MATCH (o:TicketOrder {id: $order_id})
             SET o.status = 'pending'
             REMOVE o.paid_at
         END_OF_QUERY
+
+        total_reverted = payments.sum { |p| (p['amount'] || 0).to_f }
+        log("Alle Zahlungen (#{sprintf('%.2f', total_reverted)}€) für Bestellung #{order_id} storniert")
         
         respond(success: true)
+    end
+
+    # ===========================================
+    # Payment Recording & Tracking Endpoints
+    # ===========================================
+
+    # Record a payment for an order
+    post "/api/record_payment" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:order_id, :amount], optional_keys: [:note, :send_email])
+
+        order_id = data[:order_id]
+        amount = data[:amount].to_f
+        note = data[:note]
+        send_email = data[:send_email] != false  # default true
+
+        if amount <= 0
+            respond(success: false, error: "Betrag muss größer als 0 sein")
+            return
+        end
+
+        # Verify order exists
+        order_check = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder {id: $order_id})
+            RETURN o.id AS order_id, o.total_price AS total_price, u.email AS user_email, u.name AS user_name, u.username AS user_username, o.payment_reference AS payment_reference
+        END_OF_QUERY
+
+        if order_check.empty?
+            respond(success: false, error: "Bestellung nicht gefunden")
+            return
+        end
+
+        result = record_payment_for_order(order_id, amount, @session_user[:username], note: note)
+
+        # Prepare email if send_email is enabled and order is now fully paid
+        if send_email && result[:payment_info][:status] == 'paid'
+            order = order_check.first
+            begin
+                rendered = render_manual_mail_template('payment_received', {
+                    'NAME' => order['user_name'] || 'Nutzer',
+                    'ORDER_ID' => order['order_id'],
+                    'TOTAL_PRICE' => sprintf("%.2f", order['total_price'] || 0),
+                    'REFERENCE' => order['payment_reference'] || 'N/A',
+                    'TICKET_LINK' => "#{WEB_ROOT}/ticket_download"
+                })
+                if rendered
+                    send_manual_mail(
+                        to_email: order['user_email'],
+                        subject: rendered[:subject],
+                        body: rendered[:body],
+                        template_key: 'payment_received',
+                        sender_username: @session_user[:username],
+                        recipient_username: order['user_username'],
+                        order_id: order_id
+                    )
+                end
+            rescue => e
+                STDERR.puts "Error sending payment email: #{e.message}"
+            end
+        end
+
+        respond(success: true, payment_id: result[:payment_id], payment_info: result[:payment_info])
+    end
+
+    # Revert a specific payment
+    post "/api/revert_payment" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:payment_id])
+
+        payment_id = data[:payment_id]
+        result = revert_payment_for_order(payment_id, @session_user[:username])
+
+        if result.nil?
+            respond(success: false, error: "Zahlung nicht gefunden")
+            return
+        end
+
+        respond(success: true, order_id: result[:order_id], reverted_amount: result[:amount], payment_info: result[:payment_info])
+    end
+
+    # Get all payments for an order
+    post "/api/get_payments" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:order_id])
+
+        order_id = data[:order_id]
+
+        payments = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+            MATCH (o:TicketOrder {id: $order_id})-[:HAS_PAYMENT]->(pay:Payment)
+            RETURN pay.id AS id,
+                   pay.amount AS amount,
+                   pay.recorded_by AS recorded_by,
+                   pay.note AS note,
+                   pay.timestamp AS timestamp
+            ORDER BY pay.timestamp DESC
+        END_OF_QUERY
+
+        payment_info = calculate_payment_status(order_id)
+
+        respond(success: true, payments: payments, payment_info: payment_info)
+    end
+
+    # Get all payments across all orders (for payments.html dashboard)
+    post "/api/all_payments" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(optional_keys: [:event_id])
+
+        event_id = data[:event_id]
+        event_filter = (event_id && !event_id.to_s.empty?) ? "WHERE e.id = $event_id" : ""
+        query_params = (event_id && !event_id.to_s.empty?) ? {event_id: event_id} : {}
+
+        payments = neo4j_query(<<~END_OF_QUERY, query_params)
+            MATCH (o:TicketOrder)-[:HAS_PAYMENT]->(pay:Payment)
+            MATCH (o)-[:FOR]->(e:Event)
+            #{event_filter}
+            OPTIONAL MATCH (u:User)-[:PLACED]->(o)
+            RETURN pay.id AS id,
+                   pay.amount AS amount,
+                   pay.recorded_by AS recorded_by,
+                   pay.note AS note,
+                   pay.timestamp AS timestamp,
+                   o.id AS order_id,
+                   o.payment_reference AS payment_reference,
+                   o.total_price AS total_price,
+                   o.status AS order_status,
+                   COALESCE(u.name, '') AS user_name,
+                   COALESCE(u.email, '') AS user_email,
+                   COALESCE(e.name, '') AS event_name,
+                   COALESCE(e.year, '') AS event_year,
+                   'payment' AS entry_type
+            ORDER BY pay.timestamp DESC
+        END_OF_QUERY
+
+        # Also fetch error records (unassignable payments) - only when not filtering by event
+        error_records = []
+        unless event_id && !event_id.to_s.empty?
+            error_records = neo4j_query(<<~END_OF_QUERY)
+                MATCH (o:TicketOrder {status: 'error'})
+                WHERE NOT EXISTS((o)<-[:PLACED]-(:User))
+                RETURN null AS id,
+                       0 AS amount,
+                       '' AS recorded_by,
+                       COALESCE(o.error_reason, '') AS note,
+                       o.created_at AS timestamp,
+                       o.id AS order_id,
+                       o.payment_reference AS payment_reference,
+                       0 AS total_price,
+                       'error' AS order_status,
+                       '' AS user_name,
+                       '' AS user_email,
+                       '' AS event_name,
+                       '' AS event_year,
+                       'error' AS entry_type
+                ORDER BY o.created_at DESC
+            END_OF_QUERY
+        end
+
+        all_entries = payments + error_records
+
+        # Calculate summary statistics (only from actual payments)
+        total_amount = payments.sum { |p| (p['amount'] || 0).to_f }
+
+        respond(success: true, payments: all_entries, total_amount: total_amount, error_count: error_records.length)
     end
 
     # ===========================================
@@ -1021,6 +1344,10 @@ class Main < Sinatra::Base
                     bank_account_id: b.id,
                     bank_account_name: b.account_name
                  })[0] AS latest_payment_request
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+            WITH u, o, e, participants, latest_payment_request,
+                 COALESCE(o.total_price, 0) AS total_price_val,
+                 COALESCE(SUM(pay.amount), 0) AS total_paid_val
             RETURN u.name AS user_name,
                    u.email AS user_email,
                    u.username AS user_username,
@@ -1036,8 +1363,15 @@ class Main < Sinatra::Base
                    e.id AS event_id,
                    COALESCE(e.name, '') AS event_name,
                    COALESCE(e.year, '') AS event_year,
+                   COALESCE(e.payment_required, true) AS event_payment_required,
                    participants,
-                   latest_payment_request
+                   latest_payment_request,
+                   CASE WHEN total_paid_val <= 0 THEN 'pending'
+                        WHEN total_paid_val < total_price_val THEN 'partially_paid'
+                        ELSE 'paid' END AS payment_status,
+                   total_paid_val AS total_paid,
+                   CASE WHEN total_price_val - total_paid_val > 0 THEN total_price_val - total_paid_val ELSE 0 END AS remaining_balance,
+                   CASE WHEN total_paid_val - total_price_val > 0 THEN total_paid_val - total_price_val ELSE 0 END AS overpayment
             ORDER BY o.created_at DESC
         END_OF_QUERY
         
@@ -1090,6 +1424,7 @@ class Main < Sinatra::Base
                    e.id AS event_id,
                    COALESCE(e.name, '') AS event_name,
                    COALESCE(e.year, '') AS event_year,
+                   COALESCE(e.payment_required, true) AS event_payment_required,
                    participants,
                    [x IN payment_requests WHERE x IS NOT NULL] AS payment_requests
         END_OF_QUERY
@@ -1101,6 +1436,25 @@ class Main < Sinatra::Base
         
         # Since we're getting a single order, extract the first result
         order = order_result.first
+        
+        # Add dynamically calculated payment info
+        payment_info = calculate_payment_status(order_id)
+        order['payment_status'] = payment_info[:status]
+        order['total_paid'] = payment_info[:total_paid]
+        order['remaining_balance'] = payment_info[:remaining]
+        order['overpayment'] = payment_info[:overpayment]
+
+        # Get individual payments
+        payments = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+            MATCH (o:TicketOrder {id: $order_id})-[:HAS_PAYMENT]->(pay:Payment)
+            RETURN pay.id AS id,
+                   pay.amount AS amount,
+                   pay.recorded_by AS recorded_by,
+                   pay.note AS note,
+                   pay.timestamp AS timestamp
+            ORDER BY pay.timestamp DESC
+        END_OF_QUERY
+        order['payments'] = payments
         
         respond(success: true, order: order)
     end
@@ -1265,6 +1619,25 @@ class Main < Sinatra::Base
         participants = data[:participants] || []
         notes = data[:notes] || ''
         admin_notes = data[:admin_notes] || ''
+
+        # Prevent manual setting of payment-derived statuses
+        if PAYMENT_DERIVED_STATUSES.include?(status)
+            # Check if the status is actually correct based on payments
+            payment_info = calculate_payment_status(order_id)
+            status = payment_info[:status]
+        end
+
+        # When setting status to pending, delete all payment records and reset paid_at
+        # so that new payments can be recorded again
+        if status == 'pending'
+            neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+                MATCH (o:TicketOrder {id: $order_id})
+                OPTIONAL MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+                DETACH DELETE pay
+                REMOVE o.paid_at
+            END_OF_QUERY
+            log("Bestellung #{order_id} auf 'pending' gesetzt, alle Zahlungen gelöscht")
+        end
         
         # Update order basic information
         update_params = {
@@ -1370,11 +1743,13 @@ class Main < Sinatra::Base
             return
         end
         
-        # Delete participants and order
+        # Delete participants, payments, payment requests, and order
         neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
             MATCH (o:TicketOrder {id: $order_id})
             OPTIONAL MATCH (o)-[:INCLUDES]->(p:Participant)
-            DETACH DELETE p, o
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT_REQUEST]->(pr:PaymentRequest)
+            DETACH DELETE p, pay, pr, o
         END_OF_QUERY
         
         respond(success: true, message: "Bestellung wurde erfolgreich gelöscht")
@@ -1856,30 +2231,115 @@ class Main < Sinatra::Base
             respond(success: false, error: "Keine Bestellung mit Verwendungszweck '#{payment_ref}' gefunden")
         else
             order = orders.first
+            # Add calculated payment info
+            payment_info = calculate_payment_status(order['order_id'])
+            order['payment_status'] = payment_info[:status]
+            order['total_paid'] = payment_info[:total_paid]
+            order['remaining_balance'] = payment_info[:remaining]
             respond(success: true, order: order)
         end
     end
 
-    # Quick payment mark as paid
+    # Quick payment mark as paid - records a payment for the specified amount
+    # If amount > remaining, records remaining as payment (marks order paid) and creates error for overpayment difference
     post "/api/quick_mark_paid" do
         require_user_with_permission!("manage_orders")
-        data = parse_request_data(required_keys: [:payment_reference])
+        data = parse_request_data(required_keys: [:payment_reference, :amount], optional_keys: [:send_email])
         
         payment_ref = data[:payment_reference].strip.upcase
+        send_email = data[:send_email] != false  # default true
+        incoming_amount = data[:amount].to_f
         
-        # Mark order as paid
-        result = neo4j_query(<<~END_OF_QUERY, {payment_ref: payment_ref, date: Date.today.to_s})
-            MATCH (o:TicketOrder {payment_reference: $payment_ref})
-            SET o.status = 'paid', o.paid_at = $date
-            RETURN o.id AS order_id
+        if incoming_amount <= 0
+            respond(success: false, error: "Betrag muss größer als 0 sein")
+            return
+        end
+
+        # Find order by payment reference
+        order_result = neo4j_query(<<~END_OF_QUERY, {payment_ref: payment_ref})
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder {payment_reference: $payment_ref})
+            RETURN o.id AS order_id, o.total_price AS total_price, u.email AS user_email, u.name AS user_name, u.username AS user_username, o.payment_reference AS payment_reference
         END_OF_QUERY
         
-        if result.empty?
+        if order_result.empty?
             respond(success: false, error: "Bestellung nicht gefunden")
-        else
-            log("Bestellung #{result.first['order_id']} über Quick Payment als bezahlt markiert (Ref: #{payment_ref})")
-            respond(success: true)
+            return
         end
+
+        order = order_result.first
+        order_id = order['order_id']
+
+        # Calculate remaining amount
+        payment_info = calculate_payment_status(order_id)
+        remaining = payment_info[:remaining]
+
+        if remaining <= 0
+            respond(success: false, error: "Bestellung ist bereits vollständig bezahlt")
+            return
+        end
+
+        # Determine how much to record as payment vs overpayment
+        payment_amount = [incoming_amount, remaining].min
+        overpayment_amount = [incoming_amount - remaining, 0].max
+
+        result = record_payment_for_order(order_id, payment_amount, @session_user[:username], note: "Quick Payment (Ref: #{payment_ref}), Eingegangen: #{sprintf('%.2f', incoming_amount)}€")
+
+        # If there is overpayment, create an error record for the difference
+        overpayment_recorded = false
+        if overpayment_amount > 0
+            error_params = {
+                order_id: RandomTag::generate(8),
+                payment_ref: "ÜBERZAHLUNG-#{payment_ref}",
+                status: 'error',
+                created_at: DateTime.now.to_s,
+                error_reason: "Überzahlung #{sprintf('%.2f', overpayment_amount)}€ für Ref: #{payment_ref} (Eingegangen: #{sprintf('%.2f', incoming_amount)}€, Offen: #{sprintf('%.2f', remaining)}€)"
+            }
+
+            neo4j_query(<<~END_OF_QUERY, error_params)
+                CREATE (o:TicketOrder {
+                    id: $order_id,
+                    ticket_count: 0,
+                    total_price: 0,
+                    individual_ticket_price: 0,
+                    payment_reference: $payment_ref,
+                    status: $status,
+                    created_at: $created_at,
+                    error_reason: $error_reason
+                })
+            END_OF_QUERY
+
+            log("Überzahlung #{sprintf('%.2f', overpayment_amount)}€ für Ref: #{payment_ref} als Fehler markiert")
+            overpayment_recorded = true
+        end
+
+        # Send email if enabled and order is now fully paid
+        if send_email && result[:payment_info][:status] == 'paid'
+            begin
+                rendered = render_manual_mail_template('payment_received', {
+                    'NAME' => order['user_name'] || 'Nutzer',
+                    'ORDER_ID' => order['order_id'],
+                    'TOTAL_PRICE' => sprintf("%.2f", order['total_price'] || 0),
+                    'REFERENCE' => order['payment_reference'] || 'N/A',
+                    'TICKET_LINK' => "#{WEB_ROOT}/ticket_download"
+                })
+                if rendered
+                    send_manual_mail(
+                        to_email: order['user_email'],
+                        subject: rendered[:subject],
+                        body: rendered[:body],
+                        template_key: 'payment_received',
+                        sender_username: @session_user[:username],
+                        recipient_username: order['user_username'],
+                        order_id: order_id
+                    )
+                end
+            rescue => e
+                STDERR.puts "Error sending payment email via quick payment: #{e.message}"
+            end
+        end
+
+        log("Bestellung #{order_id} über Quick Payment: #{sprintf('%.2f', payment_amount)}€ verbucht (Ref: #{payment_ref})")
+        respond(success: true, payment_info: result[:payment_info], overpayment: overpayment_amount, overpayment_recorded: overpayment_recorded)
     end
 
     # Mark payment as error

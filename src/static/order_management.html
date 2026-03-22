@@ -312,12 +312,25 @@
 </div>
 
 <!-- Order Details Modal -->
-<div class="modal fade" id="orderDetailsModal" tabindex="-1" aria-labelledby="orderDetailsModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+<div class="modal fade" id="orderDetailsModal" tabindex="-1" aria-labelledby="orderDetailsModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-fullscreen">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title fs-5" id="orderDetailsModalLabel">Bestellung #<span id="order_id_display"></span></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+                <div>
+                    <h5 class="modal-title" id="orderDetailsModalLabel">Bestellung #<span id="order_id_display"></span></h5>
+                    <span class="badge bg-info fs-6 mt-1" id="event_badge"><i class="bi bi-calendar-event"></i> <span id="event_name_display"></span></span>
+                </div>
+                <div class="d-flex gap-2 align-items-center">
+                    <button type="button" class="btn btn-primary" id="edit_order_btn" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                        <i class="bi bi-pencil"></i> Bearbeiten
+                    </button>
+                    <button type="button" class="btn btn-danger" id="delete_order_btn" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                        <i class="bi bi-trash"></i> Löschen
+                    </button>
+                    <button type="button" class="btn btn-secondary" id="close_modal_btn">
+                        <i class="bi bi-x-lg"></i> Schließen
+                    </button>
+                </div>
             </div>
             <div class="modal-body">
                 <form id="order_form">
@@ -339,7 +352,7 @@
                         <div class="col-md-6">
                             <label class="form-label">Benutzerprofil</label>
                             <div>
-                                <a href="#" id="user_profile_link_modal" class="btn btn-sm btn-outline-primary" target="_blank">
+                                <a href="#" id="user_profile_link" class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener noreferrer">
                                     <i class="bi bi-person"></i> Benutzerprofil anzeigen
                                 </a>
                                 <br><small class="text-muted">Adresse und weitere Details im Benutzerprofil</small>
@@ -356,21 +369,22 @@
                     <div class="row mb-3">
                         <div class="col-md-3">
                             <label for="ticket_count_input" class="form-label">Anzahl Tickets</label>
-                            <input type="number" class="form-control" id="ticket_count_input" min="1">
+                            <input type="number" class="form-control" id="ticket_count_input" min="1" disabled>
                         </div>
                         <div class="col-md-3">
                             <label for="total_price_input" class="form-label">Gesamtpreis</label>
-                            <input type="number" class="form-control" id="total_price_input" min="0" step="0.01">
+                            <input type="number" class="form-control" id="total_price_input" min="0" step="0.01" disabled>
                         </div>
                         <div class="col-md-3">
                             <label for="payment_reference_input" class="form-label">Referenz</label>
-                            <input type="text" class="form-control" id="payment_reference_input">
+                            <input type="text" class="form-control" id="payment_reference_input" disabled>
                         </div>
                         <div class="col-md-3">
                             <label for="status_input" class="form-label">Status</label>
-                            <select class="form-control" id="status_input">
+                            <select class="form-control" id="status_input" disabled>
                                 <option value="pending">Ausstehend</option>
-                                <option value="paid">Bezahlt</option>
+                                <option value="paid" disabled>Bezahlt (automatisch)</option>
+                                <option value="partially_paid" disabled>Teilweise bezahlt (automatisch)</option>
                                 <option value="offline_payment">Barzahlung vor Ort</option>
                                 <option value="in_review">Manuelle Prüfung</option>
                                 <option value="on_hold">Pausiert</option>
@@ -379,8 +393,65 @@
                                 <option value="cancelled">Storniert</option>
                                 <option value="cancelled_by_user">Storniert durch Käufer</option>
                             </select>
+                            <small class="text-muted">Zahlungsstatus wird automatisch berechnet</small>
                         </div>
                     </div>
+
+                    <!-- Payment Summary Section (hidden for offline events) -->
+                    <div id="payment_sections">
+                        <h6 class="mb-3"><i class="bi bi-cash-stack"></i> Zahlungsübersicht</h6>
+                        <div class="row mb-3">
+                            <div class="col-md-3">
+                                <label class="form-label">Gesamtbetrag</label>
+                                <div class="form-control-plaintext fw-bold" id="payment_total_display">0,00 €</div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Bezahlt</label>
+                                <div class="form-control-plaintext fw-bold text-success" id="payment_paid_display">0,00 €</div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Ausstehend</label>
+                                <div class="form-control-plaintext fw-bold text-danger" id="payment_remaining_display">0,00 €</div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Zahlungsstatus</label>
+                                <div id="payment_status_badge_display"></div>
+                                <div id="payment_overpayment_display" style="display:none;">
+                                    <small class="text-warning"><i class="bi bi-exclamation-triangle"></i> Überzahlung: <span id="overpayment_amount">0,00</span> €</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Payment History -->
+                        <div id="payment_history_section" style="display:none;">
+                            <h6 class="mb-2"><i class="bi bi-clock-history"></i> Zahlungsverlauf</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Datum</th>
+                                            <th>Betrag</th>
+                                            <th>Verbucht von</th>
+                                            <th>Notiz</th>
+                                            <th>Aktionen</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="payment_history_tbody">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Record Payment Button (hidden for offline events) -->
+                    <div id="record_payment_section_wrapper">
+                        <div class="mb-3" id="record_payment_section" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                            <button type="button" class="btn btn-sm btn-success" id="record_payment_btn">
+                                <i class="bi bi-plus-circle"></i> Zahlung verbuchen
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="row mb-3">
                         <div class="col-md-4">
                             <label for="created_at_input" class="form-label">Bestellt am</label>
@@ -407,29 +478,209 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Payment Requests Section -->
+                    <h6 class="mb-3"><i class="bi bi-credit-card"></i> Zahlungsaufforderungen</h6>
+                    <div id="payment_requests_section">
+                    </div>
+                    
+                    <div class="mb-3" id="send_payment_request_section" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                        <button type="button" class="btn btn-sm btn-info" id="send_payment_request_btn" style="display:none;">
+                            <i class="bi bi-envelope-paper"></i> Zahlungsaufforderung senden
+                        </button>
+                    </div>
+
                     <!-- Notes Section -->
+                    <h6 class="mb-3"><i class="bi bi-journal-text"></i> Notizen</h6>
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="notes_input" class="form-label">
                                 Notiz <small class="text-muted">(sichtbar für Kunde und Admin)</small>
                             </label>
-                            <textarea class="form-control" id="notes_input" rows="2"></textarea>
+                            <textarea class="form-control" id="notes_input" rows="3" disabled></textarea>
                         </div>
                         <div class="col-md-6" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
                             <label for="admin_notes_input" class="form-label">
                                 Admin-Notiz <small class="text-danger">(nur für Admins sichtbar)</small>
                             </label>
-                            <textarea class="form-control" id="admin_notes_input" rows="2"></textarea>
+                            <textarea class="form-control" id="admin_notes_input" rows="3" disabled></textarea>
                         </div>
                     </div>
+
+                    <!-- Participants Information -->
+                    <h6 class="mb-3"><i class="bi bi-people"></i> Teilnehmer</h6>
+                    <div id="participants_section">
+                    </div>
                 </form>
+
+                <!-- Manual Email Section -->
+                <div class="card mt-4" id="manual_mail_section" #{can_send_manual_mail? ? "" : "style='display:none'"}>
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-envelope"></i> Manuelle E-Mails</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap gap-2" id="order_mail_buttons">
+                            <button type="button" class="btn btn-outline-success manual-mail-btn" data-template="order_accepted_cash">
+                                <i class="bi bi-envelope"></i> Bestellung angenommen (Barzahlung vor Ort) <span class="badge bg-secondary mail-counter" data-template="order_accepted_cash">0</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-success manual-mail-btn" data-template="payment_received">
+                                <i class="bi bi-envelope"></i> Zahlung eingegangen <span class="badge bg-secondary mail-counter" data-template="payment_received">0</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled">
+                                <i class="bi bi-envelope"></i> Bestellung storniert <span class="badge bg-secondary mail-counter" data-template="order_cancelled">0</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled_user_request">
+                                <i class="bi bi-envelope"></i> Storniert (auf Wunsch) <span class="badge bg-secondary mail-counter" data-template="order_cancelled_user_request">0</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-info manual-mail-btn" data-template="order_reminder_1">
+                                <i class="bi bi-envelope"></i> Erinnerung 1 <span class="badge bg-secondary mail-counter" data-template="order_reminder_1">0</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-info manual-mail-btn" data-template="order_reminder_2">
+                                <i class="bi bi-envelope"></i> Erinnerung 2 <span class="badge bg-secondary mail-counter" data-template="order_reminder_2">0</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary manual-mail-btn" data-template="order_adjusted">
+                                <i class="bi bi-envelope"></i> Bestellung angepasst <span class="badge bg-secondary mail-counter" data-template="order_adjusted">0</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary manual-mail-btn" data-template="order_adjusted_user_request">
+                                <i class="bi bi-envelope"></i> Angepasst (auf Wunsch) <span class="badge bg-secondary mail-counter" data-template="order_adjusted_user_request">0</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-warning manual-mail-btn" data-template="order_issue">
+                                <i class="bi bi-envelope"></i> Problem mit Bestellung <span class="badge bg-secondary mail-counter" data-template="order_issue">0</span>
+                            </button>
+                        </div>
+
+                        <hr>
+                        
+                        <!-- Mail Log Section -->
+                        <h6 class="mb-3"><i class="bi bi-clock-history"></i> E-Mail-Verlauf</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover" id="order_mail_log_table">
+                                <thead>
+                                    <tr>
+                                        <th>Datum</th>
+                                        <th>Template</th>
+                                        <th>Betreff</th>
+                                        <th>Gesendet von</th>
+                                        <th>Aktionen</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="order_mail_log_tbody">
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted"><em>Keine E-Mails gesendet</em></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-danger me-auto" id="delete_order_modal_btn" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
-                    <i class="bi bi-trash"></i> Bestellung löschen
+                <button type="button" class="btn btn-success" id="save_order_btn" style="display:none;" #{user_has_permission?("manage_orders") ? "" : "disabled"}>
+                    <i class="bi bi-save"></i> Speichern
                 </button>
+                <button type="button" class="btn btn-secondary" id="cancel_edit_btn" style="display:none;">
+                    <i class="bi bi-x"></i> Abbrechen
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manual Email Compose Modal -->
+<div class="modal fade" id="manualMailModal" tabindex="-1" aria-labelledby="manualMailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="manualMailModalLabel"><i class="bi bi-envelope"></i> E-Mail bearbeiten und senden</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="mail_template_key">
+                <div class="mb-3">
+                    <label for="mail_recipient" class="form-label">Empfänger</label>
+                    <input type="text" class="form-control" id="mail_recipient" readonly>
+                </div>
+                <div class="mb-3">
+                    <label for="mail_subject" class="form-label">Betreff</label>
+                    <input type="text" class="form-control" id="mail_subject">
+                </div>
+                <div class="mb-3">
+                    <label for="mail_body" class="form-label">Nachricht (HTML)</label>
+                    <textarea class="form-control" id="mail_body" rows="12"></textarea>
+                    <small class="text-muted">Ersetze Platzhalter wie [X], [REASON] durch den gewünschten Text. Die Grußformel am Ende wird automatisch hinzugefügt.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="send_manual_mail_btn">
+                    <i class="bi bi-send"></i> E-Mail senden
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Mail Log Detail Modal -->
+<div class="modal fade" id="mailLogDetailModal" tabindex="-1" aria-labelledby="mailLogDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="mailLogDetailModalLabel"><i class="bi bi-envelope-open"></i> E-Mail-Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <strong>Gesendet:</strong> <span id="log_detail_timestamp"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>Von:</strong> <span id="log_detail_sender"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>An:</strong> <span id="log_detail_recipient"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>Betreff:</strong> <span id="log_detail_subject"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>Inhalt:</strong>
+                    <div class="border p-3 bg-light" id="log_detail_body" style="max-height: 400px; overflow-y: auto;"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
-                <button type="button" class="btn btn-primary" id="save_order_btn" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>Speichern</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Record Payment Modal -->
+<div class="modal fade" id="recordPaymentModal" tabindex="-1" aria-labelledby="recordPaymentModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="recordPaymentModalLabel"><i class="bi bi-cash-stack"></i> Zahlung verbuchen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="payment_amount_input" class="form-label">Betrag (€)</label>
+                    <input type="number" class="form-control" id="payment_amount_input" min="0.01" step="0.01" required>
+                    <small class="text-muted">Offener Betrag: <span id="payment_remaining_hint">0,00</span> €</small>
+                </div>
+                <div class="mb-3">
+                    <label for="payment_note_input" class="form-label">Notiz (optional)</label>
+                    <input type="text" class="form-control" id="payment_note_input" placeholder="z.B. Banküberweisung, Barzahlung...">
+                </div>
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="payment_send_email_check" checked>
+                    <label class="form-check-label" for="payment_send_email_check">E-Mail senden bei vollständiger Bezahlung</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-success" id="confirm_record_payment_btn">
+                    <i class="bi bi-check-circle"></i> Zahlung verbuchen
+                </button>
             </div>
         </div>
     </div>
@@ -437,7 +688,9 @@
 
 <script>
     let currentOrder = null;
+    let currentOrderId = null;
     let currentBankAccounts = [];
+    let hasUnsavedChanges = false;
     
     // Format price for display
     function formatPrice(price) {
@@ -505,7 +758,6 @@
                     // Actions column
                     let actions = $('<div class="d-flex flex-nowrap gap-1">');
 
-                    // Mark as paid/unpaid buttons
                     if (`#{user_has_permission?("manage_orders")}` ? "true" : "false") {
                         // Send payment request button (only if no request sent yet and not paid/offline_payment)
                         if (order.status !== 'paid' && order.status !== 'offline_payment' && (!order.latest_payment_request || !order.latest_payment_request.id)) {
@@ -517,29 +769,15 @@
                             actions.append(sendPrButton);
                         }
                         
-                        if (order.status !== 'paid' && order.status !== 'offline_payment') {
-                            let paidButton = $('<button>')
+                        // Green tick: accept order for offline events (no payment required)
+                        if (order.event_payment_required === false && order.status !== 'offline_payment') {
+                            let acceptButton = $('<button>')
                                 .addClass('btn btn-sm btn-success me-1')
                                 .html('<i class="bi bi-check"></i>')
-                                .attr('title', 'Bestätigen')
-                                .click((e) => { e.stopPropagation(); markOrderPaid(order.order_id); });
-                            actions.append(paidButton);
-                        } else {
-                            let unpaidButton = $('<button>')
-                                .addClass('btn btn-sm btn-warning me-1')
-                                .html('<i class="bi bi-x"></i>')
-                                .attr('title', 'Als unbezahlt markieren')
-                                .click((e) => { e.stopPropagation(); markOrderUnpaid(order.order_id); });
-                            actions.append(unpaidButton);
+                                .attr('title', 'Bestellung annehmen')
+                                .click((e) => { e.stopPropagation(); acceptOrderOffline(order.order_id); });
+                            actions.append(acceptButton);
                         }
-                        
-                        // Delete order button
-                        let deleteButton = $('<button>')
-                            .addClass('btn btn-sm btn-danger me-1')
-                            .html('<i class="bi bi-trash"></i>')
-                            .attr('title', 'Bestellung löschen')
-                            .click((e) => { e.stopPropagation(); deleteOrder(order.order_id, order.payment_reference); });
-                        actions.append(deleteButton);
                     }
                     
                     row.append($('<td>').append(actions));
@@ -638,7 +876,7 @@
     function showParticipants(participants) {
         let html = '<table class="table table-sm"><thead><tr><th>Ticket #</th><th>Name</th><th>Telefon</th><th>E-Mail</th></tr></thead><tbody>';
         for (let participant of participants) {
-            if (participant.name) { // Only show non-empty participants
+            if (participant.name) {
                 html += `<tr><td>${participant.ticket_number}</td><td>${participant.name}</td><td>${participant.phone || '-'}</td><td>${participant.email || '-'}</td></tr>`;
             }
         }
@@ -649,74 +887,401 @@
     }
     
     function editOrder(order) {
-        // Redirect to dedicated order detail page
-        window.open(`/order_detail/${order.order_id}`, '_blank');
+        // Load full order details via API and show in modal
+        api_call('/api/get_ticket_order', {order_id: order.order_id}, function(data) {
+            if (data.success) {
+                currentOrder = data.order;
+                currentOrderId = data.order.order_id;
+                hasUnsavedChanges = false;
+                populateOrderForm(data.order);
+                cancelEditMode();
+                new bootstrap.Modal(document.getElementById('orderDetailsModal')).show();
+            }
+        });
     }
     
+    function loadOrderDetails(orderId) {
+        api_call('/api/get_ticket_order', {order_id: orderId}, function(data) {
+            if (data.success) {
+                currentOrder = data.order;
+                populateOrderForm(data.order);
+            }
+        });
+    }
+    
+    function populateOrderForm(order) {
+        $('#order_id_display').text(order.order_id);
+        $('#order_id_input').val(order.order_id);
+        
+        // Event information - display prominently
+        let eventDisplayText = order.event_name || '';
+        if (order.event_year) {
+            eventDisplayText += ' ' + order.event_year;
+        }
+        $('#event_name_display').text(eventDisplayText || 'Unbekanntes Event');
+        
+        // User information
+        $('#user_name_input').val(order.user_name);
+        $('#user_email_input').val(order.user_email);
+        $('#user_profile_link').attr('href', '/user/' + order.user_username);
+        $('#user_phone_input').val(order.user_phone || '');
+        
+        // Order information
+        $('#ticket_count_input').val(order.ticket_count);
+        $('#total_price_input').val(order.total_price);
+        $('#payment_reference_input').val(order.payment_reference);
+        $('#status_input').val(order.status);
+        $('#created_at_input').val(new Date(order.created_at).toLocaleString('de-DE'));
+        $('#paid_at_input').val(order.paid_at ? new Date(order.paid_at).toLocaleString('de-DE') : '');
+        
+        // Hide payment sections for offline events
+        if (order.event_payment_required === false) {
+            $('#payment_sections').hide();
+            $('#record_payment_section_wrapper').hide();
+        } else {
+            $('#payment_sections').show();
+            $('#record_payment_section_wrapper').show();
+        }
+        
+        // Payment summary
+        const totalPrice = parseFloat(order.total_price) || 0;
+        const totalPaid = parseFloat(order.total_paid) || 0;
+        const remaining = parseFloat(order.remaining_balance) || 0;
+        const overpayment = parseFloat(order.overpayment) || 0;
+        const paymentStatus = order.payment_status || 'pending';
+
+        $('#payment_total_display').text(totalPrice.toFixed(2) + ' €');
+        $('#payment_paid_display').text(totalPaid.toFixed(2) + ' €');
+        $('#payment_remaining_display').text(remaining.toFixed(2) + ' €');
+        
+        // Payment status badge
+        const statusText = getOrderStatusText(paymentStatus);
+        const statusClass = getOrderStatusBadgeClass(paymentStatus);
+        $('#payment_status_badge_display').html(`<span class="badge ${statusClass} fs-6">${statusText}</span>`);
+        
+        // Overpayment warning
+        if (overpayment > 0) {
+            $('#overpayment_amount').text(overpayment.toFixed(2));
+            $('#payment_overpayment_display').show();
+        } else {
+            $('#payment_overpayment_display').hide();
+        }
+
+        // Render payment history
+        renderPaymentHistory(order.payments || []);
+        
+        // Notes fields
+        $('#notes_input').val(order.notes || '');
+        $('#admin_notes_input').val(order.admin_notes || '');
+        
+        // Check ticket generation status
+        checkTicketGenerationStatus(order.order_id, order.status);
+        
+        // Render payment requests
+        renderPaymentRequests(order.payment_requests || [], order);
+        
+        // Render participants
+        renderParticipants(order.participants || []);
+        
+        // Initialize manual mail section
+        initializeMailSection();
+    }
+    
+    function enableEditMode() {
+        // Enable all editable fields
+        $('#ticket_count_input, #total_price_input, #payment_reference_input, #status_input').prop('disabled', false);
+        $('#notes_input, #admin_notes_input').prop('disabled', false);
+        $('.participant-name, .participant-email, .participant-phone, .participant-birthdate').prop('disabled', false);
+        
+        // Show add/remove participant buttons
+        $('#add_participant_btn').show();
+        $('.remove-participant-btn').show();
+        
+        // Toggle button visibility
+        $('#edit_order_btn').hide();
+        $('#delete_order_btn').hide();
+        $('#save_order_btn').show();
+        $('#cancel_edit_btn').show();
+    }
+    
+    function cancelEditMode() {
+        // Disable all editable fields
+        $('#ticket_count_input, #total_price_input, #payment_reference_input, #status_input').prop('disabled', true);
+        $('#notes_input, #admin_notes_input').prop('disabled', true);
+        $('.participant-name, .participant-email, .participant-phone, .participant-birthdate').prop('disabled', true);
+        
+        // Hide add/remove participant buttons
+        $('#add_participant_btn').hide();
+        $('.remove-participant-btn').hide();
+        
+        // Toggle button visibility
+        $('#edit_order_btn').show();
+        $('#delete_order_btn').show();
+        $('#save_order_btn').hide();
+        $('#cancel_edit_btn').hide();
+        
+        hasUnsavedChanges = false;
+    }
+    
+    // Render payment history table
+    function renderPaymentHistory(payments) {
+        const tbody = $('#payment_history_tbody');
+        tbody.empty();
+        
+        if (payments && payments.length > 0) {
+            $('#payment_history_section').show();
+            payments.forEach(function(payment) {
+                const row = $('<tr>');
+                const timestamp = payment.timestamp ? new Date(payment.timestamp).toLocaleString('de-DE') : '-';
+                row.append($('<td>').text(timestamp));
+                row.append($('<td>').text(Number(payment.amount || 0).toFixed(2) + ' €'));
+                row.append($('<td>').text(payment.recorded_by || '-'));
+                row.append($('<td>').text(payment.note || '-'));
+                
+                const actionsCell = $('<td>');
+                const revertBtn = $('<button>')
+                    .addClass('btn btn-sm btn-outline-danger')
+                    .html('<i class="bi bi-arrow-counterclockwise"></i> Stornieren')
+                    .attr('title', 'Zahlung stornieren')
+                    .on('click', function() {
+                        revertPayment(payment.id, payment.amount);
+                    });
+                actionsCell.append(revertBtn);
+                row.append(actionsCell);
+                
+                tbody.append(row);
+            });
+        } else {
+            $('#payment_history_section').hide();
+        }
+    }
+    
+    // Render payment requests section
+    function renderPaymentRequests(paymentRequests, order) {
+        let html = '';
+        
+        if (paymentRequests.length === 0) {
+            html = '<div class="alert alert-secondary"><i class="bi bi-info-circle"></i> Keine Zahlungsaufforderung gesendet</div>';
+            // Show send button if order is not paid
+            if (order.status !== 'paid') {
+                $('#send_payment_request_btn').show();
+            }
+        } else {
+            for (const pr of paymentRequests) {
+                let statusBadge = '';
+                if (pr.status === 'paid') {
+                    statusBadge = '<span class="badge bg-success">Bezahlt</span>';
+                } else if (pr.status === 'sent') {
+                    statusBadge = '<span class="badge bg-info">Gesendet</span>';
+                } else {
+                    statusBadge = '<span class="badge bg-secondary">Nicht gesendet</span>';
+                }
+                
+                html += `
+                    <div class="card mb-2">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>Bankkonto:</strong> ${pr.bank_account_name || '-'}
+                                    ${pr.bank_name ? `<br><small class="text-muted">${pr.bank_name}</small>` : ''}
+                                    ${pr.iban ? `<br><small class="text-muted">IBAN: ${pr.iban}</small>` : ''}
+                                </div>
+                                <div class="text-end">
+                                    ${statusBadge}
+                                    <br><small class="text-muted">${pr.sent_at ? 'Gesendet: ' + new Date(pr.sent_at).toLocaleDateString('de-DE') : ''}</small>
+                                    ${pr.paid_at ? `<br><small class="text-success">Bezahlt: ${new Date(pr.paid_at).toLocaleDateString('de-DE')}</small>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Hide send button if payment request already exists
+            $('#send_payment_request_btn').hide();
+        }
+        
+        $('#payment_requests_section').html(html);
+    }
+    
+    function renderParticipants(participants) {
+        let html = '';
+        for (let i = 0; i < participants.length; i++) {
+            const participant = participants[i];
+            html += `
+                <div class="card mb-2 participant-card" data-index="${i}">
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-3">
+                                <label class="form-label">Ticket #${i + 1} - Name</label>
+                                <input type="text" class="form-control participant-name" data-index="${i}" value="${escapeHtml(participant.name || '')}" placeholder="Name des Teilnehmers" disabled>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">E-Mail</label>
+                                <input type="email" class="form-control participant-email" data-index="${i}" value="${escapeHtml(participant.email || '')}" placeholder="E-Mail (optional)" disabled>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Telefon</label>
+                                <input type="tel" class="form-control participant-phone" data-index="${i}" value="${escapeHtml(participant.phone || '')}" placeholder="Telefon (optional)" disabled>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Geburtsdatum</label>
+                                <input type="date" class="form-control participant-birthdate" data-index="${i}" value="${escapeHtml(participant.birthdate || '')}" disabled>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">&nbsp;</label>
+                                <button type="button" class="btn btn-outline-danger w-100 remove-participant-btn" data-index="${i}" style="display: none;">
+                                    <i class="bi bi-trash"></i> Entfernen
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Add button to add new participants
+        html += `
+            <div class="mt-3">
+                <button type="button" class="btn btn-sm btn-outline-primary" id="add_participant_btn" style="display: none;">
+                    <i class="bi bi-plus"></i> Teilnehmer hinzufügen
+                </button>
+            </div>
+        `;
+        
+        $('#participants_section').html(html);
+        
+        // Set up event handlers for remove buttons
+        $('.remove-participant-btn').on('click', function() {
+            const index = $(this).data('index');
+            $(`.participant-card[data-index="${index}"]`).remove();
+            renumberParticipants();
+        });
+        
+        // Set up event handler for add button
+        $('#add_participant_btn').on('click', addNewParticipant);
+    }
+    
+    function addNewParticipant() {
+        const participantCount = $('.participant-card').length;
+        const newIndex = participantCount;
+        
+        const newParticipantHtml = `
+            <div class="card mb-2 participant-card" data-index="${newIndex}">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-3">
+                            <label class="form-label">Ticket #${newIndex + 1} - Name</label>
+                            <input type="text" class="form-control participant-name" data-index="${newIndex}" value="" placeholder="Name des Teilnehmers">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">E-Mail</label>
+                            <input type="email" class="form-control participant-email" data-index="${newIndex}" value="" placeholder="E-Mail (optional)">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Telefon</label>
+                            <input type="tel" class="form-control participant-phone" data-index="${newIndex}" value="" placeholder="Telefon (optional)">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Geburtsdatum</label>
+                            <input type="date" class="form-control participant-birthdate" data-index="${newIndex}" value="">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">&nbsp;</label>
+                            <button type="button" class="btn btn-outline-danger w-100 remove-participant-btn" data-index="${newIndex}">
+                                <i class="bi bi-trash"></i> Entfernen
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        $('#add_participant_btn').before(newParticipantHtml);
+        
+        // Set up event handler for the new remove button
+        $(`.remove-participant-btn[data-index="${newIndex}"]`).on('click', function() {
+            const index = $(this).data('index');
+            $(`.participant-card[data-index="${index}"]`).remove();
+            renumberParticipants();
+        });
+    }
+    
+    function renumberParticipants() {
+        $('.participant-card').each(function(newIndex) {
+            $(this).attr('data-index', newIndex);
+            $(this).find('.participant-name').attr('data-index', newIndex);
+            $(this).find('.participant-email').attr('data-index', newIndex);
+            $(this).find('.participant-phone').attr('data-index', newIndex);
+            $(this).find('.participant-birthdate').attr('data-index', newIndex);
+            $(this).find('.remove-participant-btn').attr('data-index', newIndex);
+            $(this).find('label:first').text(`Ticket #${newIndex + 1} - Name`);
+        });
+    }
+    
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
     
     function saveOrderChanges() {
-        if (!currentOrder) return;
+        const orderId = $('#order_id_input').val();
         
-        // Collect form data
+        // Collect participants
+        const participants = [];
+        $('.participant-name').each(function(index) {
+            const i = $(this).data('index');
+            participants.push({
+                name: $(`.participant-name[data-index="${i}"]`).val(),
+                email: $(`.participant-email[data-index="${i}"]`).val(),
+                phone: $(`.participant-phone[data-index="${i}"]`).val(),
+                birthdate: $(`.participant-birthdate[data-index="${i}"]`).val()
+            });
+        });
+        
         const orderData = {
-            order_id: currentOrder.order_id,
+            order_id: orderId,
             ticket_count: parseInt($('#ticket_count_input').val()),
-            total_price: $('#total_price_input').val(),
+            total_price: parseFloat($('#total_price_input').val()),
             payment_reference: $('#payment_reference_input').val(),
             status: $('#status_input').val(),
             notes: $('#notes_input').val(),
             admin_notes: $('#admin_notes_input').val(),
-            paid_at: $('#paid_at_input').val() || null,
-            // Include user information for updating
-            user_name: $('#user_name_input').val(),
-            user_email: $('#user_email_input').val(),
-            user_phone: $('#user_phone_input').val()
+            participants: participants
         };
         
-        // Send update request
         api_call('/api/update_ticket_order', orderData, function(data) {
             if (data.success) {
-                $('#orderDetailsModal').modal('hide');
+                hasUnsavedChanges = false;
                 refresh_ticket_orders();
                 refreshStatistics();
-                showTemplateModal('Erfolg', 'Bestellung wurde erfolgreich aktualisiert.', 'OK', 'btn-success', null, null, function() {});
+                showTemplateModal('Erfolg', 'Bestellung wurde erfolgreich aktualisiert.', 'OK', 'btn-success', null, null, function() {
+                    loadOrderDetails(orderId);
+                    cancelEditMode();
+                });
             } else {
-                showTemplateModal('Fehler', data.error || 'Fehler beim Speichern der Änderungen', 'OK', 'btn-primary', null, null, function() {});
+                showTemplateModal('Fehler', data.error || 'Fehler beim Aktualisieren der Bestellung', 'OK', 'btn-primary', null, null, function() {});
             }
         });
     }
     
-    function markOrderPaid(orderId) {
-        api_call('/api/mark_order_paid', {order_id: orderId}, function(data) {
-            if (data.success) {
-                refresh_ticket_orders();
-                refreshStatistics();
-            }
-        });
-    }
-    
-    function markOrderUnpaid(orderId) {
-        api_call('/api/mark_order_unpaid', {order_id: orderId}, function(data) {
-            if (data.success) {
-                refresh_ticket_orders();
-                refreshStatistics();
-            }
-        });
-    }
-    
-    function deleteOrder(orderId, paymentReference) {
-        // Show confirmation dialog
+    function deleteOrder() {
+        const orderId = $('#order_id_input').val();
+        
         showTemplateModal(
-            'Bestellung löschen', 
-            `Möchtest du die Bestellung ${paymentReference} wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.`,
-            'Ja, löschen',
+            'Bestellung löschen',
+            'Möchten Sie diese Bestellung wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+            'Löschen',
             'btn-danger',
             'Abbrechen',
             'btn-secondary',
             function() {
-                // User confirmed deletion
                 api_call('/api/delete_ticket_order', {order_id: orderId}, function(data) {
                     if (data.success) {
+                        hasUnsavedChanges = false;
+                        bootstrap.Modal.getInstance(document.getElementById('orderDetailsModal')).hide();
                         refresh_ticket_orders();
                         refreshStatistics();
                         showTemplateModal('Erfolg', 'Bestellung wurde erfolgreich gelöscht.', 'OK', 'btn-success', null, null, function() {});
@@ -728,14 +1293,21 @@
         );
     }
     
+    function acceptOrderOffline(orderId) {
+        api_call('/api/mark_order_paid', {order_id: orderId}, function(data) {
+            if (data.success) {
+                refresh_ticket_orders();
+                refreshStatistics();
+            }
+        });
+    }
+    
     function generateOrderSummaryPDF() {
-        // Open PDF in new window
         window.open('/api/generate_order_summary_pdf', '_blank');
     }
     
     function generateOrderPDF() {
         if (!currentOrder) return;
-        // Open order-specific PDF in new window
         window.open(`/api/generate_order_pdf/${currentOrder.order_id}`, '_blank');
     }
     
@@ -759,15 +1331,14 @@
                 }
             });
         } else {
-            $('#generate_tickets_btn').hide();
             $('#tickets_status').hide();
+            $('#generate_tickets_btn').hide();
         }
     }
 
     function generateTickets() {
         if (!currentOrder) return;
         
-        // Show confirmation dialog
         showTemplateModal(
             'Tickets generieren', 
             `Möchtest du die Tickets für Bestellung ${currentOrder.payment_reference} generieren und freigeben? Nach der Freigabe können die Tickets von den Kunden heruntergeladen werden.`,
@@ -776,7 +1347,6 @@
             'Abbrechen',
             'btn-secondary',
             function() {
-                // User confirmed ticket generation
                 api_call('/api/generate_tickets', {order_id: currentOrder.order_id}, function(data) {
                     if (data.success) {
                         $('#generate_tickets_btn').hide();
@@ -790,17 +1360,41 @@
         );
     }
     
+    // Revert payment
+    function revertPayment(paymentId, amount) {
+        showTemplateModal(
+            'Zahlung stornieren',
+            `Möchtest du die Zahlung über ${Number(amount).toFixed(2)} € wirklich stornieren?`,
+            'Ja, stornieren',
+            'btn-danger',
+            'Abbrechen',
+            'btn-secondary',
+            function() {
+                api_call('/api/revert_payment', { payment_id: paymentId }, function(data) {
+                    if (data.success) {
+                        refresh_ticket_orders();
+                        refreshStatistics();
+                        showTemplateModal('Erfolg', 'Zahlung wurde storniert.', 'OK', 'btn-success', null, null, function() {
+                            loadOrderDetails(currentOrderId);
+                        });
+                    } else {
+                        showTemplateModal('Fehler', data.error || 'Fehler beim Stornieren der Zahlung.', 'OK', 'btn-primary', null, null, function() {});
+                    }
+                });
+            }
+        );
+    }
+    
     // ===========================================
     // Payment Request Functions
     // ===========================================
     
-    // Show modal to send individual payment request
+    // Show modal to send individual payment request (table-level)
     function showSendPaymentRequestModal(order) {
         $('#pr_order_id').val(order.order_id);
         $('#pr_order_ref').text(order.payment_reference);
         $('#pr_event_id').val(order.event_id);
         
-        // Load bank accounts for this event
         api_call('/api/get_bank_accounts', {event_id: order.event_id}, function(data) {
             if (data.success) {
                 currentBankAccounts = data.accounts;
@@ -809,7 +1403,7 @@
                     $('#bank_account_select').append(`<option value="${account.id}">${account.account_name} (${account.percentage}%)</option>`);
                 }
                 $('#bank_account_details').hide();
-                $('#sendPaymentRequestModal').modal('show');
+                new bootstrap.Modal(document.getElementById('sendPaymentRequestModal')).show();
             } else {
                 showTemplateModal('Fehler', 'Keine Bankkonten für dieses Event konfiguriert. Bitte zuerst Bankkonten in den Event-Einstellungen hinterlegen.', 'OK', 'btn-primary', null, null, function() {});
             }
@@ -854,6 +1448,9 @@
                 showTemplateModal('Erfolg', 'Zahlungsaufforderung erfolgreich gesendet.', 'OK', 'btn-success', null, null, function() {
                     refresh_ticket_orders();
                     refreshStatistics();
+                    if (currentOrderId) {
+                        loadOrderDetails(currentOrderId);
+                    }
                 });
             } else {
                 showTemplateModal('Fehler', data.error || 'Fehler beim Senden der Zahlungsaufforderung', 'OK', 'btn-primary', null, null, function() {});
@@ -863,7 +1460,6 @@
     
     // Show bulk payment request modal
     function showBulkPaymentRequestModal() {
-        // Load events for selection
         api_call('/api/get_events', {}, function(data) {
             if (data.success) {
                 $('#bulk_event_select').empty().append('<option value="">Event auswählen...</option>');
@@ -871,7 +1467,7 @@
                     $('#bulk_event_select').append(`<option value="${event.id}">${event.name} ${event.year}</option>`);
                 }
                 $('#bulk_preview').hide();
-                $('#bulkPaymentRequestModal').modal('show');
+                new bootstrap.Modal(document.getElementById('bulkPaymentRequestModal')).show();
             }
         });
     }
@@ -924,6 +1520,252 @@
         });
     }
     
+    // Record payment modal handler
+    $('#record_payment_btn').on('click', function() {
+        if (!currentOrder) return;
+        const remaining = currentOrder.remaining_balance != null ? Number(currentOrder.remaining_balance) : (parseFloat(currentOrder.total_price) || 0);
+        $('#payment_amount_input').val(remaining > 0 ? remaining.toFixed(2) : '');
+        $('#payment_remaining_hint').text(remaining.toFixed(2));
+        $('#payment_note_input').val('');
+        $('#payment_send_email_check').prop('checked', true);
+        new bootstrap.Modal(document.getElementById('recordPaymentModal')).show();
+    });
+    
+    // Confirm record payment
+    $('#confirm_record_payment_btn').on('click', function() {
+        if (!currentOrder) return;
+        
+        const amount = parseFloat($('#payment_amount_input').val());
+        const note = $('#payment_note_input').val();
+        const sendEmail = $('#payment_send_email_check').is(':checked');
+        
+        if (!amount || amount <= 0) {
+            showTemplateModal('Fehler', 'Bitte gib einen gültigen Betrag ein.', 'OK', 'btn-primary', null, null, function() {});
+            return;
+        }
+        
+        const btn = $(this);
+        btn.prop('disabled', true);
+        
+        api_call('/api/record_payment', {
+            order_id: currentOrder.order_id,
+            amount: amount,
+            note: note,
+            send_email: sendEmail
+        }, function(data) {
+            btn.prop('disabled', false);
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('recordPaymentModal')).hide();
+                refresh_ticket_orders();
+                refreshStatistics();
+                showTemplateModal('Erfolg', 'Zahlung wurde erfolgreich verbucht.', 'OK', 'btn-success', null, null, function() {
+                    loadOrderDetails(currentOrderId);
+                });
+            } else {
+                showTemplateModal('Fehler', data.error || 'Fehler beim Verbuchen der Zahlung.', 'OK', 'btn-primary', null, null, function() {});
+            }
+        }, function() {
+            btn.prop('disabled', false);
+            showTemplateModal('Fehler', 'Netzwerkfehler beim Verbuchen der Zahlung.', 'OK', 'btn-primary', null, null, function() {});
+        });
+    });
+    
+    // Order-level send payment request button
+    $('#send_payment_request_btn').click(function() {
+        if (!currentOrder) return;
+        
+        // Set fields for the shared sendPaymentRequestModal
+        $('#pr_order_id').val(currentOrder.order_id);
+        $('#pr_order_ref').text(currentOrder.payment_reference);
+        $('#pr_event_id').val(currentOrder.event_id);
+        
+        api_call('/api/get_bank_accounts', {event_id: currentOrder.event_id}, function(data) {
+            if (data.success && data.accounts && data.accounts.length > 0) {
+                currentBankAccounts = data.accounts;
+                $('#bank_account_select').empty().append('<option value="">Bankkonto auswählen...</option>');
+                for (let account of data.accounts) {
+                    $('#bank_account_select').append(`<option value="${account.id}">${account.account_name} (${account.percentage}%)</option>`);
+                }
+                $('#bank_account_details').hide();
+                new bootstrap.Modal(document.getElementById('sendPaymentRequestModal')).show();
+            } else {
+                showTemplateModal('Fehler', 'Keine Bankkonten für dieses Event konfiguriert. Bitte zuerst Bankkonten in den Event-Einstellungen hinterlegen.', 'OK', 'btn-primary', null, null, function() {});
+            }
+        });
+    });
+    
+    // Track changes on form inputs
+    $(document).on('change input', '#order_form input, #order_form select, #order_form textarea', function() {
+        if ($('#save_order_btn').is(':visible')) {
+            hasUnsavedChanges = true;
+        }
+    });
+    
+    // Close modal handler with unsaved changes check
+    $('#close_modal_btn').on('click', function() {
+        if (hasUnsavedChanges) {
+            showTemplateModal(
+                'Ungespeicherte Änderungen',
+                'Es gibt ungespeicherte Änderungen. Möchtest du wirklich schließen?',
+                'Ja, schließen',
+                'btn-danger',
+                'Abbrechen',
+                'btn-secondary',
+                function() {
+                    hasUnsavedChanges = false;
+                    bootstrap.Modal.getInstance(document.getElementById('orderDetailsModal')).hide();
+                }
+            );
+        } else {
+            bootstrap.Modal.getInstance(document.getElementById('orderDetailsModal')).hide();
+        }
+    });
+    
+    // ==================== Manual Mail Functions ====================
+    
+    function loadMailCounters() {
+        if (!currentOrder) return;
+        
+        api_call('/api/manual_mail/order_counters', { order_id: currentOrder.order_id }, function(data) {
+            if (data.success) {
+                $('.mail-counter').each(function() {
+                    const templateKey = $(this).data('template');
+                    const count = data.counters[templateKey] || 0;
+                    $(this).text(count);
+                    if (count > 0) {
+                        $(this).removeClass('bg-secondary').addClass('bg-primary');
+                    } else {
+                        $(this).removeClass('bg-primary').addClass('bg-secondary');
+                    }
+                });
+            }
+        });
+    }
+    
+    function loadMailLog() {
+        if (!currentOrder) return;
+        
+        api_call('/api/manual_mail/order_logs', { order_id: currentOrder.order_id }, function(data) {
+            if (data.success && data.logs && data.logs.length > 0) {
+                const tbody = $('#order_mail_log_tbody');
+                tbody.empty();
+                
+                data.logs.forEach(function(log) {
+                    const row = $('<tr>');
+                    const timestamp = new Date(log.timestamp);
+                    row.append($('<td>').text(timestamp.toLocaleString('de-DE')));
+                    row.append($('<td>').text(log.template_key));
+                    row.append($('<td>').text(log.subject));
+                    row.append($('<td>').text(log.sender_username));
+                    
+                    const actionsCell = $('<td>');
+                    const viewBtn = $('<button>')
+                        .addClass('btn btn-sm btn-outline-info')
+                        .html('<i class="bi bi-eye"></i>')
+                        .attr('title', 'Details anzeigen')
+                        .on('click', function() {
+                            showMailLogDetail(log.id);
+                        });
+                    actionsCell.append(viewBtn);
+                    row.append(actionsCell);
+                    
+                    tbody.append(row);
+                });
+            } else {
+                $('#order_mail_log_tbody').html('<tr><td colspan="5" class="text-center text-muted"><em>Keine E-Mails gesendet</em></td></tr>');
+            }
+        });
+    }
+    
+    function showMailLogDetail(logId) {
+        api_call('/api/manual_mail/log_details', { log_id: logId }, function(data) {
+            if (data.success && data.log) {
+                const log = data.log;
+                $('#log_detail_timestamp').text(new Date(log.timestamp).toLocaleString('de-DE'));
+                $('#log_detail_sender').text(log.sender_username);
+                $('#log_detail_recipient').text(log.recipient_email);
+                $('#log_detail_subject').text(log.subject);
+                $('#log_detail_body').text(log.body);
+                new bootstrap.Modal(document.getElementById('mailLogDetailModal')).show();
+            } else {
+                showTemplateModal('Fehler', 'Log-Details konnten nicht geladen werden.', 'OK', 'btn-primary', null, null, function() {});
+            }
+        });
+    }
+    
+    $(document).on('click', '.manual-mail-btn', function() {
+        if (!currentOrder) return;
+        
+        const templateKey = $(this).data('template');
+        
+        api_call('/api/manual_mail/get_template', {
+            template_key: templateKey,
+            order_id: currentOrder.order_id,
+            username: currentOrder.user_username
+        }, function(data) {
+            if (data.success && data.template) {
+                $('#mail_template_key').val(templateKey);
+                $('#mail_recipient').val(currentOrder.user_email + ' (' + currentOrder.user_name + ')');
+                $('#mail_subject').val(data.template.subject);
+                $('#mail_body').val(data.template.body);
+                new bootstrap.Modal(document.getElementById('manualMailModal')).show();
+            } else {
+                showTemplateModal('Fehler', data.error || 'Template konnte nicht geladen werden.', 'OK', 'btn-primary', null, null, function() {});
+            }
+        });
+    });
+    
+    $('#send_manual_mail_btn').on('click', function() {
+        if (!currentOrder) return;
+        
+        const templateKey = $('#mail_template_key').val();
+        const subject = $('#mail_subject').val();
+        const body = $('#mail_body').val();
+        
+        if (!subject.trim()) {
+            showTemplateModal('Fehler', 'Bitte gib einen Betreff ein.', 'OK', 'btn-primary', null, null, function() {});
+            return;
+        }
+        
+        if (!body.trim()) {
+            showTemplateModal('Fehler', 'Bitte gib eine Nachricht ein.', 'OK', 'btn-primary', null, null, function() {});
+            return;
+        }
+        
+        const btn = $(this);
+        btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> Sende...');
+        
+        api_call('/api/manual_mail/send', {
+            template_key: templateKey,
+            recipient_username: currentOrder.user_username,
+            subject: subject,
+            body: body,
+            order_id: currentOrder.order_id
+        }, function(data) {
+            btn.prop('disabled', false).html('<i class="bi bi-send"></i> E-Mail senden');
+            
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('manualMailModal')).hide();
+                showTemplateModal('Erfolg', 'E-Mail wurde erfolgreich gesendet.', 'OK', 'btn-success', null, null, function() {
+                    loadMailCounters();
+                    loadMailLog();
+                });
+            } else {
+                showTemplateModal('Fehler', data.error || 'Fehler beim Senden der E-Mail.', 'OK', 'btn-primary', null, null, function() {});
+            }
+        }, function() {
+            btn.prop('disabled', false).html('<i class="bi bi-send"></i> E-Mail senden');
+            showTemplateModal('Fehler', 'Netzwerkfehler beim Senden der E-Mail.', 'OK', 'btn-primary', null, null, function() {});
+        });
+    });
+    
+    function initializeMailSection() {
+        if ($('#manual_mail_section').is(':visible') && currentOrder) {
+            loadMailCounters();
+            loadMailLog();
+        }
+    }
+    
     $(document).ready(function() {
         loadEventFilter();
         refresh_ticket_orders();
@@ -938,13 +1780,32 @@
         // Save button handler
         $('#save_order_btn').click(saveOrderChanges);
         
-        // Delete button handler in modal
-        $('#delete_order_modal_btn').click(function() {
-            if (currentOrder) {
-                deleteOrder(currentOrder.order_id, currentOrder.payment_reference);
-                $('#orderDetailsModal').modal('hide');
+        // Edit button handler
+        $('#edit_order_btn').on('click', enableEditMode);
+        
+        // Cancel edit button handler
+        $('#cancel_edit_btn').on('click', function() {
+            if (hasUnsavedChanges) {
+                showTemplateModal(
+                    'Ungespeicherte Änderungen',
+                    'Es gibt ungespeicherte Änderungen. Möchtest du wirklich abbrechen?',
+                    'Ja, abbrechen',
+                    'btn-danger',
+                    'Weiter bearbeiten',
+                    'btn-secondary',
+                    function() {
+                        hasUnsavedChanges = false;
+                        loadOrderDetails(currentOrderId);
+                        cancelEditMode();
+                    }
+                );
+            } else {
+                cancelEditMode();
             }
         });
+        
+        // Delete button handler
+        $('#delete_order_btn').on('click', deleteOrder);
         
         // Refresh every 30 seconds
         setInterval(function() {

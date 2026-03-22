@@ -72,7 +72,8 @@
                         <label for="status_input" class="form-label">Status</label>
                         <select class="form-control" id="status_input" disabled>
                             <option value="pending">Ausstehend</option>
-                            <option value="paid">Bezahlt</option>
+                            <option value="paid" disabled>Bezahlt (automatisch)</option>
+                            <option value="partially_paid" disabled>Teilweise bezahlt (automatisch)</option>
                             <option value="offline_payment">Barzahlung vor Ort</option>
                             <option value="in_review">Manuelle Prüfung</option>
                             <option value="on_hold">Pausiert</option>
@@ -81,8 +82,63 @@
                             <option value="cancelled">Storniert</option>
                             <option value="cancelled_by_user">Storniert durch Käufer</option>
                         </select>
+                        <small class="text-muted">Zahlungsstatus wird automatisch berechnet</small>
                     </div>
                 </div>
+
+                <!-- Payment Summary Section (hidden for offline events) -->
+                <div id="payment_sections">
+                <h6 class="mb-3"><i class="bi bi-cash-stack"></i> Zahlungsübersicht</h6>
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Gesamtbetrag</label>
+                        <div class="form-control-plaintext fw-bold" id="payment_total_display">0,00 €</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Bezahlt</label>
+                        <div class="form-control-plaintext fw-bold text-success" id="payment_paid_display">0,00 €</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Ausstehend</label>
+                        <div class="form-control-plaintext fw-bold text-danger" id="payment_remaining_display">0,00 €</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Zahlungsstatus</label>
+                        <div id="payment_status_badge_display"></div>
+                        <div id="payment_overpayment_display" style="display:none;">
+                            <small class="text-warning"><i class="bi bi-exclamation-triangle"></i> Überzahlung: <span id="overpayment_amount">0,00</span> €</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Record Payment Button -->
+                <div class="mb-3" id="record_payment_section" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                    <button type="button" class="btn btn-sm btn-success" id="record_payment_btn">
+                        <i class="bi bi-plus-circle"></i> Zahlung verbuchen
+                    </button>
+                </div>
+
+                <!-- Payment History -->
+                <div id="payment_history_section" style="display:none;">
+                    <h6 class="mb-2"><i class="bi bi-clock-history"></i> Zahlungsverlauf</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Datum</th>
+                                    <th>Betrag</th>
+                                    <th>Verbucht von</th>
+                                    <th>Notiz</th>
+                                    <th>Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="payment_history_tbody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                </div><!-- end payment_sections -->
+
                 <div class="row mb-3">
                     <div class="col-md-4">
                         <label for="created_at_input" class="form-label">Bestellt am</label>
@@ -323,6 +379,39 @@
     </div>
 </div>
 
+<!-- Record Payment Modal -->
+<div class="modal fade" id="recordPaymentModal" tabindex="-1" aria-labelledby="recordPaymentModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="recordPaymentModalLabel"><i class="bi bi-cash-stack"></i> Zahlung verbuchen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="payment_amount_input" class="form-label">Betrag (€)</label>
+                    <input type="number" class="form-control" id="payment_amount_input" min="0.01" step="0.01" required>
+                    <small class="text-muted">Offener Betrag: <span id="payment_remaining_hint">0,00</span> €</small>
+                </div>
+                <div class="mb-3">
+                    <label for="payment_note_input" class="form-label">Notiz (optional)</label>
+                    <input type="text" class="form-control" id="payment_note_input" placeholder="z.B. Banküberweisung, Barzahlung...">
+                </div>
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="payment_send_email_check" checked>
+                    <label class="form-check-label" for="payment_send_email_check">E-Mail senden bei vollständiger Bezahlung</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-success" id="confirm_record_payment_btn">
+                    <i class="bi bi-check-circle"></i> Zahlung verbuchen
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 let currentOrder = null;
 let currentOrderId = null;
@@ -478,6 +567,40 @@ function populateOrderForm(order) {
     $('#created_at_input').val(new Date(order.created_at).toLocaleString('de-DE'));
     $('#paid_at_input').val(order.paid_at ? new Date(order.paid_at).toLocaleString('de-DE') : '');
     
+    // Hide payment sections for offline events
+    if (order.event_payment_required === false) {
+        $('#payment_sections').hide();
+    } else {
+        $('#payment_sections').show();
+    }
+    
+    // Payment summary
+    const totalPrice = parseFloat(order.total_price) || 0;
+    const totalPaid = parseFloat(order.total_paid) || 0;
+    const remaining = parseFloat(order.remaining_balance) || 0;
+    const overpayment = parseFloat(order.overpayment) || 0;
+    const paymentStatus = order.payment_status || 'pending';
+
+    $('#payment_total_display').text(totalPrice.toFixed(2) + ' €');
+    $('#payment_paid_display').text(totalPaid.toFixed(2) + ' €');
+    $('#payment_remaining_display').text(remaining.toFixed(2) + ' €');
+    
+    // Payment status badge
+    const statusText = getOrderStatusText(paymentStatus);
+    const statusClass = getOrderStatusBadgeClass(paymentStatus);
+    $('#payment_status_badge_display').html(`<span class="badge ${statusClass} fs-6">${statusText}</span>`);
+    
+    // Overpayment warning
+    if (overpayment > 0) {
+        $('#overpayment_amount').text(overpayment.toFixed(2));
+        $('#payment_overpayment_display').show();
+    } else {
+        $('#payment_overpayment_display').hide();
+    }
+
+    // Render payment history
+    renderPaymentHistory(order.payments || []);
+    
     // Notes fields
     $('#notes_input').val(order.notes || '');
     $('#admin_notes_input').val(order.admin_notes || '');
@@ -493,6 +616,110 @@ function populateOrderForm(order) {
     
     // Initialize manual mail section
     initializeMailSection();
+}
+
+// Render payment history table
+function renderPaymentHistory(payments) {
+    const tbody = $('#payment_history_tbody');
+    tbody.empty();
+    
+    if (payments && payments.length > 0) {
+        $('#payment_history_section').show();
+        payments.forEach(function(payment) {
+            const row = $('<tr>');
+            const timestamp = payment.timestamp ? new Date(payment.timestamp).toLocaleString('de-DE') : '-';
+            row.append($('<td>').text(timestamp));
+            row.append($('<td>').text(Number(payment.amount || 0).toFixed(2) + ' €'));
+            row.append($('<td>').text(payment.recorded_by || '-'));
+            row.append($('<td>').text(payment.note || '-'));
+            
+            const actionsCell = $('<td>');
+            const revertBtn = $('<button>')
+                .addClass('btn btn-sm btn-outline-danger')
+                .html('<i class="bi bi-arrow-counterclockwise"></i> Stornieren')
+                .attr('title', 'Zahlung stornieren')
+                .on('click', function() {
+                    revertPayment(payment.id, payment.amount);
+                });
+            actionsCell.append(revertBtn);
+            row.append(actionsCell);
+            
+            tbody.append(row);
+        });
+    } else {
+        $('#payment_history_section').hide();
+    }
+}
+
+// Record payment modal handler
+$('#record_payment_btn').on('click', function() {
+    if (!currentOrder) return;
+    const remaining = currentOrder.remaining_balance != null ? Number(currentOrder.remaining_balance) : (parseFloat(currentOrder.total_price) || 0);
+    $('#payment_amount_input').val(remaining > 0 ? remaining.toFixed(2) : '');
+    $('#payment_remaining_hint').text(remaining.toFixed(2));
+    $('#payment_note_input').val('');
+    $('#payment_send_email_check').prop('checked', true);
+    new bootstrap.Modal(document.getElementById('recordPaymentModal')).show();
+});
+
+// Confirm record payment
+$('#confirm_record_payment_btn').on('click', function() {
+    if (!currentOrder) return;
+    
+    const amount = parseFloat($('#payment_amount_input').val());
+    const note = $('#payment_note_input').val();
+    const sendEmail = $('#payment_send_email_check').is(':checked');
+    
+    if (!amount || amount <= 0) {
+        showTemplateModal('Fehler', 'Bitte gib einen gültigen Betrag ein.', 'OK', 'btn-primary', null, null, function() {});
+        return;
+    }
+    
+    const btn = $(this);
+    btn.prop('disabled', true);
+    
+    api_call('/api/record_payment', {
+        order_id: currentOrder.order_id,
+        amount: amount,
+        note: note,
+        send_email: sendEmail
+    }, function(data) {
+        btn.prop('disabled', false);
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('recordPaymentModal')).hide();
+            showTemplateModal('Erfolg', 'Zahlung wurde erfolgreich verbucht.', 'OK', 'btn-success', null, null, function() {
+                loadOrderDetails(currentOrderId);
+            });
+        } else {
+            showTemplateModal('Fehler', data.error || 'Fehler beim Verbuchen der Zahlung.', 'OK', 'btn-primary', null, null, function() {});
+        }
+    }, function() {
+        btn.prop('disabled', false);
+        showTemplateModal('Fehler', 'Netzwerkfehler beim Verbuchen der Zahlung.', 'OK', 'btn-primary', null, null, function() {});
+    });
+});
+
+// Revert payment
+function revertPayment(paymentId, amount) {
+    showTemplateModal(
+        'Zahlung stornieren',
+        `Möchtest du die Zahlung über ${Number(amount).toFixed(2)} € wirklich stornieren?`,
+        'Ja, stornieren',
+        'btn-danger',
+        'Abbrechen',
+        'btn-secondary',
+        function() {
+            api_call('/api/revert_payment', { payment_id: paymentId }, function(data) {
+                if (data.success) {
+                    showTemplateModal('Erfolg', 'Zahlung wurde storniert.', 'OK', 'btn-success', null, null, function() {
+                        loadOrderDetails(currentOrderId);
+                    });
+                } else {
+                    showTemplateModal('Fehler', data.error || 'Fehler beim Stornieren der Zahlung.', 'OK', 'btn-primary', null, null, function() {});
+                }
+            });
+        }
+    );
 }
 
 // Render payment requests section
@@ -737,15 +964,21 @@ function generateOrderPDF() {
 
 function checkTicketGenerationStatus(orderId, status) {
     if (status === 'paid' || status === 'offline_payment') {
-        api_call('/api/check_tickets_generated', {order_id: orderId}, function(data) {
+        api_call(`/api/check_ticket_generation/${orderId}`, {}, function(data) {
             if (data.success) {
-                if (data.tickets_generated) {
-                    $('#tickets_status').show();
-                    $('#generate_tickets_btn').hide();
-                } else {
-                    $('#tickets_status').hide();
+                if (data.can_generate_tickets) {
                     $('#generate_tickets_btn').show();
+                    $('#tickets_status').hide();
+                } else if (data.tickets_generated) {
+                    $('#generate_tickets_btn').hide();
+                    $('#tickets_status').show();
+                } else {
+                    $('#generate_tickets_btn').hide();
+                    $('#tickets_status').hide();
                 }
+            } else {
+                $('#generate_tickets_btn').hide();
+                $('#tickets_status').hide();
             }
         });
     } else {
@@ -853,7 +1086,7 @@ function showMailLogDetail(logId) {
             $('#log_detail_sender').text(log.sender_username);
             $('#log_detail_recipient').text(log.recipient_email);
             $('#log_detail_subject').text(log.subject);
-            $('#log_detail_body').html(log.body);
+            $('#log_detail_body').text(log.body);
             
             new bootstrap.Modal(document.getElementById('mailLogDetailModal')).show();
         } else {

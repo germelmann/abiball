@@ -196,6 +196,20 @@ class Main < Sinatra::Base
             BODY
             category: 'user',
             label: 'Benutzerkonto gelöscht (auf Wunsch)'
+        },
+        'payment_unassignable' => {
+            key: 'payment_unassignable',
+            subject: 'Zahlung erhalten – nicht zuordenbar',
+            body: <<~BODY,
+                <p>Hallo [NAME],</p>
+                <p>wir haben eine Zahlung erhalten, die wir leider keiner Bestellung zuordnen konnten.</p>
+                <p><strong>Betrag:</strong> [AMOUNT] €</p>
+                <p><strong>Verwendungszweck:</strong> [REFERENCE]</p>
+                <p>Bitte kontaktiere uns unter #{support_email}, damit wir die Zahlung korrekt zuordnen können.</p>
+                <p>Bitte antworte innerhalb von <strong>[X] Tagen</strong>, damit wir die Zahlung verarbeiten können.</p>
+            BODY
+            category: 'user',
+            label: 'Zahlung erhalten – nicht zuordenbar'
         }
     }
 
