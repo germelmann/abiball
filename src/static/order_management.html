@@ -317,20 +317,9 @@
         <div class="modal-content">
             <div class="modal-header">
                 <div>
-                    <h5 class="modal-title" id="orderDetailsModalLabel">Bestellung #<span id="order_id_display"></span></h5>
-                    <span class="badge bg-info fs-6 mt-1" id="event_badge"><i class="bi bi-calendar-event"></i> <span id="event_name_display"></span></span>
+                    <h5 class="modal-title" id="orderDetailsModalLabel">Bestellung #<span id="order_id_display"></span>&nbsp;<span class="badge bg-info fs-6 mt-1" id="event_badge"><i class="bi bi-calendar-event"></i> <span id="event_name_display"></span></span></h5>
                 </div>
-                <div class="d-flex gap-2 align-items-center">
-                    <button type="button" class="btn btn-primary" id="edit_order_btn" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
-                        <i class="bi bi-pencil"></i> Bearbeiten
-                    </button>
-                    <button type="button" class="btn btn-danger" id="delete_order_btn" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
-                        <i class="bi bi-trash"></i> Löschen
-                    </button>
-                    <button type="button" class="btn btn-secondary" id="close_modal_btn">
-                        <i class="bi bi-x-lg"></i> Schließen
-                    </button>
-                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <form id="order_form">
@@ -575,6 +564,12 @@
                 </div>
             </div>
             <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="edit_order_btn" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                    <i class="bi bi-pencil"></i> Bearbeiten
+                </button>
+                <button type="button" class="btn btn-danger" id="delete_order_btn" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                    <i class="bi bi-trash"></i> Löschen
+                </button>
                 <button type="button" class="btn btn-success" id="save_order_btn" style="display:none;" #{user_has_permission?("manage_orders") ? "" : "disabled"}>
                     <i class="bi bi-save"></i> Speichern
                 </button>
