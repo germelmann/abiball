@@ -2282,7 +2282,7 @@ class Main < Sinatra::Base
         payment_amount = [incoming_amount, remaining].min
         overpayment_amount = [incoming_amount - remaining, 0].max
 
-        result = record_payment_for_order(order_id, payment_amount, @session_user[:username], note: "Quick Payment (Ref: #{payment_ref}), Eingegangen: #{sprintf('%.2f', incoming_amount)}€")
+        result = record_payment_for_order(order_id, payment_amount, @session_user[:username], note: "Quick Payment (Ref: #{payment_ref})")
 
         # If there is overpayment, create an error record for the difference
         overpayment_recorded = false
@@ -2292,7 +2292,7 @@ class Main < Sinatra::Base
                 payment_ref: "ÜBERZAHLUNG-#{payment_ref}",
                 status: 'error',
                 created_at: DateTime.now.to_s,
-                error_reason: "Überzahlung #{sprintf('%.2f', overpayment_amount)}€ für Ref: #{payment_ref} (Eingegangen: #{sprintf('%.2f', incoming_amount)}€, Offen: #{sprintf('%.2f', remaining)}€)"
+                error_reason: "Überzahlung #{sprintf('%.2f', overpayment_amount)}€ für Ref: #{payment_ref} (Offen: #{sprintf('%.2f', remaining)}€)"
             }
 
             neo4j_query(<<~END_OF_QUERY, error_params)

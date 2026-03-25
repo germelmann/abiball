@@ -415,7 +415,7 @@
                         <div id="payment_history_section" style="display:none;">
                             <h6 class="mb-2"><i class="bi bi-clock-history"></i> Zahlungsverlauf</h6>
                             <div class="table-responsive">
-                                <table class="table table-sm table-hover">
+                                <table class="table table-sm">
                                     <thead>
                                         <tr>
                                             <th>Datum</th>
@@ -1032,17 +1032,12 @@
                 row.append($('<td>').text(Number(payment.amount || 0).toFixed(2) + ' €'));
                 row.append($('<td>').text(payment.recorded_by || '-'));
                 row.append($('<td>').text(payment.note || '-'));
-                
-                const actionsCell = $('<td>');
                 const revertBtn = $('<button>')
                     .addClass('btn btn-sm btn-outline-danger')
                     .html('<i class="bi bi-arrow-counterclockwise"></i> Stornieren')
                     .attr('title', 'Zahlung stornieren')
-                    .on('click', function() {
-                        revertPayment(payment.id, payment.amount);
-                    });
-                actionsCell.append(revertBtn);
-                row.append(actionsCell);
+                    .click(revertPayment(payment.id, payment.amount))
+                row.append($('<td>').html(revertBtn));
                 
                 tbody.append(row);
             });
@@ -1357,27 +1352,28 @@
     
     // Revert payment
     function revertPayment(paymentId, amount) {
-        showTemplateModal(
-            'Zahlung stornieren',
-            `Möchtest du die Zahlung über ${Number(amount).toFixed(2)} € wirklich stornieren?`,
-            'Ja, stornieren',
-            'btn-danger',
-            'Abbrechen',
-            'btn-secondary',
-            function() {
-                api_call('/api/revert_payment', { payment_id: paymentId }, function(data) {
-                    if (data.success) {
-                        refresh_ticket_orders();
-                        refreshStatistics();
-                        showTemplateModal('Erfolg', 'Zahlung wurde storniert.', 'OK', 'btn-success', null, null, function() {
-                            loadOrderDetails(currentOrderId);
-                        });
-                    } else {
-                        showTemplateModal('Fehler', data.error || 'Fehler beim Stornieren der Zahlung.', 'OK', 'btn-primary', null, null, function() {});
-                    }
-                });
-            }
-        );
+        console.log("MODAL!")
+        // showTemplateModal(
+        //     'Zahlung stornieren',
+        //     `Möchtest du die Zahlung über ${Number(amount).toFixed(2)} € wirklich stornieren?`,
+        //     'Ja, stornieren',
+        //     'btn-danger',
+        //     'Abbrechen',
+        //     'btn-secondary',
+        //     function() {
+        //         api_call('/api/revert_payment', { payment_id: paymentId }, function(data) {
+        //             if (data.success) {
+        //                 refresh_ticket_orders();
+        //                 refreshStatistics();
+        //                 showTemplateModal('Erfolg', 'Zahlung wurde storniert.', 'OK', 'btn-success', null, null, function() {
+        //                     loadOrderDetails(currentOrderId);
+        //                 });
+        //             } else {
+        //                 showTemplateModal('Fehler', data.error || 'Fehler beim Stornieren der Zahlung.', 'OK', 'btn-primary', null, null, function() {});
+        //             }
+        //         });
+        //     }
+        // );
     }
     
     // ===========================================
