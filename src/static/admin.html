@@ -52,6 +52,157 @@
                     </div>
                 </div>
             </div>
+
+            <!-- E-Mail-Adressen Sammlung -->
+            <hr class="my-4">
+            <h3><i class="bi bi-envelope"></i>&nbsp;&nbsp;E-Mail-Adressen</h3>
+            
+            <!-- Per Event Emails -->
+            <div class="row mt-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0"><i class="bi bi-calendar-event"></i>&nbsp;&nbsp;E-Mail-Adressen je Event</h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted">Alle E-Mail-Adressen der Besteller und Ticket-Inhaber je Event (ohne Duplikate).</p>
+                            <div class="mb-3">
+                                <label for="event_email_select" class="form-label">Event auswählen</label>
+                                <select class="form-select" id="event_email_select">
+                                    <option value="">-- Event wählen --</option>
+                                </select>
+                            </div>
+                            <div id="event_emails_container" style="display: none;">
+                                <div class="input-group">
+                                    <textarea class="form-control" id="event_emails_field" rows="4" disabled></textarea>
+                                    <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('event_emails_field')" title="Kopieren">
+                                        <i class="bi bi-clipboard"></i>
+                                    </button>
+                                </div>
+                                <small class="form-text text-muted"><span id="event_emails_count">0</span> E-Mail-Adressen</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Per Tag Emails -->
+            <div class="row mt-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0"><i class="bi bi-tags"></i>&nbsp;&nbsp;E-Mail-Adressen je Tag (Mitglieder)</h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted">Alle E-Mail-Adressen der Mitglieder gruppiert nach Tags (ohne Duplikate).</p>
+                            <div id="tag_emails_container">
+                                <p class="text-muted"><em>Lade Tags...</em></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
+
+<script>
+    function copyToClipboard(fieldId) {
+        let field = document.getElementById(fieldId);
+        let text = field.value;
+        navigator.clipboard.writeText(text).then(function() {
+            showTemplateModal('Kopiert', 'E-Mail-Adressen wurden in die Zwischenablage kopiert.', 'OK', 'btn-success', '', '', function() {});
+        }).catch(function() {
+            // Fallback: select and copy
+            field.disabled = false;
+            field.select();
+            document.execCommand('copy');
+            field.disabled = true;
+            showTemplateModal('Kopiert', 'E-Mail-Adressen wurden in die Zwischenablage kopiert.', 'OK', 'btn-success', '', '', function() {});
+        });
+    }
+
+    function loadAdminData() {
+        // Load events for email selector
+        api_call('/api/get_events', {}, function(data) {
+            if (data.success && data.events) {
+                let select = $('#event_email_select');
+                data.events.forEach(function(event) {
+                    select.append($('<option>').val(event.id).text(event.name));
+                });
+            }
+        });
+
+        // Load tags for member emails
+        api_call('/api/tags', {}, function(data) {
+            if (data.success && data.tags) {
+                let container = $('#tag_emails_container');
+                container.empty();
+                if (data.tags.length === 0) {
+                    container.html('<p class="text-muted"><em>Keine Tags vorhanden.</em></p>');
+                    return;
+                }
+                data.tags.forEach(function(tag) {
+                    let sanitizedTagName = tag.name.replace(/[^a-zA-Z0-9]/g, '_');
+                    let tagHtml = `
+                        <div class="mb-3">
+                            <label class="form-label">
+                                <span class="badge" style="background-color: ${tag.color}">${tag.name}</span>
+                                (<span class="tag-email-count" data-tag="${tag.name}">...</span> E-Mails)
+                            </label>
+                            <div class="input-group">
+                                <textarea class="form-control tag-email-field" id="tag_emails_${sanitizedTagName}" rows="2" disabled></textarea>
+                                <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('tag_emails_${sanitizedTagName}')" title="Kopieren">
+                                    <i class="bi bi-clipboard"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    container.append(tagHtml);
+                    
+                    // Load emails for this tag
+                    loadTagEmails(tag.name);
+                });
+            } else {
+                $('#tag_emails_container').html('<p class="text-muted"><em>Fehler beim Laden der Tags.</em></p>');
+            }
+        });
+    }
+
+    function loadTagEmails(tagName) {
+        api_call('/api/get_tag_member_emails', {tag_name: tagName}, function(data) {
+            let fieldId = 'tag_emails_' + tagName.replace(/[^a-zA-Z0-9]/g, '_');
+            if (data.success && data.emails) {
+                $('#' + fieldId).val(data.emails.join(', '));
+                $(`.tag-email-count[data-tag="${tagName}"]`).text(data.emails.length);
+            } else {
+                $('#' + fieldId).val('Fehler beim Laden');
+                $(`.tag-email-count[data-tag="${tagName}"]`).text('?');
+            }
+        });
+    }
+
+    $('#event_email_select').change(function() {
+        let eventId = $(this).val();
+        if (!eventId) {
+            $('#event_emails_container').hide();
+            return;
+        }
+        
+        api_call('/api/get_event_emails', {event_id: eventId}, function(data) {
+            if (data.success && data.emails) {
+                $('#event_emails_field').val(data.emails.join(', '));
+                $('#event_emails_count').text(data.emails.length);
+                $('#event_emails_container').show();
+            } else {
+                $('#event_emails_field').val('Fehler beim Laden');
+                $('#event_emails_count').text('0');
+                $('#event_emails_container').show();
+            }
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', function() {
+        loadAdminData();
+    });
+</script>

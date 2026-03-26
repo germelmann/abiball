@@ -9,6 +9,7 @@ class Main < Sinatra::Base
     def self.order_status_translations
         {
             'paid' => 'Bezahlt',
+            'overpaid' => 'Überzahlung',
             'partially_paid' => 'Teilweise bezahlt',
             'pending' => 'Ausstehend',
             'pending_payment' => 'Zahlung ausstehend',
@@ -23,7 +24,8 @@ class Main < Sinatra::Base
     end
 
     # Statuses that are derived from payments and cannot be set manually
-    PAYMENT_DERIVED_STATUSES = %w[paid partially_paid].freeze
+    # 'auto' is the user-selectable value that triggers recalculation
+    PAYMENT_DERIVED_STATUSES = %w[auto paid overpaid partially_paid pending].freeze
     
     def self.get_order_status_text(status)
         order_status_translations[status] || status
@@ -132,6 +134,8 @@ class Main < Sinatra::Base
             'pending'
         elsif total_paid < total_price
             'partially_paid'
+        elsif total_paid > total_price
+            'overpaid'
         else
             'paid'
         end
@@ -143,6 +147,9 @@ class Main < Sinatra::Base
     def record_payment_for_order(order_id, amount, recorded_by, note: nil)
         payment_id = RandomTag::generate(12)
         timestamp = Time.now.iso8601
+        if note == "" || !note
+            note = order_id
+        end
 
         neo4j_query(<<~END_OF_QUERY, {order_id: order_id, payment_id: payment_id, amount: amount.to_f, recorded_by: recorded_by, note: note, timestamp: timestamp})
             MATCH (o:TicketOrder {id: $order_id})
@@ -160,7 +167,7 @@ class Main < Sinatra::Base
         payment_info = calculate_payment_status(order_id)
         new_status = payment_info[:status]
 
-        if new_status == 'paid'
+        if new_status == 'paid' || new_status == 'overpaid'
             neo4j_query(<<~END_OF_QUERY, {order_id: order_id, date: Date.today.to_s, status: new_status})
                 MATCH (o:TicketOrder {id: $order_id})
                 SET o.status = $status, o.paid_at = $date
@@ -344,7 +351,7 @@ class Main < Sinatra::Base
             return
         end
 
-        current_tickets = existing_orders.select { |o| o['status'] == 'paid' || o['status'] == 'pending' }
+        current_tickets = existing_orders.select { |o| o['status'] == 'paid' || o['status'] == 'overpaid' || o['status'] == 'pending' }
                                         .sum { |o| o['ticket_count'] }
         
         if current_tickets + ticket_count > user_limit
@@ -690,36 +697,26 @@ class Main < Sinatra::Base
         respond(success: true, new_status: result[:payment_info][:status], payment_info: result[:payment_info])
     end
 
-    # Admin: Mark order as unpaid - removes all payments
+    # Admin: Recalculate order payment status from actual payments
+    # Payments are the single source of truth and are NEVER deleted by status changes
     post "/api/mark_order_unpaid" do
         require_user_with_permission!("manage_orders")
         data = parse_request_data(required_keys: [:order_id])
         
         order_id = data[:order_id]
 
-        # Get all payments for this order
-        payments = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
-            MATCH (o:TicketOrder {id: $order_id})-[:HAS_PAYMENT]->(pay:Payment)
-            RETURN pay.id AS id, pay.amount AS amount
-        END_OF_QUERY
+        # Recalculate payment status from actual payment records
+        payment_info = calculate_payment_status(order_id)
+        new_status = payment_info[:status]
 
-        # Delete all payments
-        neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
-            MATCH (o:TicketOrder {id: $order_id})-[:HAS_PAYMENT]->(pay:Payment)
-            DETACH DELETE pay
-        END_OF_QUERY
-
-        # Reset order status
-        neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+        neo4j_query(<<~END_OF_QUERY, {order_id: order_id, status: new_status})
             MATCH (o:TicketOrder {id: $order_id})
-            SET o.status = 'pending'
-            REMOVE o.paid_at
+            SET o.status = $status
         END_OF_QUERY
 
-        total_reverted = payments.sum { |p| (p['amount'] || 0).to_f }
-        log("Alle Zahlungen (#{sprintf('%.2f', total_reverted)}€) für Bestellung #{order_id} storniert")
+        log("Bestellung #{order_id} Zahlungsstatus neu berechnet: #{new_status}")
         
-        respond(success: true)
+        respond(success: true, new_status: new_status, payment_info: payment_info)
     end
 
     # ===========================================
@@ -755,7 +752,7 @@ class Main < Sinatra::Base
         result = record_payment_for_order(order_id, amount, @session_user[:username], note: note)
 
         # Prepare email if send_email is enabled and order is now fully paid
-        if send_email && result[:payment_info][:status] == 'paid'
+        if send_email && (result[:payment_info][:status] == 'paid' || result[:payment_info][:status] == 'overpaid')
             order = order_check.first
             begin
                 rendered = render_manual_mail_template('payment_received', {
@@ -948,7 +945,7 @@ class Main < Sinatra::Base
         order = order_result.first
         
         # Check if order is already paid
-        if order['status'] == 'paid'
+        if order['status'] == 'paid' || order['status'] == 'overpaid'
             respond(success: false, error: "Bestellung ist bereits bezahlt")
             return
         end
@@ -1590,6 +1587,14 @@ class Main < Sinatra::Base
                    latest_payment_request
             ORDER BY o.created_at DESC
         END_OF_QUERY
+
+        # Add calculated payment info for each order
+        orders.each do |order|
+            payment_info = calculate_payment_status(order['order_id'])
+            order['payment_status'] = payment_info[:status]
+            order['total_paid'] = payment_info[:total_paid]
+            order['remaining_balance'] = payment_info[:remaining]
+        end
         
         respond(success: true, orders: orders)
     end
@@ -1620,23 +1625,12 @@ class Main < Sinatra::Base
         notes = data[:notes] || ''
         admin_notes = data[:admin_notes] || ''
 
-        # Prevent manual setting of payment-derived statuses
+        # Payment-derived statuses (paid, partially_paid, pending) are always
+        # calculated from actual payment records and cannot be set manually.
+        # Payments are the single source of truth and are NEVER deleted here.
+        payment_info = calculate_payment_status(order_id)
         if PAYMENT_DERIVED_STATUSES.include?(status)
-            # Check if the status is actually correct based on payments
-            payment_info = calculate_payment_status(order_id)
             status = payment_info[:status]
-        end
-
-        # When setting status to pending, delete all payment records and reset paid_at
-        # so that new payments can be recorded again
-        if status == 'pending'
-            neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
-                MATCH (o:TicketOrder {id: $order_id})
-                OPTIONAL MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
-                DETACH DELETE pay
-                REMOVE o.paid_at
-            END_OF_QUERY
-            log("Bestellung #{order_id} auf 'pending' gesetzt, alle Zahlungen gelöscht")
         end
         
         # Update order basic information
@@ -1807,7 +1801,7 @@ class Main < Sinatra::Base
             paid_orders = 0
             pending_orders = 0
             order_counts_result.each do |row|
-                if row['status'] == 'paid' || row['status'] == 'offline_payment'
+                if row['status'] == 'paid' || row['status'] == 'overpaid' || row['status'] == 'offline_payment'
                     paid_orders += row['count']
                 elsif row['status'] == 'pending'
                     pending_orders = row['count']
@@ -1817,7 +1811,7 @@ class Main < Sinatra::Base
             # Calculate paid revenue for this event (includes paid and offline_payment)
             revenue_paid_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
                 MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
-                WHERE o.status = 'paid' OR o.status = 'offline_payment'
+                WHERE o.status = 'paid' OR o.status = 'overpaid' OR o.status = 'offline_payment'
                 RETURN SUM(o.total_price) AS total_revenue
             END_OF_QUERY
             revenue_paid_total = revenue_paid_result.first&.dig('total_revenue') || 0.0
@@ -1878,7 +1872,7 @@ class Main < Sinatra::Base
             paid_orders = 0
             pending_orders = 0
             order_counts_result.each do |row|
-                if row['status'] == 'paid' || row['status'] == 'offline_payment'
+                if row['status'] == 'paid' || row['status'] == 'overpaid' || row['status'] == 'offline_payment'
                     paid_orders += row['count']
                 elsif row['status'] == 'pending'
                     pending_orders = row['count']
@@ -1888,7 +1882,7 @@ class Main < Sinatra::Base
             # Calculate total paid revenue (includes paid and offline_payment)
             revenue_paid_result = neo4j_query(<<~END_OF_QUERY)
                 MATCH (o:TicketOrder)
-                WHERE o.status = 'paid' OR o.status = 'offline_payment'
+                WHERE o.status = 'paid' OR o.status = 'overpaid' OR o.status = 'offline_payment'
                 RETURN SUM(o.total_price) AS total_revenue
             END_OF_QUERY
             revenue_paid_total = revenue_paid_result.first&.dig('total_revenue') || 0.0
@@ -2069,7 +2063,7 @@ class Main < Sinatra::Base
             RETURN o.status AS status, o.tickets_generated AS tickets_generated
         END_OF_QUERY
         
-        can_generate = (order['status'] == 'paid' || order['status'] == 'offline_payment') && !order['tickets_generated']
+        can_generate = (order['status'] == 'paid' || order['status'] == 'overpaid' || order['status'] == 'offline_payment') && !order['tickets_generated']
         
         respond(success: true, can_generate_tickets: can_generate, order_status: order['status'], tickets_generated: !!order['tickets_generated'])
     end
@@ -2091,7 +2085,7 @@ class Main < Sinatra::Base
                    COLLECT({name: p.name, phone: p.phone, email: p.email, birthdate: p.birthdate, ticket_number: p.ticket_number}) AS participants
         END_OF_QUERY
         
-        unless order['status'] == 'paid' || order['status'] == 'offline_payment'
+        unless order['status'] == 'paid' || order['status'] == 'overpaid' || order['status'] == 'offline_payment'
             respond(success: false, error: "Tickets können nur für bestätigte Bestellungen generiert werden")
             return
         end
@@ -2169,7 +2163,7 @@ class Main < Sinatra::Base
         
         order_data = order_result.first
         
-        unless order_data['status'] == 'paid'
+        unless order_data['status'] == 'paid' || order_data['status'] == 'overpaid'
             respond(success: false, error: "Tickets sind nur für bezahlte Bestellungen verfügbar")
             return
         end
@@ -2240,108 +2234,6 @@ class Main < Sinatra::Base
         end
     end
 
-    # Quick payment mark as paid - records a payment for the specified amount
-    # If amount > remaining, records remaining as payment (marks order paid) and creates error for overpayment difference
-    post "/api/quick_mark_paid" do
-        require_user_with_permission!("manage_orders")
-        data = parse_request_data(required_keys: [:payment_reference, :amount], optional_keys: [:send_email])
-        
-        payment_ref = data[:payment_reference].strip.upcase
-        send_email = data[:send_email] != false  # default true
-        incoming_amount = data[:amount].to_f
-        
-        if incoming_amount <= 0
-            respond(success: false, error: "Betrag muss größer als 0 sein")
-            return
-        end
-
-        # Find order by payment reference
-        order_result = neo4j_query(<<~END_OF_QUERY, {payment_ref: payment_ref})
-            MATCH (u:User)-[:PLACED]->(o:TicketOrder {payment_reference: $payment_ref})
-            RETURN o.id AS order_id, o.total_price AS total_price, u.email AS user_email, u.name AS user_name, u.username AS user_username, o.payment_reference AS payment_reference
-        END_OF_QUERY
-        
-        if order_result.empty?
-            respond(success: false, error: "Bestellung nicht gefunden")
-            return
-        end
-
-        order = order_result.first
-        order_id = order['order_id']
-
-        # Calculate remaining amount
-        payment_info = calculate_payment_status(order_id)
-        remaining = payment_info[:remaining]
-
-        if remaining <= 0
-            respond(success: false, error: "Bestellung ist bereits vollständig bezahlt")
-            return
-        end
-
-        # Determine how much to record as payment vs overpayment
-        payment_amount = [incoming_amount, remaining].min
-        overpayment_amount = [incoming_amount - remaining, 0].max
-
-        result = record_payment_for_order(order_id, payment_amount, @session_user[:username], note: "Quick Payment (Ref: #{payment_ref})")
-
-        # If there is overpayment, create an error record for the difference
-        overpayment_recorded = false
-        if overpayment_amount > 0
-            error_params = {
-                order_id: RandomTag::generate(8),
-                payment_ref: "ÜBERZAHLUNG-#{payment_ref}",
-                status: 'error',
-                created_at: DateTime.now.to_s,
-                error_reason: "Überzahlung #{sprintf('%.2f', overpayment_amount)}€ für Ref: #{payment_ref} (Offen: #{sprintf('%.2f', remaining)}€)"
-            }
-
-            neo4j_query(<<~END_OF_QUERY, error_params)
-                CREATE (o:TicketOrder {
-                    id: $order_id,
-                    ticket_count: 0,
-                    total_price: 0,
-                    individual_ticket_price: 0,
-                    payment_reference: $payment_ref,
-                    status: $status,
-                    created_at: $created_at,
-                    error_reason: $error_reason
-                })
-            END_OF_QUERY
-
-            log("Überzahlung #{sprintf('%.2f', overpayment_amount)}€ für Ref: #{payment_ref} als Fehler markiert")
-            overpayment_recorded = true
-        end
-
-        # Send email if enabled and order is now fully paid
-        if send_email && result[:payment_info][:status] == 'paid'
-            begin
-                rendered = render_manual_mail_template('payment_received', {
-                    'NAME' => order['user_name'] || 'Nutzer',
-                    'ORDER_ID' => order['order_id'],
-                    'TOTAL_PRICE' => sprintf("%.2f", order['total_price'] || 0),
-                    'REFERENCE' => order['payment_reference'] || 'N/A',
-                    'TICKET_LINK' => "#{WEB_ROOT}/ticket_download"
-                })
-                if rendered
-                    send_manual_mail(
-                        to_email: order['user_email'],
-                        subject: rendered[:subject],
-                        body: rendered[:body],
-                        template_key: 'payment_received',
-                        sender_username: @session_user[:username],
-                        recipient_username: order['user_username'],
-                        order_id: order_id
-                    )
-                end
-            rescue => e
-                STDERR.puts "Error sending payment email via quick payment: #{e.message}"
-            end
-        end
-
-        log("Bestellung #{order_id} über Quick Payment: #{sprintf('%.2f', payment_amount)}€ verbucht (Ref: #{payment_ref})")
-        respond(success: true, payment_info: result[:payment_info], overpayment: overpayment_amount, overpayment_recorded: overpayment_recorded)
-    end
-
     # Mark payment as error
     post "/api/mark_payment_error" do
         require_user_with_permission!("manage_orders")
@@ -2388,11 +2280,11 @@ class Main < Sinatra::Base
             pdf.text "Statistiken", size: 16, style: :bold
             pdf.move_down 10
             
-            total_tickets_sold = orders.select { |o| o['status'] == 'paid' }.sum { |o| o['ticket_count'] || 0 }
+            total_tickets_sold = orders.select { |o| o['status'] == 'paid' || o['status'] == 'overpaid' }.sum { |o| o['ticket_count'] || 0 }
             tickets_available = MAX_TICKETS_GLOBAL - total_tickets_sold
-            total_paid_revenue = orders.select { |o| o['status'] == 'paid' }.sum { |o| o['total_price']&.to_f || 0.0 }
+            total_paid_revenue = orders.select { |o| o['status'] == 'paid' || o['status'] == 'overpaid' }.sum { |o| o['total_price']&.to_f || 0.0 }
             total_revenue = orders.sum { |o| o['total_price']&.to_f || 0.0 }
-            paid_orders = orders.count { |o| o['status'] == 'paid' }
+            paid_orders = orders.count { |o| o['status'] == 'paid' || o['status'] == 'overpaid' }
             pending_orders = orders.count { |o| o['status'] == 'pending' }
             
             stats_data = [
@@ -2420,7 +2312,7 @@ class Main < Sinatra::Base
                 table_data = [['Benutzer', 'Status', 'Tickets', 'Preis', 'Bestellt am', 'Bezahlt am']]
                 
                 orders.each do |order|
-                    status_text = order['status'] == 'paid' ? 'Bezahlt' : 'Ausstehend'
+                    status_text = self.class.get_order_status_text(order['status'])
                     created_date = order['created_at'] ? Date.parse(order['created_at']).strftime('%d.%m.%Y') : '-'
                     paid_date = order['paid_at'] ? Date.parse(order['paid_at']).strftime('%d.%m.%Y') : '-'
                     
@@ -2462,7 +2354,7 @@ class Main < Sinatra::Base
             
             order_data = [
                 ['Bestellnummer:', order['payment_reference'] || '-'],
-                ['Status:', order['status'] == 'paid' ? 'Bezahlt' : 'Ausstehend'],
+                ['Status:', self.class.get_order_status_text(order['status'])],
                 ['Anzahl Tickets:', (order['ticket_count'] || 0).to_s],
                 ['Gesamtpreis:', "#{(order['total_price']&.to_f || 0.0).round(2)}€"],
                 ['Bestellt am:', order['created_at'] ? Date.parse(order['created_at']).strftime('%d.%m.%Y') : '-'],
@@ -3071,7 +2963,7 @@ class Main < Sinatra::Base
                 order_status: order_data['status'],
                 tickets_generated: !!order_data['tickets_generated'],
                 tickets_generated_at: order_data['tickets_generated_at'],
-                can_download_tickets: (order_data['status'] == 'paid' || order_data['status'] == 'offline_payment') && !!order_data['tickets_generated'])
+                can_download_tickets: (order_data['status'] == 'paid' || order_data['status'] == 'overpaid' || order_data['status'] == 'offline_payment') && !!order_data['tickets_generated'])
     end
 
     # Toggle ticket download setting (admin only)
@@ -3235,7 +3127,7 @@ class Main < Sinatra::Base
             ticket['age_status'] = age_status
             
             # Check if order is paid
-            unless ticket['order_status'] == 'paid'
+            unless ticket['order_status'] == 'paid' || ticket['order_status'] == 'overpaid'
                 respond(success: false, error: "Bestellung ist nicht bezahlt", status: 'invalid', ticket: ticket)
                 return
             end
@@ -3309,7 +3201,7 @@ class Main < Sinatra::Base
         
         ticket = ticket_result.first
         
-        unless ticket['order_status'] == 'paid'
+        unless ticket['order_status'] == 'paid' || ticket['order_status'] == 'overpaid'
             respond(success: false, error: "Bestellung ist nicht bezahlt")
             return
         end

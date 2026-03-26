@@ -372,6 +372,17 @@
                         </div>
                         <small class="form-text text-muted">Verwalte Bankkonten für dieses Event mit prozentualer Verteilung der Zahlungen</small>
                     </div>
+                    
+                    <!-- Global Price Adjustment -->
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <label class="form-label">Globale Preisanpassung</label>
+                            <button type="button" class="btn btn-sm btn-outline-warning" id="adjust_prices_btn">
+                                <i class="bi bi-cash-coin"></i> Ticketpreise anpassen
+                            </button>
+                        </div>
+                        <small class="form-text text-muted">Passe Ticketpreise für bestehende Bestellungen nachträglich an</small>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -454,6 +465,77 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
                 <button type="button" class="btn btn-primary" id="save_bank_accounts_btn">Konten speichern</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Global Price Adjustment Modal -->
+<div class="modal fade" id="priceAdjustmentModal" tabindex="-1" aria-labelledby="priceAdjustmentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="priceAdjustmentModalLabel">Ticketpreise anpassen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    <strong>Hinweis:</strong> Diese Funktion ändert den Ticketpreis für bestehende Bestellungen. 
+                    Bereits individuell angepasste Tickets (z.B. durch manuelle Preisänderungen) bleiben unverändert.
+                </div>
+                
+                <p><strong>Event:</strong> <span id="price_adj_event_name"></span></p>
+                <p><strong>Aktueller Standardpreis:</strong> <span id="price_adj_current_price"></span>€</p>
+                
+                <hr>
+                
+                <!-- A) Target Group Selection -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Zielgruppe</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="price_adj_target" id="price_adj_target_all" value="all" checked>
+                        <label class="form-check-label" for="price_adj_target_all">
+                            Alle Bestellungen
+                        </label>
+                        <small class="form-text text-muted d-block">Alle Bestellungen prüfen (nur Tickets mit dem aktuellen Standardpreis werden angepasst)</small>
+                    </div>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="radio" name="price_adj_target" id="price_adj_target_unprocessed" value="unprocessed">
+                        <label class="form-check-label" for="price_adj_target_unprocessed">
+                            Nur unbearbeitete Bestellungen
+                        </label>
+                        <small class="form-text text-muted d-block">Nur Bestellungen, deren Ticketpreis exakt dem Event-Standardpreis entspricht</small>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <!-- B) New Price -->
+                <div class="mb-3">
+                    <label for="price_adj_new_price" class="form-label fw-bold">Neuer Ticketpreis (€)</label>
+                    <input type="number" class="form-control" id="price_adj_new_price" step="0.01" min="0" placeholder="0.00">
+                    <small class="form-text text-muted">Der neue Preis pro Ticket. Gesamtpreise werden automatisch neu berechnet.</small>
+                </div>
+                
+                <hr>
+                
+                <!-- C) Mail Option -->
+                <div class="mb-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="price_adj_send_mail">
+                        <label class="form-check-label" for="price_adj_send_mail">
+                            Benachrichtigungsmail für jede betroffene Bestellung senden
+                        </label>
+                        <small class="form-text text-muted d-block">Jeder betroffene Besteller erhält eine E-Mail mit den alten und neuen Preisdetails</small>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-warning" id="apply_price_adjustment_btn">
+                    <i class="bi bi-cash-coin"></i> Preisanpassung durchführen
+                </button>
             </div>
         </div>
     </div>
@@ -1156,6 +1238,81 @@
                 }
             });
         }
+    });
+
+    // Global Price Adjustment
+    let currentEventForPriceAdj = null;
+
+    $('#adjust_prices_btn').click(function() {
+        if (editingEvent) {
+            currentEventForPriceAdj = editingEvent;
+            $('#price_adj_event_name').text(editingEvent.name);
+            $('#price_adj_current_price').text(editingEvent.ticket_price);
+            $('#price_adj_new_price').val('');
+            $('#price_adj_send_mail').prop('checked', false);
+            $('input[name="price_adj_target"][value="all"]').prop('checked', true);
+            $('#priceAdjustmentModal').modal('show');
+        }
+    });
+
+    $('#apply_price_adjustment_btn').click(function() {
+        if (!currentEventForPriceAdj) return;
+
+        let newPrice = parseFloat($('#price_adj_new_price').val());
+        if (isNaN(newPrice) || newPrice < 0) {
+            showTemplateModal('Fehler', 'Bitte gib einen gültigen Preis ein (mindestens 0€).', 'OK', 'btn-secondary', '', '', function() {});
+            return;
+        }
+
+        let target = $('input[name="price_adj_target"]:checked').val();
+        let sendMail = $('#price_adj_send_mail').is(':checked');
+
+        // First, show confirmation dialog
+        let targetText = target === 'all' ? 'alle Bestellungen' : 'nur unbearbeitete Bestellungen';
+        let mailText = sendMail ? 'Ja' : 'Nein';
+
+        showTemplateModal(
+            'Preisanpassung bestätigen',
+            `<p>Möchtest du die Preisanpassung wirklich durchführen?</p>
+             <ul>
+                <li><strong>Event:</strong> ${currentEventForPriceAdj.name}</li>
+                <li><strong>Alter Preis:</strong> ${currentEventForPriceAdj.ticket_price}€</li>
+                <li><strong>Neuer Preis:</strong> ${newPrice.toFixed(2)}€</li>
+                <li><strong>Zielgruppe:</strong> ${targetText}</li>
+                <li><strong>Mailversand:</strong> ${mailText}</li>
+             </ul>
+             <p class="text-warning"><i class="bi bi-exclamation-triangle"></i> Diese Aktion kann nicht rückgängig gemacht werden.</p>`,
+            'Preisanpassung durchführen', 'btn-warning',
+            'Abbrechen', 'btn-secondary',
+            function() {
+                let btn = $('#apply_price_adjustment_btn');
+                btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> Wird durchgeführt...');
+
+                api_call('/api/apply_global_price_change', {
+                    event_id: currentEventForPriceAdj.id,
+                    new_price: newPrice,
+                    target: target,
+                    send_mail: sendMail
+                }, function(data) {
+                    btn.prop('disabled', false).html('<i class="bi bi-cash-coin"></i> Preisanpassung durchführen');
+                    if (data.success) {
+                        $('#priceAdjustmentModal').modal('hide');
+                        loadEvents();
+                        showTemplateModal('Erfolg',
+                            `<p>Preisanpassung erfolgreich durchgeführt!</p>
+                             <ul>
+                                <li><strong>Betroffene Bestellungen:</strong> ${data.affected_count}</li>
+                                <li><strong>Alter Preis:</strong> ${Number(data.old_price).toFixed(2)}€</li>
+                                <li><strong>Neuer Preis:</strong> ${Number(data.new_price).toFixed(2)}€</li>
+                                <li><strong>Mailversand:</strong> ${data.mail_sent ? 'Ja' : 'Nein'}</li>
+                             </ul>`,
+                            'OK', 'btn-success', '', '', function() {});
+                    } else {
+                        showTemplateModal('Fehler', data.error || 'Fehler bei der Preisanpassung', 'OK', 'btn-secondary', '', '', function() {});
+                    }
+                });
+            }
+        );
     });
 
     // Load events when page loads

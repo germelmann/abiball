@@ -401,7 +401,7 @@ class Main < Sinatra::Base
     
     # Get bank accounts for an event
     post "/api/get_bank_accounts" do
-        require_user_with_permission!("buy_tickets")
+        require_user_with_permission!("manage_orders")
         data = parse_request_data(required_keys: [:event_id])
         
         accounts = neo4j_query(<<~END_OF_QUERY, {event_id: data[:event_id]})
@@ -418,7 +418,7 @@ class Main < Sinatra::Base
     
     # Get escrow agreements for an event (public endpoint for users before ordering)
     post "/api/get_escrow_agreements" do
-        require_user!
+        require_user_with_permission!("buy_tickets")
         data = parse_request_data(required_keys: [:event_id])
         
         accounts = neo4j_query(<<~END_OF_QUERY, {event_id: data[:event_id]})
@@ -622,6 +622,197 @@ class Main < Sinatra::Base
         
         respond(success: true)
         log("Benutzerspezifische Event-Einstellungen für #{data[:username]} bei Event #{data[:event_id]} entfernt")
+    end
+
+    # Global price adjustment for all orders of an event
+    post "/api/apply_global_price_change" do
+        require_user_with_permission!("admin")
+        data = parse_request_data(
+            required_keys: [:event_id, :new_price, :target],
+            optional_keys: [:send_mail],
+            max_body_length: 4096
+        )
+
+        event_id = data[:event_id]
+        new_price = data[:new_price].to_f
+        target = data[:target] # 'all' or 'unprocessed'
+        send_mail = data[:send_mail] == true
+
+        # Validate new price
+        if new_price < 0
+            respond(success: false, error: "Der neue Preis darf nicht negativ sein.")
+            return
+        end
+
+        unless ['all', 'unprocessed'].include?(target)
+            respond(success: false, error: "Ungültige Zielgruppe.")
+            return
+        end
+
+        # Verify event exists and get current ticket price
+        event_result = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
+            MATCH (e:Event {id: $event_id, active: true})
+            RETURN e.ticket_price AS ticket_price, e.name AS name
+        END_OF_QUERY
+
+        if event_result.empty?
+            respond(success: false, error: "Event nicht gefunden.")
+            return
+        end
+
+        old_event_price = event_result.first['ticket_price'].to_f
+        event_name = event_result.first['name']
+
+        # Load all orders for this event
+        orders = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
+            WHERE o.status <> 'cancelled' AND o.status <> 'error'
+            RETURN o.id AS order_id,
+                   o.individual_ticket_price AS individual_ticket_price,
+                   o.ticket_count AS ticket_count,
+                   o.total_price AS total_price,
+                   o.payment_reference AS payment_reference,
+                   u.email AS user_email,
+                   u.name AS user_name,
+                   u.username AS user_username
+        END_OF_QUERY
+
+        affected_orders = []
+        orders.each do |order|
+            current_ticket_price = (order['individual_ticket_price'] || 0).to_f
+
+            if target == 'unprocessed'
+                # Only adjust orders where ticket price matches the old event default price
+                next unless (current_ticket_price - old_event_price).abs < 0.01
+            else
+                # For 'all': still only adjust tickets that match the old event price
+                # Already individually adjusted tickets remain unchanged
+                next unless (current_ticket_price - old_event_price).abs < 0.01
+            end
+
+            # Skip if price is already the new price (prevent double application)
+            next if (current_ticket_price - new_price).abs < 0.01
+
+            affected_orders << order
+        end
+
+        # Apply price changes
+        affected_orders.each do |order|
+            order_id = order['order_id']
+            ticket_count = (order['ticket_count'] || 1).to_i
+            new_total = (new_price * ticket_count).round(2)
+
+            neo4j_query(<<~END_OF_QUERY, {order_id: order_id, new_price: new_price, new_total: new_total})
+                MATCH (o:TicketOrder {id: $order_id})
+                SET o.individual_ticket_price = $new_price,
+                    o.total_price = $new_total
+            END_OF_QUERY
+
+            # Send mail if enabled
+            if send_mail
+                begin
+                    old_price = (order['individual_ticket_price'] || 0).to_f
+                    old_total = (order['total_price'] || 0).to_f
+                    price_difference = (old_price - new_price).round(2)
+                    ticket_count_val = (order['ticket_count'] || 1).to_i
+
+                    rendered = render_manual_mail_template('price_adjustment', {
+                        'NAME' => order['user_name'] || 'Nutzer',
+                        'ORDER_ID' => order['order_id'],
+                        'REFERENCE' => order['payment_reference'] || 'N/A',
+                        'OLD_PRICE' => sprintf("%.2f", old_price),
+                        'NEW_PRICE' => sprintf("%.2f", new_price),
+                        'DIFFERENCE' => sprintf("%.2f", price_difference.abs),
+                        'TICKET_COUNT' => ticket_count_val.to_s,
+                        'OLD_TOTAL' => sprintf("%.2f", old_total),
+                        'NEW_TOTAL' => sprintf("%.2f", new_total)
+                    })
+                    if rendered
+                        send_manual_mail(
+                            to_email: order['user_email'],
+                            subject: rendered[:subject],
+                            body: rendered[:body],
+                            template_key: 'price_adjustment',
+                            sender_username: @session_user[:username],
+                            recipient_username: order['user_username'],
+                            order_id: order_id
+                        )
+                    end
+                rescue => e
+                    STDERR.puts "Error sending price adjustment email for order #{order_id}: #{e.message}"
+                end
+            end
+        end
+
+        affected_order_ids = affected_orders.map { |o| o['order_id'] }
+        order_ids_str = affected_order_ids.any? ? ", Order-IDs: #{affected_order_ids.join(', ')}" : ""
+
+        log("Globale Preisanpassung für Event '#{event_name}' (#{event_id}): " \
+            "#{old_event_price}€ → #{new_price}€, " \
+            "Zielgruppe: #{target}, " \
+            "#{affected_orders.size} Bestellungen betroffen, " \
+            "Mailversand: #{send_mail ? 'Ja' : 'Nein'}" \
+            "#{order_ids_str}")
+
+        respond(
+            success: true,
+            affected_count: affected_orders.size,
+            old_price: old_event_price,
+            new_price: new_price,
+            event_name: event_name,
+            mail_sent: send_mail
+        )
+    end
+
+    # Get all unique emails for an event (orderers + ticket holders)
+    post "/api/get_event_emails" do
+        require_user_with_permission!("admin")
+        data = parse_request_data(required_keys: [:event_id])
+
+        event_id = data[:event_id]
+
+        # Get orderer emails
+        orderer_emails = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
+            WHERE o.status <> 'cancelled' AND o.status <> 'error'
+            RETURN DISTINCT u.email AS email
+        END_OF_QUERY
+
+        # Get participant emails
+        participant_emails = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
+            MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
+            WHERE o.status <> 'cancelled' AND o.status <> 'error'
+            MATCH (o)-[:INCLUDES]->(p:Participant)
+            WHERE p.email IS NOT NULL AND p.email <> ''
+            RETURN DISTINCT p.email AS email
+        END_OF_QUERY
+
+        all_emails = (orderer_emails.map { |r| r['email'] } + participant_emails.map { |r| r['email'] })
+            .compact
+            .map(&:strip)
+            .reject(&:empty?)
+            .uniq
+            .sort
+
+        respond(success: true, emails: all_emails)
+    end
+
+    # Get all unique emails for members of a specific tag
+    post "/api/get_tag_member_emails" do
+        require_user_with_permission!("admin")
+        data = parse_request_data(required_keys: [:tag_name])
+
+        tag_name = data[:tag_name]
+
+        result = neo4j_query(<<~END_OF_QUERY, {tag_name: tag_name})
+            MATCH (u:User)-[:HAS_TAG]->(t:Tag {name: $tag_name})
+            WHERE u.email IS NOT NULL AND u.email <> ''
+            RETURN DISTINCT u.email AS email
+        END_OF_QUERY
+
+        emails = result.map { |r| r['email'] }.compact.map(&:strip).reject(&:empty?).uniq.sort
+
+        respond(success: true, emails: emails)
     end
 
 end

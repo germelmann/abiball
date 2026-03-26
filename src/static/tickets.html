@@ -495,6 +495,28 @@ function displayPreviousOrders(orders) {
                         `${order.total_price}€`
                     )
                 ),
+                // Show payment breakdown when there are actual payments or payment request was sent
+                (order.total_paid > 0 || (order.latest_payment_request && order.latest_payment_request.status === 'sent')) ?
+                    $('<div>').addClass('row mb-2 mt-1').append(
+                        $('<div>').addClass('col-md-12').append(
+                            $('<div>').addClass('border rounded p-2').append(
+                                $('<div>').addClass('row text-center').append(
+                                    $('<div>').addClass('col-md-4').append(
+                                        $('<small>').addClass('text-muted d-block').text('Gesamt'),
+                                        $('<strong>').text(`${Number(order.total_price || 0).toFixed(2)}€`)
+                                    ),
+                                    $('<div>').addClass('col-md-4').append(
+                                        $('<small>').addClass('text-muted d-block').text('Bezahlt'),
+                                        $('<strong>').addClass('text-success').text(`${Number(order.total_paid || 0).toFixed(2)}€`)
+                                    ),
+                                    $('<div>').addClass('col-md-4').append(
+                                        $('<small>').addClass('text-muted d-block').text('Offen'),
+                                        $('<strong>').addClass(Number(order.remaining_balance || 0) > 0 ? 'text-danger' : 'text-success').text(`${Number(order.remaining_balance || 0).toFixed(2)}€`)
+                                    )
+                                )
+                            )
+                        )
+                    ) : '',
                 order.participants && order.participants.length > 0 ? 
                     $('<div>').addClass('mt-3').append(
                         $('<strong>').text('Teilnehmer:'),

@@ -91,8 +91,10 @@ function perform_logout() {
 function getOrderStatusText(status) {
     const statusMap = {
         'paid': 'Bezahlt',
+        'overpaid': 'Überzahlung',
         'partially_paid': 'Teilweise bezahlt',
         'pending': 'Ausstehend',
+        'auto': 'Automatisch',
         'pending_payment': 'Zahlung ausstehend',
         'offline_payment': 'Barzahlung',
         'cancelled': 'Storniert',
@@ -108,6 +110,7 @@ function getOrderStatusText(status) {
 function getOrderStatusBadgeClass(status) {
     const classMap = {
         'paid': 'bg-success',
+        'overpaid': 'bg-warning text-dark',
         'partially_paid': 'bg-info',
         'pending': 'bg-warning text-dark',
         'pending_payment': 'bg-info',

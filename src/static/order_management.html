@@ -371,9 +371,7 @@
                         <div class="col-md-3">
                             <label for="status_input" class="form-label">Status</label>
                             <select class="form-control" id="status_input" disabled>
-                                <option value="pending">Ausstehend</option>
-                                <option value="paid" disabled>Bezahlt (automatisch)</option>
-                                <option value="partially_paid" disabled>Teilweise bezahlt (automatisch)</option>
+                                <option value="auto">Automatisch</option>
                                 <option value="offline_payment">Barzahlung vor Ort</option>
                                 <option value="in_review">Manuelle Prüfung</option>
                                 <option value="on_hold">Pausiert</option>
@@ -382,7 +380,7 @@
                                 <option value="cancelled">Storniert</option>
                                 <option value="cancelled_by_user">Storniert durch Käufer</option>
                             </select>
-                            <small class="text-muted">Zahlungsstatus wird automatisch berechnet</small>
+                            <small class="text-muted">Automatisch = Status wird aus Zahlungen berechnet (Ausstehend/Teilweise bezahlt/Bezahlt/Überzahlung)</small>
                         </div>
                     </div>
 
@@ -755,7 +753,7 @@
 
                     if (`#{user_has_permission?("manage_orders")}` ? "true" : "false") {
                         // Send payment request button (only if no request sent yet and not paid/offline_payment)
-                        if (order.status !== 'paid' && order.status !== 'offline_payment' && (!order.latest_payment_request || !order.latest_payment_request.id)) {
+                        if (order.status !== 'paid' && order.status !== 'overpaid' && order.status !== 'offline_payment' && (!order.latest_payment_request || !order.latest_payment_request.id)) {
                             let sendPrButton = $('<button>')
                                 .addClass('btn btn-sm btn-info me-1')
                                 .html('<i class="bi bi-envelope-paper"></i>')
@@ -925,7 +923,9 @@
         $('#ticket_count_input').val(order.ticket_count);
         $('#total_price_input').val(order.total_price);
         $('#payment_reference_input').val(order.payment_reference);
-        $('#status_input').val(order.status);
+        // Map payment-derived statuses to 'auto' for the dropdown
+        const autoStatuses = ['pending', 'paid', 'partially_paid', 'overpaid'];
+        $('#status_input').val(autoStatuses.includes(order.status) ? 'auto' : order.status);
         $('#created_at_input').val(new Date(order.created_at).toLocaleString('de-DE'));
         $('#paid_at_input').val(order.paid_at ? new Date(order.paid_at).toLocaleString('de-DE') : '');
         
@@ -1033,6 +1033,7 @@
                 row.append($('<td>').text(payment.recorded_by || '-'));
                 row.append($('<td>').text(payment.note || '-'));
                 const revertBtn = $('<button>')
+                    .attr('type', 'button')
                     .addClass('btn btn-sm btn-outline-danger')
                     .html('<i class="bi bi-arrow-counterclockwise"></i> Stornieren')
                     .attr('title', 'Zahlung stornieren')
@@ -1053,7 +1054,7 @@
         if (paymentRequests.length === 0) {
             html = '<div class="alert alert-secondary"><i class="bi bi-info-circle"></i> Keine Zahlungsaufforderung gesendet</div>';
             // Show send button if order is not paid
-            if (order.status !== 'paid') {
+            if (order.status !== 'paid' && order.status !== 'overpaid') {
                 $('#send_payment_request_btn').show();
             }
         } else {
@@ -1302,7 +1303,7 @@
     }
     
     function checkTicketGenerationStatus(orderId, status) {
-        if (status === 'paid' || status === 'offline_payment') {
+        if (status === 'paid' || status === 'overpaid' || status === 'offline_payment') {
             api_call(`/api/check_ticket_generation/${orderId}`, {}, function(data) {
                 if (data.success) {
                     if (data.can_generate_tickets) {

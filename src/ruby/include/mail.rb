@@ -210,7 +210,54 @@ class Main < Sinatra::Base
             BODY
             category: 'user',
             label: 'Zahlung erhalten – nicht zuordenbar'
-        }
+        },
+        'price_adjustment' => {
+            key: 'price_adjustment',
+            subject: 'Preisanpassung deiner Bestellung',
+            body: <<~BODY,
+                <p>Hallo [NAME],</p>
+                <p>der Ticketpreis für deine Bestellung #[ORDER_ID] ([REFERENCE]) wurde angepasst.</p>
+                <p><strong>Alter Ticketpreis:</strong> [OLD_PRICE] €</p>
+                <p><strong>Neuer Ticketpreis:</strong> [NEW_PRICE] €</p>
+                <p><strong>Differenz pro Ticket:</strong> [DIFFERENCE] €</p>
+                <p><strong>Anzahl Tickets:</strong> [TICKET_COUNT]</p>
+                <p><strong>Alter Gesamtbetrag:</strong> [OLD_TOTAL] €</p>
+                <p><strong>Neuer Gesamtbetrag:</strong> [NEW_TOTAL] €</p>
+                <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>
+            BODY
+            category: 'order',
+            label: 'Preisanpassung'
+        },
+        'partial_payment_received' => {
+            key: 'partial_payment_received',
+            subject: 'Teilzahlung eingegangen',
+            body: <<~BODY,
+                <p>Hallo [NAME],</p>
+                <p>wir haben eine Zahlung über <strong>[PAYMENT_AMOUNT] €</strong> für deine Bestellung #[ORDER_ID] ([REFERENCE]) erhalten.</p>
+                <p><strong>Gesamtbetrag:</strong> [TOTAL_PRICE] €</p>
+                <p><strong>Bereits bezahlt:</strong> [TOTAL_PAID] €</p>
+                <p><strong>Offener Restbetrag:</strong> [REMAINING] €</p>
+                <p>Bitte überweise den offenen Betrag zeitnah, damit wir deine Bestellung abschließen können.</p>
+                <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>
+            BODY
+            category: 'order',
+            label: 'Teilzahlung eingegangen'
+        },
+        'overpayment_received' => {
+            key: 'overpayment_received',
+            subject: 'Überzahlung eingegangen',
+            body: <<~BODY,
+                <p>Hallo [NAME],</p>
+                <p>wir haben eine Zahlung über <strong>[PAYMENT_AMOUNT] €</strong> für deine Bestellung #[ORDER_ID] ([REFERENCE]) erhalten.</p>
+                <p><strong>Gesamtbetrag:</strong> [TOTAL_PRICE] €</p>
+                <p><strong>Eingegangener Betrag:</strong> [TOTAL_PAID] €</p>
+                <p><strong>Rückzahlung:</strong> [REFUND] €</p>
+                <p>Wir werden die Rückbuchung von [REFUND] € veranlassen.</p>
+                <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>
+            BODY
+            category: 'order',
+            label: 'Überzahlung eingegangen'
+        },
     }
 
     # Get template by key
