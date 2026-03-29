@@ -41,6 +41,18 @@ class Main < Sinatra::Base
             category: 'order',
             label: 'Bestellung storniert'
         },
+        'order_cancelled_no_payment' => {
+            key: 'order_cancelled_no_payment',
+            subject: 'Bestellung storniert – Zahlungsfrist abgelaufen',
+            body: <<~BODY,
+                <p>Hallo [NAME],</p>
+                <p>deine Bestellung #[ORDER_ID] ([REFERENCE]) wurde storniert, da trotz mehrfacher Erinnerung keine Zahlung bei uns eingegangen ist.</p>
+                <p>Offener Betrag: <strong>[TOTAL_PRICE] €</strong></p>
+                <p>Falls du die Bestellung doch noch abschließen möchtest, kontaktiere uns bitte zeitnah: #{support_email}.</p>
+            BODY
+            category: 'order',
+            label: 'Bestellung storniert (keine Zahlung)'
+        },
         'order_cancelled_user_request' => {
             key: 'order_cancelled_user_request',
             subject: 'Bestellung auf deinen Wunsch storniert',
@@ -524,24 +536,6 @@ class Main < Sinatra::Base
     end
 
     # Get all templates for a category
-    post '/api/manual_mail/get_templates' do
-        require_user_with_permission!("manual_mail_send")
-        data = parse_request_data(required_keys: [:category])
-
-        category = data[:category]
-        templates = get_manual_mail_templates_by_category(category)
-
-        template_list = templates.map do |key, template|
-            {
-                key: key,
-                label: template[:label],
-                subject: template[:subject]
-            }
-        end
-
-        respond(success: true, templates: template_list)
-    end
-
     # Send manual email
     post '/api/manual_mail/send' do
         require_user_with_permission!("manual_mail_send")

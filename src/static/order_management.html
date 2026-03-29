@@ -19,6 +19,34 @@
         </div>
     </div>
     
+    <!-- Dunning / Reminder Section (visible when event is selected) -->
+    <div class="row mb-4" id="dunning_section" style="display: none;">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header bg-warning bg-opacity-10">
+                    <h5 class="mb-0"><i class="bi bi-bell"></i> Mahnwesen</h5>
+                </div>
+                <div class="card-body">
+                    <div id="dunning_config_info" class="mb-3">
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-outline-info" id="send_bulk_reminder_1_btn">
+                            <i class="bi bi-envelope"></i> Mahnung 1 an fällige Bestellungen senden
+                        </button>
+                        <button type="button" class="btn btn-outline-warning" id="send_bulk_reminder_2_btn">
+                            <i class="bi bi-envelope-exclamation"></i> Mahnung 2 an fällige Bestellungen senden
+                        </button>
+                        <button type="button" class="btn btn-outline-danger" id="bulk_cancel_btn">
+                            <i class="bi bi-x-circle"></i> Fällige unbezahlte Bestellungen stornieren
+                        </button>
+                    </div>
+                    <div id="dunning_status_info" class="mt-3">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Statistics Dashboard -->
     <div class='row mb-4'>
         <div class='col-md-12'>
@@ -316,247 +344,426 @@
     <div class="modal-dialog modal-fullscreen">
         <div class="modal-content">
             <div class="modal-header">
-                <div>
-                    <h5 class="modal-title" id="orderDetailsModalLabel">Bestellung #<span id="order_id_display"></span>&nbsp;<span class="badge bg-info fs-6 mt-1" id="event_badge"><i class="bi bi-calendar-event"></i> <span id="event_name_display"></span></span></h5>
+                <div class="d-flex align-items-center gap-3">
+                    <div>
+                        <h5 class="modal-title mb-0" id="orderDetailsModalLabel">Bestellung #<span id="order_id_display"></span></h5>
+                        <small class="text-muted" id="order_date_header_display"></small>
+                    </div>
+                    <span class="badge bg-info fs-6" id="event_badge"><i class="bi bi-calendar-event"></i> <span id="event_name_display"></span></span>
+                    <span class="badge fs-6" id="order_status_header_badge"></span>
                 </div>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <form id="order_form">
-                    <input type="hidden" id="order_id_input">
-                    
-                    <!-- User Information -->
-                    <h6 class="mb-3"><i class="bi bi-person"></i> Benutzerinformationen</h6>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label for="user_name_input" class="form-label">Name</label>
-                            <input type="text" class="form-control" id="user_name_input" readonly>
-                        </div>
-                        <div class="col-md-6">
-                            <label for="user_email_input" class="form-label">E-Mail</label>
-                            <input type="email" class="form-control" id="user_email_input" readonly>
+                <!-- Quick Info Summary Bar -->
+                <div class="row mb-3 g-2" id="order_summary_bar">
+                    <div class="col-md-2">
+                        <div class="card border-0 bg-body-secondary text-center p-2">
+                            <small class="text-body-secondary">Tickets</small>
+                            <strong id="summary_ticket_count">-</strong>
                         </div>
                     </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label class="form-label">Benutzerprofil</label>
+                    <div class="col-md-2">
+                        <div class="card border-0 bg-body-secondary text-center p-2">
+                            <small class="text-body-secondary">Gesamtpreis</small>
+                            <strong id="summary_total_price">-</strong>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="card border-0 bg-body-secondary text-center p-2">
+                            <small class="text-body-secondary">Bezahlt</small>
+                            <strong class="text-success" id="summary_paid">-</strong>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="card border-0 bg-body-secondary text-center p-2">
+                            <small class="text-body-secondary">Offen</small>
+                            <strong class="text-danger" id="summary_remaining">-</strong>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="card border-0 bg-body-secondary text-center p-2">
+                            <small class="text-body-secondary">Referenz</small>
+                            <strong id="summary_reference" class="text-truncate d-block" style="font-size: 0.85rem;">-</strong>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="card border-0 bg-body-secondary text-center p-2">
+                            <small class="text-body-secondary">PDF & Tickets</small>
                             <div>
-                                <a href="#" id="user_profile_link" class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener noreferrer">
-                                    <i class="bi bi-person"></i> Benutzerprofil anzeigen
-                                </a>
-                                <br><small class="text-muted">Adresse und weitere Details im Benutzerprofil</small>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <label for="user_phone_input" class="form-label">Telefon</label>
-                            <input type="text" class="form-control" id="user_phone_input" readonly>
-                        </div>
-                    </div>
-
-                    <!-- Order Information -->
-                    <h6 class="mb-3"><i class="bi bi-ticket"></i> Bestellinformationen</h6>
-                    <div class="row mb-3">
-                        <div class="col-md-3">
-                            <label for="ticket_count_input" class="form-label">Anzahl Tickets</label>
-                            <input type="number" class="form-control" id="ticket_count_input" min="1" disabled>
-                        </div>
-                        <div class="col-md-3">
-                            <label for="total_price_input" class="form-label">Gesamtpreis</label>
-                            <input type="number" class="form-control" id="total_price_input" min="0" step="0.01" disabled>
-                        </div>
-                        <div class="col-md-3">
-                            <label for="payment_reference_input" class="form-label">Referenz</label>
-                            <input type="text" class="form-control" id="payment_reference_input" disabled>
-                        </div>
-                        <div class="col-md-3">
-                            <label for="status_input" class="form-label">Status</label>
-                            <select class="form-control" id="status_input" disabled>
-                                <option value="auto">Automatisch</option>
-                                <option value="offline_payment">Barzahlung vor Ort</option>
-                                <option value="in_review">Manuelle Prüfung</option>
-                                <option value="on_hold">Pausiert</option>
-                                <option value="issue">Problem/Fehler</option>
-                                <option value="contact_required">Kontakt erforderlich</option>
-                                <option value="cancelled">Storniert</option>
-                                <option value="cancelled_by_user">Storniert durch Käufer</option>
-                            </select>
-                            <small class="text-muted">Automatisch = Status wird aus Zahlungen berechnet (Ausstehend/Teilweise bezahlt/Bezahlt/Überzahlung)</small>
-                        </div>
-                    </div>
-
-                    <!-- Payment Summary Section (hidden for offline events) -->
-                    <div id="payment_sections">
-                        <h6 class="mb-3"><i class="bi bi-cash-stack"></i> Zahlungsübersicht</h6>
-                        <div class="row mb-3">
-                            <div class="col-md-3">
-                                <label class="form-label">Gesamtbetrag</label>
-                                <div class="form-control-plaintext fw-bold" id="payment_total_display">0,00 €</div>
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label">Bezahlt</label>
-                                <div class="form-control-plaintext fw-bold text-success" id="payment_paid_display">0,00 €</div>
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label">Ausstehend</label>
-                                <div class="form-control-plaintext fw-bold text-danger" id="payment_remaining_display">0,00 €</div>
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label">Zahlungsstatus</label>
-                                <div id="payment_status_badge_display"></div>
-                                <div id="payment_overpayment_display" style="display:none;">
-                                    <small class="text-warning"><i class="bi bi-exclamation-triangle"></i> Überzahlung: <span id="overpayment_amount">0,00</span> €</small>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Payment History -->
-                        <div id="payment_history_section" style="display:none;">
-                            <h6 class="mb-2"><i class="bi bi-clock-history"></i> Zahlungsverlauf</h6>
-                            <div class="table-responsive">
-                                <table class="table table-sm">
-                                    <thead>
-                                        <tr>
-                                            <th>Datum</th>
-                                            <th>Betrag</th>
-                                            <th>Verbucht von</th>
-                                            <th>Notiz</th>
-                                            <th>Aktionen</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="payment_history_tbody">
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Record Payment Button (hidden for offline events) -->
-                    <div id="record_payment_section_wrapper">
-                        <div class="mb-3" id="record_payment_section" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
-                            <button type="button" class="btn btn-sm btn-success" id="record_payment_btn">
-                                <i class="bi bi-plus-circle"></i> Zahlung verbuchen
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="row mb-3">
-                        <div class="col-md-4">
-                            <label for="created_at_input" class="form-label">Bestellt am</label>
-                            <input disabled type="text" class="form-control" id="created_at_input" readonly>
-                        </div>
-                        <div class="col-md-4">
-                            <label for="paid_at_input" class="form-label">Bezahlt am</label>
-                            <input disabled type="text" class="form-control" id="paid_at_input">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">PDF & Tickets</label>
-                            <div>
-                                <button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="generateOrderPDF()">
-                                    <i class="bi bi-file-pdf"></i> Bestellbestätigung
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="generateOrderPDF()" title="Bestellbestätigung PDF">
+                                    <i class="bi bi-file-pdf"></i>
                                 </button>
-                                <button type="button" class="btn btn-outline-success btn-sm" id="generate_tickets_btn" onclick="generateTickets()" style="display:none;">
-                                    <i class="bi bi-ticket-detailed"></i> Tickets generieren
+                                <button type="button" class="btn btn-outline-success btn-sm" id="generate_tickets_btn" onclick="generateTickets()" style="display:none;" title="Tickets generieren">
+                                    <i class="bi bi-ticket-detailed"></i>
                                 </button>
-                                <div class="mt-2" id="tickets_status" style="display:none;">
-                                    <small class="text-success">
-                                        <i class="bi bi-check-circle"></i> Tickets generiert
-                                    </small>
-                                </div>
+                                <span id="tickets_status" style="display:none;">
+                                    <small class="text-success"><i class="bi bi-check-circle"></i></small>
+                                </span>
                             </div>
                         </div>
                     </div>
+                </div>
 
-                    <!-- Payment Requests Section -->
-                    <h6 class="mb-3"><i class="bi bi-credit-card"></i> Zahlungsaufforderungen</h6>
-                    <div id="payment_requests_section">
-                    </div>
-                    
-                    <div class="mb-3" id="send_payment_request_section" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
-                        <button type="button" class="btn btn-sm btn-info" id="send_payment_request_btn" style="display:none;">
-                            <i class="bi bi-envelope-paper"></i> Zahlungsaufforderung senden
+                <!-- Tab Navigation -->
+                <ul class="nav nav-tabs mb-3" id="orderDetailTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="tab-overview" data-bs-toggle="tab" data-bs-target="#pane-overview" type="button" role="tab">
+                            <i class="bi bi-info-circle"></i> Übersicht
                         </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="tab-payment" data-bs-toggle="tab" data-bs-target="#pane-payment" type="button" role="tab">
+                            <i class="bi bi-cash-stack"></i> Zahlung
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="tab-participants" data-bs-toggle="tab" data-bs-target="#pane-participants" type="button" role="tab">
+                            <i class="bi bi-people"></i> Teilnehmer
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation" id="tab-mail-li" #{can_send_manual_mail? ? "" : "style='display:none'"}>
+                        <button class="nav-link" id="tab-mail" data-bs-toggle="tab" data-bs-target="#pane-mail" type="button" role="tab">
+                            <i class="bi bi-envelope"></i> E-Mails
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                        <button class="nav-link" id="tab-settings" data-bs-toggle="tab" data-bs-target="#pane-settings" type="button" role="tab">
+                            <i class="bi bi-gear"></i> Einstellungen
+                        </button>
+                    </li>
+                </ul>
+
+                <!-- Tab Content -->
+                <div class="tab-content">
+                    <!-- TAB: Overview -->
+                    <div class="tab-pane fade show active" id="pane-overview" role="tabpanel">
+                        <form id="order_form">
+                            <input type="hidden" id="order_id_input">
+                            
+                            <!-- User Information -->
+                            <div class="card mb-3">
+                                <div class="card-header"><h6 class="mb-0"><i class="bi bi-person"></i> Benutzer</h6></div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <label for="user_name_input" class="form-label">Name</label>
+                                            <input type="text" class="form-control" id="user_name_input" readonly>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="user_email_input" class="form-label">E-Mail</label>
+                                            <input type="email" class="form-control" id="user_email_input" readonly>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label for="user_phone_input" class="form-label">Telefon</label>
+                                            <input type="text" class="form-control" id="user_phone_input" readonly>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label">&nbsp;</label>
+                                            <div>
+                                                <a href="#" id="user_profile_link" class="btn btn-sm btn-outline-primary w-100" target="_blank" rel="noopener noreferrer">
+                                                    <i class="bi bi-person"></i> Profil
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Order Details -->
+                            <div class="card mb-3">
+                                <div class="card-header"><h6 class="mb-0"><i class="bi bi-ticket"></i> Bestelldaten</h6></div>
+                                <div class="card-body">
+                                    <div class="row mb-2">
+                                        <div class="col-md-2">
+                                            <label for="ticket_count_input" class="form-label">Tickets</label>
+                                            <input type="number" class="form-control" id="ticket_count_input" min="1" disabled>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label for="total_price_input" class="form-label">Gesamtpreis</label>
+                                            <input type="number" class="form-control" id="total_price_input" min="0" step="0.01" disabled>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label for="payment_reference_input" class="form-label">Referenz</label>
+                                            <input type="text" class="form-control" id="payment_reference_input" disabled>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label for="status_input" class="form-label">Status</label>
+                                            <select class="form-control" id="status_input" disabled>
+                                                <option value="auto">Automatisch</option>
+                                                <option value="offline_payment">Barzahlung vor Ort</option>
+                                                <option value="in_review">Manuelle Prüfung</option>
+                                                <option value="on_hold">Pausiert</option>
+                                                <option value="issue">Problem/Fehler</option>
+                                                <option value="contact_required">Kontakt erforderlich</option>
+                                                <option value="cancelled">Storniert</option>
+                                                <option value="cancelled_by_user">Storniert durch Käufer</option>
+                                            </select>
+                                            <small class="text-muted">Automatisch = aus Zahlungen berechnet</small>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label for="created_at_input" class="form-label">Bestellt am</label>
+                                            <input disabled type="text" class="form-control" id="created_at_input" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-2">
+                                            <label for="paid_at_input" class="form-label">Bezahlt am</label>
+                                            <input disabled type="text" class="form-control" id="paid_at_input">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Notes -->
+                            <div class="card mb-3">
+                                <div class="card-header"><h6 class="mb-0"><i class="bi bi-journal-text"></i> Notizen</h6></div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <label for="notes_input" class="form-label">
+                                                Kundennotiz <small class="text-muted">(sichtbar für Kunde)</small>
+                                            </label>
+                                            <textarea class="form-control" id="notes_input" rows="2" disabled></textarea>
+                                        </div>
+                                        <div class="col-md-6" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                                            <label for="admin_notes_input" class="form-label">
+                                                Admin-Notiz <small class="text-danger">(nur intern)</small>
+                                            </label>
+                                            <textarea class="form-control" id="admin_notes_input" rows="2" disabled></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
                     </div>
 
-                    <!-- Notes Section -->
-                    <h6 class="mb-3"><i class="bi bi-journal-text"></i> Notizen</h6>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label for="notes_input" class="form-label">
-                                Notiz <small class="text-muted">(sichtbar für Kunde und Admin)</small>
-                            </label>
-                            <textarea class="form-control" id="notes_input" rows="3" disabled></textarea>
+                    <!-- TAB: Payment -->
+                    <div class="tab-pane fade" id="pane-payment" role="tabpanel">
+                        <!-- Payment Summary -->
+                        <div id="payment_sections">
+                            <div class="card mb-3">
+                                <div class="card-header"><h6 class="mb-0"><i class="bi bi-cash-stack"></i> Zahlungsübersicht</h6></div>
+                                <div class="card-body">
+                                    <div class="row mb-2">
+                                        <div class="col-md-3">
+                                            <label class="form-label">Gesamtbetrag</label>
+                                            <div class="form-control-plaintext fw-bold" id="payment_total_display">0,00 €</div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Bezahlt</label>
+                                            <div class="form-control-plaintext fw-bold text-success" id="payment_paid_display">0,00 €</div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Ausstehend</label>
+                                            <div class="form-control-plaintext fw-bold text-danger" id="payment_remaining_display">0,00 €</div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Zahlungsstatus</label>
+                                            <div id="payment_status_badge_display"></div>
+                                            <div id="payment_overpayment_display" style="display:none;">
+                                                <small class="text-warning"><i class="bi bi-exclamation-triangle"></i> Überzahlung: <span id="overpayment_amount">0,00</span> €</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <!-- Record Payment Button -->
+                                    <div id="record_payment_section_wrapper">
+                                        <div id="record_payment_section" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                                            <button type="button" class="btn btn-sm btn-success" id="record_payment_btn">
+                                                <i class="bi bi-plus-circle"></i> Zahlung verbuchen
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Payment History -->
+                            <div class="card mb-3" id="payment_history_section" style="display:none;">
+                                <div class="card-header"><h6 class="mb-0"><i class="bi bi-clock-history"></i> Zahlungsverlauf</h6></div>
+                                <div class="card-body">
+                                    <div class="table-responsive">
+                                        <table class="table table-sm">
+                                            <thead>
+                                                <tr>
+                                                    <th>Datum</th>
+                                                    <th>Betrag</th>
+                                                    <th>Verbucht von</th>
+                                                    <th>Notiz</th>
+                                                    <th>Aktionen</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="payment_history_tbody">
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="col-md-6" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
-                            <label for="admin_notes_input" class="form-label">
-                                Admin-Notiz <small class="text-danger">(nur für Admins sichtbar)</small>
-                            </label>
-                            <textarea class="form-control" id="admin_notes_input" rows="3" disabled></textarea>
+
+                        <!-- Payment Requests -->
+                        <div class="card mb-3">
+                            <div class="card-header">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h6 class="mb-0"><i class="bi bi-credit-card"></i> Zahlungsaufforderungen</h6>
+                                    <div id="send_payment_request_section" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                                        <button type="button" class="btn btn-sm btn-info" id="send_payment_request_btn" style="display:none;">
+                                            <i class="bi bi-envelope-paper"></i> Zahlungsaufforderung senden
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-body" id="payment_requests_section">
+                            </div>
+                        </div>
+
+                        <!-- Per-Order Dunning Actions -->
+                        <div class="card mb-3" id="order_dunning_actions_section" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
+                            <div class="card-header"><h6 class="mb-0"><i class="bi bi-bell"></i> Mahnung / Stornierung</h6></div>
+                            <div class="card-body">
+                                <div class="d-flex flex-wrap gap-2" id="dunning_action_buttons">
+                                    <button type="button" class="btn btn-outline-info btn-sm dunning-action-btn" id="send_reminder_1_btn" data-type="order_reminder_1">
+                                        <i class="bi bi-envelope"></i> 1. Mahnung senden
+                                    </button>
+                                    <button type="button" class="btn btn-outline-warning btn-sm dunning-action-btn" id="send_reminder_2_btn" data-type="order_reminder_2">
+                                        <i class="bi bi-envelope-exclamation"></i> 2. Mahnung senden
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm dunning-action-btn" id="send_cancellation_btn" data-type="order_cancelled_no_payment">
+                                        <i class="bi bi-x-circle"></i> Stornierung (keine Zahlung) senden
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Dunning History (sent reminders) -->
+                        <div class="card mb-3" id="dunning_history_section" style="display: none;">
+                            <div class="card-header"><h6 class="mb-0"><i class="bi bi-clock-history"></i> Mahnungsverlauf</h6></div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Typ</th>
+                                                <th>Gesendet am</th>
+                                                <th>Gesendet von</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="dunning_history_tbody">
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Participants Information -->
-                    <h6 class="mb-3"><i class="bi bi-people"></i> Teilnehmer</h6>
-                    <div id="participants_section">
-                    </div>
-                </form>
-
-                <!-- Manual Email Section -->
-                <div class="card mt-4" id="manual_mail_section" #{can_send_manual_mail? ? "" : "style='display:none'"}>
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-envelope"></i> Manuelle E-Mails</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="d-flex flex-wrap gap-2" id="order_mail_buttons">
-                            <button type="button" class="btn btn-outline-success manual-mail-btn" data-template="order_accepted_cash">
-                                <i class="bi bi-envelope"></i> Bestellung angenommen (Barzahlung vor Ort) <span class="badge bg-secondary mail-counter" data-template="order_accepted_cash">0</span>
-                            </button>
-                            <button type="button" class="btn btn-outline-success manual-mail-btn" data-template="payment_received">
-                                <i class="bi bi-envelope"></i> Zahlung eingegangen <span class="badge bg-secondary mail-counter" data-template="payment_received">0</span>
-                            </button>
-                            <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled">
-                                <i class="bi bi-envelope"></i> Bestellung storniert <span class="badge bg-secondary mail-counter" data-template="order_cancelled">0</span>
-                            </button>
-                            <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled_user_request">
-                                <i class="bi bi-envelope"></i> Storniert (auf Wunsch) <span class="badge bg-secondary mail-counter" data-template="order_cancelled_user_request">0</span>
-                            </button>
-                            <button type="button" class="btn btn-outline-info manual-mail-btn" data-template="order_reminder_1">
-                                <i class="bi bi-envelope"></i> Erinnerung 1 <span class="badge bg-secondary mail-counter" data-template="order_reminder_1">0</span>
-                            </button>
-                            <button type="button" class="btn btn-outline-info manual-mail-btn" data-template="order_reminder_2">
-                                <i class="bi bi-envelope"></i> Erinnerung 2 <span class="badge bg-secondary mail-counter" data-template="order_reminder_2">0</span>
-                            </button>
-                            <button type="button" class="btn btn-outline-secondary manual-mail-btn" data-template="order_adjusted">
-                                <i class="bi bi-envelope"></i> Bestellung angepasst <span class="badge bg-secondary mail-counter" data-template="order_adjusted">0</span>
-                            </button>
-                            <button type="button" class="btn btn-outline-secondary manual-mail-btn" data-template="order_adjusted_user_request">
-                                <i class="bi bi-envelope"></i> Angepasst (auf Wunsch) <span class="badge bg-secondary mail-counter" data-template="order_adjusted_user_request">0</span>
-                            </button>
-                            <button type="button" class="btn btn-outline-warning manual-mail-btn" data-template="order_issue">
-                                <i class="bi bi-envelope"></i> Problem mit Bestellung <span class="badge bg-secondary mail-counter" data-template="order_issue">0</span>
-                            </button>
+                    <!-- TAB: Participants -->
+                    <div class="tab-pane fade" id="pane-participants" role="tabpanel">
+                        <div class="card mb-3">
+                            <div class="card-header"><h6 class="mb-0"><i class="bi bi-people"></i> Teilnehmer</h6></div>
+                            <div class="card-body" id="participants_section">
+                            </div>
                         </div>
 
-                        <hr>
-                        
-                        <!-- Mail Log Section -->
-                        <h6 class="mb-3"><i class="bi bi-clock-history"></i> E-Mail-Verlauf</h6>
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover" id="order_mail_log_table">
-                                <thead>
-                                    <tr>
-                                        <th>Datum</th>
-                                        <th>Template</th>
-                                        <th>Betreff</th>
-                                        <th>Gesendet von</th>
-                                        <th>Aktionen</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="order_mail_log_tbody">
-                                    <tr>
-                                        <td colspan="5" class="text-center text-muted"><em>Keine E-Mails gesendet</em></td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                        <!-- Ticket Download Section -->
+                        <div id="ticket_download_section" style="display: none;">
+                            <div class="card mb-3">
+                                <div class="card-header"><h6 class="mb-0"><i class="bi bi-download"></i> Tickets herunterladen</h6></div>
+                                <div class="card-body">
+                                    <div id="ticket_download_buttons" class="d-flex flex-wrap gap-2">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB: E-Mails -->
+                    <div class="tab-pane fade" id="pane-mail" role="tabpanel">
+                        <div class="card mb-3" id="manual_mail_section">
+                            <div class="card-header"><h6 class="mb-0"><i class="bi bi-envelope"></i> E-Mail senden</h6></div>
+                            <div class="card-body">
+                                <div class="d-flex flex-wrap gap-2" id="order_mail_buttons">
+                                    <button type="button" class="btn btn-outline-success manual-mail-btn" data-template="order_accepted_cash">
+                                        <i class="bi bi-envelope"></i> Bestellung angenommen (Barzahlung) <span class="badge bg-secondary mail-counter" data-template="order_accepted_cash">0</span>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-success manual-mail-btn" data-template="payment_received">
+                                        <i class="bi bi-envelope"></i> Zahlung eingegangen <span class="badge bg-secondary mail-counter" data-template="payment_received">0</span>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled">
+                                        <i class="bi bi-envelope"></i> Bestellung storniert <span class="badge bg-secondary mail-counter" data-template="order_cancelled">0</span>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled_user_request">
+                                        <i class="bi bi-envelope"></i> Storniert (auf Wunsch) <span class="badge bg-secondary mail-counter" data-template="order_cancelled_user_request">0</span>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled_no_payment">
+                                        <i class="bi bi-envelope"></i> Storniert (keine Zahlung) <span class="badge bg-secondary mail-counter" data-template="order_cancelled_no_payment">0</span>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-info manual-mail-btn" data-template="order_reminder_1">
+                                        <i class="bi bi-envelope"></i> Erinnerung 1 <span class="badge bg-secondary mail-counter" data-template="order_reminder_1">0</span>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-info manual-mail-btn" data-template="order_reminder_2">
+                                        <i class="bi bi-envelope"></i> Erinnerung 2 <span class="badge bg-secondary mail-counter" data-template="order_reminder_2">0</span>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary manual-mail-btn" data-template="order_adjusted">
+                                        <i class="bi bi-envelope"></i> Bestellung angepasst <span class="badge bg-secondary mail-counter" data-template="order_adjusted">0</span>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary manual-mail-btn" data-template="order_adjusted_user_request">
+                                        <i class="bi bi-envelope"></i> Angepasst (auf Wunsch) <span class="badge bg-secondary mail-counter" data-template="order_adjusted_user_request">0</span>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-warning manual-mail-btn" data-template="order_issue">
+                                        <i class="bi bi-envelope"></i> Problem mit Bestellung <span class="badge bg-secondary mail-counter" data-template="order_issue">0</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-3">
+                            <div class="card-header"><h6 class="mb-0"><i class="bi bi-clock-history"></i> E-Mail-Verlauf</h6></div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-hover" id="order_mail_log_table">
+                                        <thead>
+                                            <tr>
+                                                <th>Datum</th>
+                                                <th>Template</th>
+                                                <th>Betreff</th>
+                                                <th>Gesendet von</th>
+                                                <th>Aktionen</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="order_mail_log_tbody">
+                                            <tr>
+                                                <td colspan="5" class="text-center text-muted"><em>Keine E-Mails gesendet</em></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB: Settings (Dunning Overrides etc.) -->
+                    <div class="tab-pane fade" id="pane-settings" role="tabpanel">
+                        <div class="card mb-3" id="dunning_overrides_section" style="display: none;">
+                            <div class="card-header"><h6 class="mb-0"><i class="bi bi-bell"></i> Mahnfristen (Bestellungsebene)</h6></div>
+                            <div class="card-body">
+                                <small class="text-muted d-block mb-2">Überschreibt die Event-Standardfristen für diese Bestellung. Leer = Event-Standard. Frist beginnt ab Versand der Zahlungsaufforderung.</small>
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <label for="order_reminder_1_override_input" class="form-label">1. Mahnung nach (Tage)</label>
+                                        <input type="number" class="form-control" id="order_reminder_1_override_input" min="1" placeholder="Event-Standard" disabled>
+                                        <small class="text-muted" id="order_reminder_1_event_default"></small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="order_reminder_2_override_input" class="form-label">2. Mahnung nach (Tage)</label>
+                                        <input type="number" class="form-control" id="order_reminder_2_override_input" min="1" placeholder="Event-Standard" disabled>
+                                        <small class="text-muted" id="order_reminder_2_event_default"></small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="order_cancellation_override_input" class="form-label">Stornierung nach (Tage)</label>
+                                        <input type="number" class="form-control" id="order_cancellation_override_input" min="1" placeholder="Event-Standard" disabled>
+                                        <small class="text-muted" id="order_cancellation_event_default"></small>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -636,7 +843,7 @@
                 </div>
                 <div class="mb-3">
                     <strong>Inhalt:</strong>
-                    <div class="border p-3 bg-light" id="log_detail_body" style="max-height: 400px; overflow-y: auto;"></div>
+                    <div class="border p-3 bg-body-secondary" id="log_detail_body" style="max-height: 400px; overflow-y: auto;"></div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -666,7 +873,7 @@
                 </div>
                 <div class="mb-3 form-check">
                     <input type="checkbox" class="form-check-input" id="payment_send_email_check" checked>
-                    <label class="form-check-label" for="payment_send_email_check">E-Mail senden bei vollständiger Bezahlung</label>
+                    <label class="form-check-label" for="payment_send_email_check">E-Mail senden bei Teilzahlung oder voller Bezahlung</label>
                 </div>
             </div>
             <div class="modal-footer">
@@ -913,6 +1120,10 @@
         }
         $('#event_name_display').text(eventDisplayText || 'Unbekanntes Event');
         
+        // Header date display
+        const orderDate = order.created_at ? new Date(order.created_at).toLocaleDateString('de-DE') : '';
+        $('#order_date_header_display').text(orderDate ? `Bestellt am ${orderDate}` : '');
+        
         // User information
         $('#user_name_input').val(order.user_name);
         $('#user_email_input').val(order.user_email);
@@ -954,6 +1165,18 @@
         const statusClass = getOrderStatusBadgeClass(paymentStatus);
         $('#payment_status_badge_display').html(`<span class="badge ${statusClass} fs-6">${statusText}</span>`);
         
+        // Header status badge
+        const orderStatusText = getOrderStatusText(order.status);
+        const orderStatusClass = getOrderStatusBadgeClass(order.status);
+        $('#order_status_header_badge').attr('class', `badge fs-6 ${orderStatusClass}`).text(orderStatusText);
+        
+        // Summary bar
+        $('#summary_ticket_count').text(order.ticket_count || 0);
+        $('#summary_total_price').text(totalPrice.toFixed(2) + ' €');
+        $('#summary_paid').text(totalPaid.toFixed(2) + ' €');
+        $('#summary_remaining').text(remaining.toFixed(2) + ' €');
+        $('#summary_reference').text(order.payment_reference || '-');
+        
         // Overpayment warning
         if (overpayment > 0) {
             $('#overpayment_amount').text(overpayment.toFixed(2));
@@ -969,23 +1192,63 @@
         $('#notes_input').val(order.notes || '');
         $('#admin_notes_input').val(order.admin_notes || '');
         
+        // Dunning overrides
+        if (order.event_payment_required !== false) {
+            $('#dunning_overrides_section').show();
+            $('#order_reminder_1_override_input').val(order.reminder_1_override_days || '');
+            $('#order_reminder_2_override_input').val(order.reminder_2_override_days || '');
+            $('#order_cancellation_override_input').val(order.cancellation_override_days || '');
+            $('#order_reminder_1_event_default').text(order.event_reminder_1_days ? 'Event-Standard: ' + order.event_reminder_1_days + ' Tage' : 'Kein Event-Standard');
+            $('#order_reminder_2_event_default').text(order.event_reminder_2_days ? 'Event-Standard: ' + order.event_reminder_2_days + ' Tage' : 'Kein Event-Standard');
+            $('#order_cancellation_event_default').text(order.event_cancellation_days ? 'Event-Standard: ' + order.event_cancellation_days + ' Tage' : 'Kein Event-Standard');
+        } else {
+            $('#dunning_overrides_section').hide();
+        }
+        
         // Check ticket generation status
         checkTicketGenerationStatus(order.order_id, order.status);
         
         // Render payment requests
         renderPaymentRequests(order.payment_requests || [], order);
         
+        // Render dunning history (sent reminders)
+        renderDunningHistory(order.dunning_history || []);
+        
+        // Show/hide dunning actions based on order status
+        const dunningExcluded = ['cancelled', 'cancelled_by_user', 'paid', 'overpaid', 'offline_payment'];
+        if (dunningExcluded.includes(order.status)) {
+            $('#order_dunning_actions_section').hide();
+        } else {
+            $('#order_dunning_actions_section').show();
+        }
+        
         // Render participants
         renderParticipants(order.participants || []);
         
+        // Render ticket download buttons if tickets are generated
+        renderTicketDownloadButtons(order);
+        
         // Initialize manual mail section
-        initializeMailSection();
+        loadMailCounters();
+        loadMailLog();
+        
+        // Reset to overview tab when opening
+        const overviewTab = document.getElementById('tab-overview');
+        if (overviewTab) {
+            const existing = bootstrap.Tab.getInstance(overviewTab);
+            if (existing) {
+                existing.show();
+            } else {
+                new bootstrap.Tab(overviewTab).show();
+            }
+        }
     }
     
     function enableEditMode() {
         // Enable all editable fields
         $('#ticket_count_input, #total_price_input, #payment_reference_input, #status_input').prop('disabled', false);
         $('#notes_input, #admin_notes_input').prop('disabled', false);
+        $('#order_reminder_1_override_input, #order_reminder_2_override_input, #order_cancellation_override_input').prop('disabled', false);
         $('.participant-name, .participant-email, .participant-phone, .participant-birthdate').prop('disabled', false);
         
         // Show add/remove participant buttons
@@ -1003,6 +1266,7 @@
         // Disable all editable fields
         $('#ticket_count_input, #total_price_input, #payment_reference_input, #status_input').prop('disabled', true);
         $('#notes_input, #admin_notes_input').prop('disabled', true);
+        $('#order_reminder_1_override_input, #order_reminder_2_override_input, #order_cancellation_override_input').prop('disabled', true);
         $('.participant-name, .participant-email, .participant-phone, .participant-birthdate').prop('disabled', true);
         
         // Hide add/remove participant buttons
@@ -1037,7 +1301,7 @@
                     .addClass('btn btn-sm btn-outline-danger')
                     .html('<i class="bi bi-arrow-counterclockwise"></i> Stornieren')
                     .attr('title', 'Zahlung stornieren')
-                    .click(revertPayment(payment.id, payment.amount))
+                    .click(function() { revertPayment(payment.id, payment.amount); });
                 row.append($('<td>').html(revertBtn));
                 
                 tbody.append(row);
@@ -1093,6 +1357,80 @@
         }
         
         $('#payment_requests_section').html(html);
+    }
+    
+    // Render dunning history (which reminders were sent)
+    function renderDunningHistory(dunningHistory) {
+        const tbody = $('#dunning_history_tbody');
+        tbody.empty();
+
+        // Track how many times each dunning type was sent
+        const sentTypes = new Map();
+        
+        if (dunningHistory && dunningHistory.length > 0) {
+            $('#dunning_history_section').show();
+            
+            const typeLabels = {
+                'order_reminder_1': '1. Mahnung',
+                'order_reminder_2': '2. Mahnung (Letzte)',
+                'order_cancelled': 'Stornierung',
+                'order_cancelled_no_payment': 'Stornierung (keine Zahlung)'
+            };
+            const typeBadges = {
+                'order_reminder_1': 'bg-info',
+                'order_reminder_2': 'bg-warning',
+                'order_cancelled': 'bg-danger',
+                'order_cancelled_no_payment': 'bg-danger'
+            };
+            
+            dunningHistory.forEach(function(entry) {
+                sentTypes.set(entry.template_key, (sentTypes.get(entry.template_key) || 0) + 1);
+                const row = $('<tr>');
+                const label = typeLabels[entry.template_key] || entry.template_key;
+                const badgeClass = typeBadges[entry.template_key] || 'bg-secondary';
+                row.append($('<td>').html(`<span class="badge ${badgeClass}">${escapeHtml(label)}</span>`));
+                const sentAt = entry.sent_at ? new Date(entry.sent_at).toLocaleString('de-DE') : '-';
+                row.append($('<td>').text(sentAt));
+                row.append($('<td>').text(entry.sent_by || '-'));
+                tbody.append(row);
+            });
+        } else {
+            $('#dunning_history_section').hide();
+        }
+
+        // Update dunning action buttons based on what was already sent
+        updateDunningButtons(sentTypes);
+    }
+
+    function updateDunningButtons(sentTypes) {
+        // Update buttons to show sent count but keep them enabled for resending
+        $('.dunning-action-btn').each(function() {
+            const type = $(this).data('type');
+            const count = sentTypes.get(type) || 0;
+            $(this).prop('disabled', false);
+            if (type === 'order_reminder_1') {
+                $(this).removeClass('btn-secondary').addClass('btn-outline-info');
+                if (count > 0) {
+                    $(this).html(`<i class="bi bi-envelope"></i> 1. Mahnung erneut senden <span class="badge bg-info">${count}x gesendet</span>`);
+                } else {
+                    $(this).html('<i class="bi bi-envelope"></i> 1. Mahnung senden');
+                }
+            } else if (type === 'order_reminder_2') {
+                $(this).removeClass('btn-secondary').addClass('btn-outline-warning');
+                if (count > 0) {
+                    $(this).html(`<i class="bi bi-envelope-exclamation"></i> 2. Mahnung erneut senden <span class="badge bg-warning text-dark">${count}x gesendet</span>`);
+                } else {
+                    $(this).html('<i class="bi bi-envelope-exclamation"></i> 2. Mahnung senden');
+                }
+            } else if (type === 'order_cancelled_no_payment') {
+                $(this).removeClass('btn-secondary').addClass('btn-outline-danger');
+                if (count > 0) {
+                    $(this).html(`<i class="bi bi-x-circle"></i> Stornierung erneut senden <span class="badge bg-danger">${count}x gesendet</span>`);
+                } else {
+                    $(this).html('<i class="bi bi-x-circle"></i> Stornierung (keine Zahlung) senden');
+                }
+            }
+        });
     }
     
     function renderParticipants(participants) {
@@ -1210,6 +1548,37 @@
         });
     }
     
+    function renderTicketDownloadButtons(order) {
+        if (!order.tickets_generated) {
+            $('#ticket_download_section').hide();
+            return;
+        }
+        
+        const participants = order.participants || [];
+        if (participants.length === 0) {
+            $('#ticket_download_section').hide();
+            return;
+        }
+        
+        let html = '';
+        participants.forEach(function(participant, index) {
+            const ticketNumber = participant.ticket_number || (index + 1);
+            const participantName = participant.name || `Ticket ${ticketNumber}`;
+            html += `
+                <a href="/api/download_ticket/${order.order_id}/${ticketNumber}" 
+                   class="btn btn-outline-success" 
+                   target="_blank"
+                   title="Ticket für ${escapeHtml(participantName)} herunterladen">
+                    <i class="bi bi-download"></i> Ticket #${ticketNumber}
+                    <small class="d-block">${escapeHtml(participantName)}</small>
+                </a>
+            `;
+        });
+        
+        $('#ticket_download_buttons').html(html);
+        $('#ticket_download_section').show();
+    }
+    
     function escapeHtml(text) {
         if (!text) return '';
         const div = document.createElement('div');
@@ -1245,12 +1614,23 @@
         
         api_call('/api/update_ticket_order', orderData, function(data) {
             if (data.success) {
-                hasUnsavedChanges = false;
-                refresh_ticket_orders();
-                refreshStatistics();
-                showTemplateModal('Erfolg', 'Bestellung wurde erfolgreich aktualisiert.', 'OK', 'btn-success', null, null, function() {
-                    loadOrderDetails(orderId);
-                    cancelEditMode();
+                // Also save dunning overrides if they changed
+                let r1 = $('#order_reminder_1_override_input').val();
+                let r2 = $('#order_reminder_2_override_input').val();
+                let c = $('#order_cancellation_override_input').val();
+                let dunningData = { order_id: orderId };
+                dunningData.reminder_1_override_days = r1 ? parseInt(r1) : null;
+                dunningData.reminder_2_override_days = r2 ? parseInt(r2) : null;
+                dunningData.cancellation_override_days = c ? parseInt(c) : null;
+                
+                api_call('/api/update_order_dunning_overrides', dunningData, function() {
+                    hasUnsavedChanges = false;
+                    refresh_ticket_orders();
+                    refreshStatistics();
+                    showTemplateModal('Erfolg', 'Bestellung wurde erfolgreich aktualisiert.', 'OK', 'btn-success', null, null, function() {
+                        loadOrderDetails(orderId);
+                        cancelEditMode();
+                    });
                 });
             } else {
                 showTemplateModal('Fehler', data.error || 'Fehler beim Aktualisieren der Bestellung', 'OK', 'btn-primary', null, null, function() {});
@@ -1353,28 +1733,27 @@
     
     // Revert payment
     function revertPayment(paymentId, amount) {
-        console.log("MODAL!")
-        // showTemplateModal(
-        //     'Zahlung stornieren',
-        //     `Möchtest du die Zahlung über ${Number(amount).toFixed(2)} € wirklich stornieren?`,
-        //     'Ja, stornieren',
-        //     'btn-danger',
-        //     'Abbrechen',
-        //     'btn-secondary',
-        //     function() {
-        //         api_call('/api/revert_payment', { payment_id: paymentId }, function(data) {
-        //             if (data.success) {
-        //                 refresh_ticket_orders();
-        //                 refreshStatistics();
-        //                 showTemplateModal('Erfolg', 'Zahlung wurde storniert.', 'OK', 'btn-success', null, null, function() {
-        //                     loadOrderDetails(currentOrderId);
-        //                 });
-        //             } else {
-        //                 showTemplateModal('Fehler', data.error || 'Fehler beim Stornieren der Zahlung.', 'OK', 'btn-primary', null, null, function() {});
-        //             }
-        //         });
-        //     }
-        // );
+        showTemplateModal(
+            'Zahlung stornieren',
+            `Möchtest du die Zahlung über ${Number(amount).toFixed(2)} € wirklich stornieren?`,
+            'Ja, stornieren',
+            'btn-danger',
+            'Abbrechen',
+            'btn-secondary',
+            function() {
+                api_call('/api/revert_payment', { payment_id: paymentId }, function(data) {
+                    if (data.success) {
+                        refresh_ticket_orders();
+                        refreshStatistics();
+                        showTemplateModal('Erfolg', 'Zahlung wurde storniert.', 'OK', 'btn-success', null, null, function() {
+                            loadOrderDetails(currentOrderId);
+                        });
+                    } else {
+                        showTemplateModal('Fehler', data.error || 'Fehler beim Stornieren der Zahlung.', 'OK', 'btn-primary', null, null, function() {});
+                    }
+                });
+            }
+        );
     }
     
     // ===========================================
@@ -1751,12 +2130,62 @@
         });
     });
     
-    function initializeMailSection() {
-        if ($('#manual_mail_section').is(':visible') && currentOrder) {
-            loadMailCounters();
-            loadMailLog();
+    // Dunning action buttons (per-order Mahnung/Stornierung)
+    $(document).on('click', '.dunning-action-btn', function() {
+        if (!currentOrder) return;
+        
+        const btn = $(this);
+        const dunningType = btn.data('type');
+        
+        if (btn.prop('disabled')) return;
+        
+        const typeLabels = {
+            'order_reminder_1': '1. Mahnung (Zahlungserinnerung)',
+            'order_reminder_2': '2. Mahnung (Letzte Erinnerung)',
+            'order_cancelled': 'Stornierung',
+            'order_cancelled_no_payment': 'Stornierung (keine Zahlung)'
+        };
+        const label = typeLabels[dunningType] || dunningType;
+        
+        const isCancellation = dunningType === 'order_cancelled' || dunningType === 'order_cancelled_no_payment';
+        let confirmMsg = `<strong>${label}</strong> für Bestellung <strong>${escapeHtml(currentOrder.payment_reference || currentOrder.order_id)}</strong> senden?`;
+        if (isCancellation) {
+            confirmMsg += '<br><br><span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Die Bestellung wird dabei storniert!</span>';
         }
-    }
+        
+        showTemplateModal(
+            label + ' senden',
+            confirmMsg,
+            'Ja, senden',
+            isCancellation ? 'btn-danger' : 'btn-primary',
+            'Abbrechen',
+            'btn-secondary',
+            function() {
+                btn.prop('disabled', true);
+                const origHtml = btn.html();
+                btn.html('<i class="bi bi-hourglass-split"></i> Sende...');
+                
+                api_call('/api/send_order_dunning', {
+                    order_id: currentOrder.order_id,
+                    dunning_type: dunningType
+                }, function(data) {
+                    if (data.success) {
+                        showTemplateModal('Erfolg', data.message || 'Erfolgreich gesendet.', 'OK', 'btn-success', null, null, function() {
+                            // Reload order details to refresh dunning history and button states
+                            loadOrderDetails(currentOrderId);
+                            refresh_ticket_orders();
+                        });
+                    } else {
+                        btn.prop('disabled', false).html(origHtml);
+                        showTemplateModal('Fehler', data.error || 'Fehler beim Senden.', 'OK', 'btn-danger', null, null, function() {});
+                    }
+                }, function() {
+                    btn.prop('disabled', false).html(origHtml);
+                    showTemplateModal('Fehler', 'Netzwerkfehler beim Senden.', 'OK', 'btn-danger', null, null, function() {});
+                });
+            }
+        );
+    });
     
     $(document).ready(function() {
         loadEventFilter();
@@ -1767,6 +2196,7 @@
         $('#event_filter_select').change(function() {
             refresh_ticket_orders();
             refreshStatistics();
+            updateDunningSection();
         });
         
         // Save button handler
@@ -1816,12 +2246,135 @@
             }
         });
     }
+
+    // Dunning System Functions
+    function updateDunningSection() {
+        let eventId = $('#event_filter_select').val();
+        if (!eventId) {
+            $('#dunning_section').hide();
+            return;
+        }
+        
+        $('#dunning_section').show();
+        
+        api_call('/api/get_dunning_status', {event_id: eventId}, function(data) {
+            if (data.success) {
+                let event = data.event;
+                let orders = data.orders;
+                
+                // Show dunning config info
+                let configHtml = '';
+                if (event.reminder_1_days || event.reminder_2_days || event.cancellation_days) {
+                    configHtml = '<small class="text-muted">';
+                    if (event.reminder_1_days) configHtml += `<strong>1. Mahnung:</strong> nach ${event.reminder_1_days} Tagen &nbsp;|&nbsp; `;
+                    if (event.reminder_2_days) configHtml += `<strong>2. Mahnung:</strong> nach ${event.reminder_2_days} Tagen &nbsp;|&nbsp; `;
+                    if (event.cancellation_days) configHtml += `<strong>Stornierung:</strong> nach ${event.cancellation_days} Tagen &nbsp;|&nbsp; `;
+                    configHtml += `<strong>Auto-Stornierung:</strong> ${event.auto_cancel_enabled ? 'Ja' : 'Nein'}`;
+                    configHtml += '</small>';
+                } else {
+                    configHtml = '<small class="text-muted">Keine Mahnfristen konfiguriert. Konfiguriere Fristen in den Event-Einstellungen.</small>';
+                }
+                $('#dunning_config_info').html(configHtml);
+                
+                // Show status info
+                let r1Due = orders.filter(o => o.reminder_1_due).length;
+                let r2Due = orders.filter(o => o.reminder_2_due).length;
+                let cDue = orders.filter(o => o.cancellation_due).length;
+                
+                let statusHtml = `<small class="text-muted">`;
+                statusHtml += `<strong>${orders.length}</strong> offene Bestellung(en) &nbsp;|&nbsp; `;
+                statusHtml += `<strong>${r1Due}</strong> fällig für 1. Mahnung &nbsp;|&nbsp; `;
+                statusHtml += `<strong>${r2Due}</strong> fällig für 2. Mahnung &nbsp;|&nbsp; `;
+                statusHtml += `<strong>${cDue}</strong> fällig für Stornierung`;
+                statusHtml += `</small>`;
+                $('#dunning_status_info').html(statusHtml);
+            }
+        });
+    }
+    
+    // Bulk reminder 1
+    $('#send_bulk_reminder_1_btn').click(function() {
+        let eventId = $('#event_filter_select').val();
+        if (!eventId) return;
+        
+        showTemplateModal(
+            'Mahnung 1 senden',
+            'Soll die 1. Zahlungserinnerung an alle fälligen Bestellungen gesendet werden? (Nur Bestellungen, deren Frist ab Zahlungsaufforderung abgelaufen ist)',
+            'Ja, senden',
+            'btn-info',
+            'Abbrechen',
+            'btn-secondary',
+            function() {
+                api_call('/api/send_bulk_reminders', {event_id: eventId, reminder_type: 'order_reminder_1'}, function(data) {
+                    if (data.success) {
+                        showTemplateModal('Erfolg', `${data.sent_count} Mahnung(en) gesendet, ${data.skipped_count} übersprungen.`, 'OK', 'btn-success', '', '', function() {});
+                        updateDunningSection();
+                    } else {
+                        showTemplateModal('Fehler', data.error || 'Fehler beim Senden', 'OK', 'btn-danger', '', '', function() {});
+                    }
+                });
+            }
+        );
+    });
+    
+    // Bulk reminder 2
+    $('#send_bulk_reminder_2_btn').click(function() {
+        let eventId = $('#event_filter_select').val();
+        if (!eventId) return;
+        
+        showTemplateModal(
+            'Mahnung 2 senden',
+            'Soll die 2. (letzte) Zahlungserinnerung an alle fälligen Bestellungen gesendet werden?',
+            'Ja, senden',
+            'btn-warning',
+            'Abbrechen',
+            'btn-secondary',
+            function() {
+                api_call('/api/send_bulk_reminders', {event_id: eventId, reminder_type: 'order_reminder_2'}, function(data) {
+                    if (data.success) {
+                        showTemplateModal('Erfolg', `${data.sent_count} Mahnung(en) gesendet, ${data.skipped_count} übersprungen.`, 'OK', 'btn-success', '', '', function() {});
+                        updateDunningSection();
+                    } else {
+                        showTemplateModal('Fehler', data.error || 'Fehler beim Senden', 'OK', 'btn-danger', '', '', function() {});
+                    }
+                });
+            }
+        );
+    });
+    
+    // Bulk cancel
+    $('#bulk_cancel_btn').click(function() {
+        let eventId = $('#event_filter_select').val();
+        if (!eventId) return;
+        
+        showTemplateModal(
+            'Stornierungen durchführen',
+            '<strong class="text-danger">Achtung:</strong> Alle vollständig unbezahlten Bestellungen, deren Stornierungsfrist (ab Zahlungsaufforderung) abgelaufen ist, werden storniert. Teilweise bezahlte Bestellungen werden übersprungen.',
+            'Ja, stornieren',
+            'btn-danger',
+            'Abbrechen',
+            'btn-secondary',
+            function() {
+                api_call('/api/bulk_cancel_unpaid', {event_id: eventId}, function(data) {
+                    if (data.success) {
+                        showTemplateModal('Abgeschlossen', 
+                            `${data.cancelled_count} Bestellung(en) storniert. ${data.skipped_count} übersprungen.`, 
+                            'OK', 'btn-success', '', '', function() {});
+                        refresh_ticket_orders();
+                        refreshStatistics();
+                        updateDunningSection();
+                    } else {
+                        showTemplateModal('Fehler', data.error || 'Fehler beim Stornieren', 'OK', 'btn-danger', '', '', function() {});
+                    }
+                });
+            }
+        );
+    });
 </script>
 
 <style>
     .card {
-        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-        border: 1px solid rgba(0, 0, 0, 0.125);
+        box-shadow: var(--bs-box-shadow-sm);
     }
     
     .card-body h4 {

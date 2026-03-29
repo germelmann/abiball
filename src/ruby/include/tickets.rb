@@ -26,6 +26,9 @@ class Main < Sinatra::Base
     # Statuses that are derived from payments and cannot be set manually
     # 'auto' is the user-selectable value that triggers recalculation
     PAYMENT_DERIVED_STATUSES = %w[auto paid overpaid partially_paid pending].freeze
+
+    # Statuses excluded from dunning (reminders/cancellation)
+    DUNNING_EXCLUDED_STATUSES = %w[cancelled cancelled_by_user paid overpaid offline_payment].freeze
     
     def self.get_order_status_text(status)
         order_status_translations[status] || status
@@ -587,73 +590,6 @@ class Main < Sinatra::Base
     end
     
     # Get payment QR code for an order
-    post "/api/get_payment_qr_code" do
-        require_user_with_permission!("buy_tickets")
-        data = parse_request_data(required_keys: [:order_id])
-        
-        order_id = data[:order_id]
-        user_email = @session_user[:email]
-        
-        # Verify order belongs to user or user is admin
-        order_result = neo4j_query(<<~END_OF_QUERY, {order_id: order_id, user_email: user_email})
-            MATCH (u:User {email: $user_email})-[:PLACED]->(o:TicketOrder {id: $order_id})
-            OPTIONAL MATCH (o)-[:USES_ACCOUNT]->(b:BankAccount)
-            RETURN o.payment_reference AS payment_ref, o.total_price AS total_price,
-                   b.account_name AS account_name, b.bank_name AS bank_name,
-                   b.iban AS iban, b.bic AS bic
-        END_OF_QUERY
-        
-        if order_result.empty? && !user_has_permission?("manage_orders")
-            respond(success: false, error: "Bestellung nicht gefunden oder keine Berechtigung")
-            return
-        end
-        
-        order = order_result.first
-        
-        if order['iban'].nil? || order['iban'].empty?
-            respond(success: false, error: "Keine Bankverbindung für diese Bestellung hinterlegt")
-            return
-        end
-        
-        begin
-            require 'rqrcode'
-            
-            # Generate EPC QR code
-            epc_data = generate_epc_qr_data(
-                order['account_name'],
-                order['iban'],
-                order['bic'],
-                order['total_price'].to_f,
-                order['payment_ref']
-            )
-            
-            qr = RQRCode::QRCode.new(epc_data)
-            png = qr.as_png(
-                resize_gte_to: false,
-                resize_exactly_to: false,
-                fill: 'white',
-                color: 'black',
-                size: 300,
-                border_modules: 4
-            )
-            qr_code_data_uri = "data:image/png;base64,#{Base64.strict_encode64(png.to_s)}"
-            
-            respond(success: true, 
-                   qr_code: qr_code_data_uri,
-                   bank_info: {
-                       account_name: order['account_name'],
-                       bank_name: order['bank_name'],
-                       iban: order['iban'],
-                       bic: order['bic'],
-                       amount: order['total_price'].to_f,
-                       reference: order['payment_ref']
-                   })
-        rescue => e
-            debug_error("Failed to generate QR code: #{e.message}")
-            respond(success: false, error: "QR-Code konnte nicht generiert werden")
-        end
-    end
-
     # Admin: Mark order as paid - records a payment for the remaining amount
     post "/api/mark_order_paid" do
         require_user_with_permission!("manage_orders")
@@ -751,27 +687,54 @@ class Main < Sinatra::Base
 
         result = record_payment_for_order(order_id, amount, @session_user[:username], note: note)
 
-        # Prepare email if send_email is enabled and order is now fully paid
-        if send_email && (result[:payment_info][:status] == 'paid' || result[:payment_info][:status] == 'overpaid')
+        # Send email based on payment status
+        if send_email
             order = order_check.first
+            payment_status = result[:payment_info][:status]
+            
             begin
-                rendered = render_manual_mail_template('payment_received', {
-                    'NAME' => order['user_name'] || 'Nutzer',
-                    'ORDER_ID' => order['order_id'],
-                    'TOTAL_PRICE' => sprintf("%.2f", order['total_price'] || 0),
-                    'REFERENCE' => order['payment_reference'] || 'N/A',
-                    'TICKET_LINK' => "#{WEB_ROOT}/ticket_download"
-                })
-                if rendered
-                    send_manual_mail(
-                        to_email: order['user_email'],
-                        subject: rendered[:subject],
-                        body: rendered[:body],
-                        template_key: 'payment_received',
-                        sender_username: @session_user[:username],
-                        recipient_username: order['user_username'],
-                        order_id: order_id
-                    )
+                if payment_status == 'paid' || payment_status == 'overpaid'
+                    # Fully paid - send payment_received email
+                    rendered = render_manual_mail_template('payment_received', {
+                        'NAME' => order['user_name'] || 'Nutzer',
+                        'ORDER_ID' => order['order_id'],
+                        'TOTAL_PRICE' => sprintf("%.2f", order['total_price'] || 0),
+                        'REFERENCE' => order['payment_reference'] || 'N/A',
+                        'TICKET_LINK' => "#{WEB_ROOT}/ticket_download"
+                    })
+                    if rendered
+                        send_manual_mail(
+                            to_email: order['user_email'],
+                            subject: rendered[:subject],
+                            body: rendered[:body],
+                            template_key: 'payment_received',
+                            sender_username: @session_user[:username],
+                            recipient_username: order['user_username'],
+                            order_id: order_id
+                        )
+                    end
+                elsif payment_status == 'partially_paid'
+                    # Partially paid - send partial_payment_received email
+                    rendered = render_manual_mail_template('partial_payment_received', {
+                        'NAME' => order['user_name'] || 'Nutzer',
+                        'ORDER_ID' => order['order_id'],
+                        'PAYMENT_AMOUNT' => sprintf("%.2f", amount.to_f),
+                        'TOTAL_PRICE' => sprintf("%.2f", order['total_price'] || 0),
+                        'TOTAL_PAID' => sprintf("%.2f", result[:payment_info][:total_paid]),
+                        'REMAINING' => sprintf("%.2f", result[:payment_info][:remaining]),
+                        'REFERENCE' => order['payment_reference'] || 'N/A'
+                    })
+                    if rendered
+                        send_manual_mail(
+                            to_email: order['user_email'],
+                            subject: rendered[:subject],
+                            body: rendered[:body],
+                            template_key: 'partial_payment_received',
+                            sender_username: @session_user[:username],
+                            recipient_username: order['user_username'],
+                            order_id: order_id
+                        )
+                    end
                 end
             rescue => e
                 STDERR.puts "Error sending payment email: #{e.message}"
@@ -1418,10 +1381,17 @@ class Main < Sinatra::Base
                    COALESCE(o.status, '') AS status,
                    COALESCE(o.notes, '') AS notes,
                    COALESCE(o.admin_notes, '') AS admin_notes,
+                   COALESCE(o.tickets_generated, false) AS tickets_generated,
+                   o.reminder_1_override_days AS reminder_1_override_days,
+                   o.reminder_2_override_days AS reminder_2_override_days,
+                   o.cancellation_override_days AS cancellation_override_days,
                    e.id AS event_id,
                    COALESCE(e.name, '') AS event_name,
                    COALESCE(e.year, '') AS event_year,
                    COALESCE(e.payment_required, true) AS event_payment_required,
+                   e.reminder_1_days AS event_reminder_1_days,
+                   e.reminder_2_days AS event_reminder_2_days,
+                   e.cancellation_days AS event_cancellation_days,
                    participants,
                    [x IN payment_requests WHERE x IS NOT NULL] AS payment_requests
         END_OF_QUERY
@@ -1452,6 +1422,17 @@ class Main < Sinatra::Base
             ORDER BY pay.timestamp DESC
         END_OF_QUERY
         order['payments'] = payments
+
+        # Get dunning/reminder mail history for this order
+        dunning_logs = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+            MATCH (m:ManualMailLog)-[:FOR_ORDER]->(o:TicketOrder {id: $order_id})
+            WHERE m.template_key IN ['order_reminder_1', 'order_reminder_2', 'order_cancelled', 'order_cancelled_no_payment']
+            RETURN m.template_key AS template_key,
+                   m.timestamp AS sent_at,
+                   m.sender_username AS sent_by
+            ORDER BY m.timestamp ASC
+        END_OF_QUERY
+        order['dunning_history'] = dunning_logs
         
         respond(success: true, order: order)
     end
@@ -1583,6 +1564,8 @@ class Main < Sinatra::Base
                    e.id AS event_id,
                    e.name AS event_name,
                    e.year AS event_year,
+                   COALESCE(e.ticket_generation_enabled, false) AS event_ticket_generation_enabled,
+                   COALESCE(o.tickets_generated, false) AS tickets_generated,
                    participants,
                    latest_payment_request
             ORDER BY o.created_at DESC
@@ -2926,60 +2909,6 @@ class Main < Sinatra::Base
                 is_admin: is_admin)
     end
 
-    # Check ticket generation status for a specific order
-    get "/api/order_ticket_status/:order_id" do
-        require_user!
-        
-        order_id = params[:order_id]
-        unless order_id && !order_id.empty?
-            respond(success: false, error: "Ungültige Bestell-ID")
-            return
-        end
-        
-        # Check if user can access this order (admin or order owner)
-        order_result = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
-            MATCH (u:User)-[:PLACED]->(o:TicketOrder {id: $order_id})
-            RETURN u.email AS user_email, 
-                   o.status AS status, 
-                   o.tickets_generated AS tickets_generated,
-                   o.tickets_generated_at AS tickets_generated_at
-        END_OF_QUERY
-        
-        if order_result.empty?
-            respond(success: false, error: "Bestellung nicht gefunden")
-            return
-        end
-        
-        order_data = order_result.first
-        is_admin = user_has_permission?("manage_orders")
-        is_order_owner = @session_user[:email] == order_data['user_email']
-        
-        unless is_admin || is_order_owner
-            respond(success: false, error: "Keine Berechtigung für diese Bestellung")
-            return
-        end
-        
-        respond(success: true, 
-                order_status: order_data['status'],
-                tickets_generated: !!order_data['tickets_generated'],
-                tickets_generated_at: order_data['tickets_generated_at'],
-                can_download_tickets: (order_data['status'] == 'paid' || order_data['status'] == 'overpaid' || order_data['status'] == 'offline_payment') && !!order_data['tickets_generated'])
-    end
-
-    # Toggle ticket download setting (admin only)
-    post "/api/toggle_ticket_download_setting" do
-        require_user_with_permission!("admin")
-        data = parse_request_data(required_keys: [:allow_download])
-        
-        # Note: This endpoint exists to inform the admin about the current setting
-        # The actual setting needs to be changed in the credentials.rb file
-        # This is just for informational purposes and future database-based configuration
-        
-        respond(success: true, 
-               message: "Ticket-Download-Einstellung muss in der Konfigurationsdatei (credentials.rb) geändert werden",
-               current_setting: ALLOW_USER_TICKET_DOWNLOAD)
-    end
-
     # Get user's tickets for download
     post "/api/get_user_tickets" do
         require_user!
@@ -3600,5 +3529,471 @@ class Main < Sinatra::Base
         }
 
         respond(success: true, participants: participants, statistics: statistics)
+    end
+
+    # ===========================================
+    # Dunning System (Mahnwesen) - Duration-based
+    # ===========================================
+
+    # Get dunning status for an event - shows which orders are due for reminders/cancellation
+    post "/api/get_dunning_status" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:event_id])
+
+        event_id = data[:event_id]
+
+        # Get event dunning configuration
+        event = neo4j_query_expect_one(<<~END_OF_QUERY, {event_id: event_id})
+            MATCH (e:Event {id: $event_id})
+            WHERE e.active = true
+            RETURN e.reminder_1_days AS reminder_1_days,
+                   e.reminder_2_days AS reminder_2_days,
+                   e.cancellation_days AS cancellation_days,
+                   e.auto_cancel_enabled AS auto_cancel_enabled,
+                   e.name AS name
+        END_OF_QUERY
+
+        # Get all unpaid orders with payment request info
+        orders = neo4j_query(<<~END_OF_QUERY, {event_id: event_id, excluded_statuses: DUNNING_EXCLUDED_STATUSES})
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
+            WHERE NOT o.status IN $excluded_statuses
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT_REQUEST]->(pr:PaymentRequest)
+            WITH o, u,
+                 COALESCE(SUM(DISTINCT pay.amount), 0) AS total_paid,
+                 COUNT(DISTINCT pr) AS payment_request_count,
+                 MAX(pr.sent_at) AS last_payment_request_sent
+            WHERE total_paid < o.total_price AND payment_request_count > 0
+            RETURN o.id AS order_id,
+                   o.total_price AS total_price,
+                   o.payment_reference AS payment_reference,
+                   o.created_at AS created_at,
+                   o.status AS status,
+                   o.reminder_1_override_days AS reminder_1_override_days,
+                   o.reminder_2_override_days AS reminder_2_override_days,
+                   o.cancellation_override_days AS cancellation_override_days,
+                   u.email AS user_email,
+                   u.name AS user_name,
+                   u.username AS username,
+                   total_paid,
+                   last_payment_request_sent
+            ORDER BY o.created_at ASC
+        END_OF_QUERY
+
+        # Get reminder mail counts for each order
+        order_ids = orders.map { |o| o['order_id'] }
+
+        reminder_counts = {}
+        unless order_ids.empty?
+            counts = neo4j_query(<<~END_OF_QUERY, {order_ids: order_ids})
+                MATCH (m:ManualMailLog)-[:FOR_ORDER]->(o:TicketOrder)
+                WHERE o.id IN $order_ids
+                  AND m.template_key IN ['order_reminder_1', 'order_reminder_2']
+                RETURN o.id AS order_id, m.template_key AS template_key, COUNT(m) AS count
+            END_OF_QUERY
+
+            counts.each do |c|
+                reminder_counts[c['order_id']] ||= {}
+                reminder_counts[c['order_id']][c['template_key']] = c['count']
+            end
+        end
+
+        now = Time.now
+
+        # Enrich orders with computed dunning info
+        orders.each do |order|
+            oid = order['order_id']
+            order['reminder_1_sent'] = (reminder_counts.dig(oid, 'order_reminder_1') || 0) > 0
+            order['reminder_2_sent'] = (reminder_counts.dig(oid, 'order_reminder_2') || 0) > 0
+            order['remaining'] = [(order['total_price'].to_f - order['total_paid'].to_f), 0].max.round(2)
+
+            # Calculate days since payment request was sent
+            sent_at = order['last_payment_request_sent']
+            if sent_at
+                begin
+                    sent_time = Time.parse(sent_at.to_s)
+                    order['days_since_payment_request'] = ((now - sent_time) / 86400).floor
+                rescue
+                    order['days_since_payment_request'] = nil
+                end
+            else
+                order['days_since_payment_request'] = nil
+            end
+
+            # Calculate effective deadlines (per-order override > event default)
+            r1_days = order['reminder_1_override_days'] || event['reminder_1_days']
+            r2_days = order['reminder_2_override_days'] || event['reminder_2_days']
+            c_days = order['cancellation_override_days'] || event['cancellation_days']
+            order['effective_reminder_1_days'] = r1_days
+            order['effective_reminder_2_days'] = r2_days
+            order['effective_cancellation_days'] = c_days
+
+            # Determine if each action is due
+            days = order['days_since_payment_request']
+            order['reminder_1_due'] = days && r1_days && days >= r1_days && !order['reminder_1_sent']
+            order['reminder_2_due'] = days && r2_days && days >= r2_days && !order['reminder_2_sent']
+            order['cancellation_due'] = days && c_days && days >= c_days
+        end
+
+        respond(success: true, event: event, orders: orders)
+    end
+
+    # Send bulk reminders (reminder_1 or reminder_2) to due orders for an event
+    post "/api/send_bulk_reminders" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(
+            required_keys: [:event_id, :reminder_type],
+            max_body_length: 1024,
+            max_string_length: 512
+        )
+
+        event_id = data[:event_id]
+        reminder_type = data[:reminder_type]
+
+        unless ['order_reminder_1', 'order_reminder_2'].include?(reminder_type)
+            respond(success: false, error: 'Ungültiger Mahnungstyp')
+            return
+        end
+
+        # Get event dunning config
+        event = neo4j_query_expect_one(<<~END_OF_QUERY, {event_id: event_id})
+            MATCH (e:Event {id: $event_id})
+            WHERE e.active = true
+            RETURN e.reminder_1_days AS reminder_1_days,
+                   e.reminder_2_days AS reminder_2_days
+        END_OF_QUERY
+
+        # Get all unpaid orders with payment request
+        orders = neo4j_query(<<~END_OF_QUERY, {event_id: event_id, excluded_statuses: DUNNING_EXCLUDED_STATUSES})
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
+            WHERE NOT o.status IN $excluded_statuses
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT_REQUEST]->(pr:PaymentRequest)
+            WITH o, u,
+                 COALESCE(SUM(DISTINCT pay.amount), 0) AS total_paid,
+                 COUNT(DISTINCT pr) AS payment_request_count,
+                 MAX(pr.sent_at) AS last_payment_request_sent
+            WHERE total_paid < o.total_price AND payment_request_count > 0
+            RETURN o.id AS order_id,
+                   o.total_price AS total_price,
+                   o.payment_reference AS payment_reference,
+                   o.reminder_1_override_days AS reminder_1_override_days,
+                   o.reminder_2_override_days AS reminder_2_override_days,
+                   u.email AS user_email,
+                   u.name AS user_name,
+                   u.username AS username,
+                   total_paid,
+                   last_payment_request_sent
+        END_OF_QUERY
+
+        # Check which orders already received this reminder
+        order_ids = orders.map { |o| o['order_id'] }
+        already_sent = {}
+        unless order_ids.empty?
+            counts = neo4j_query(<<~END_OF_QUERY, {order_ids: order_ids, template_key: reminder_type})
+                MATCH (m:ManualMailLog {template_key: $template_key})-[:FOR_ORDER]->(o:TicketOrder)
+                WHERE o.id IN $order_ids
+                RETURN o.id AS order_id, COUNT(m) AS count
+            END_OF_QUERY
+            counts.each { |c| already_sent[c['order_id']] = c['count'] > 0 }
+        end
+
+        now = Time.now
+        sent_count = 0
+        skipped_count = 0
+        errors = []
+
+        orders.each do |order|
+            # Skip if already sent
+            if already_sent[order['order_id']]
+                skipped_count += 1
+                next
+            end
+
+            # Check if this order is due based on duration
+            sent_at = order['last_payment_request_sent']
+            next unless sent_at
+
+            begin
+                days_elapsed = ((now - Time.parse(sent_at.to_s)) / 86400).floor
+            rescue
+                next
+            end
+
+            # Determine effective days for this reminder type
+            if reminder_type == 'order_reminder_1'
+                effective_days = order['reminder_1_override_days'] || event['reminder_1_days']
+            else
+                effective_days = order['reminder_2_override_days'] || event['reminder_2_days']
+            end
+
+            # Skip if no deadline configured or not yet due
+            unless effective_days && days_elapsed >= effective_days
+                skipped_count += 1
+                next
+            end
+
+            remaining = (order['total_price'].to_f - order['total_paid'].to_f).round(2)
+
+            begin
+                template = get_manual_mail_template(reminder_type)
+                next unless template
+
+                replacements = {
+                    'NAME' => order['user_name'] || order['user_email'],
+                    'ORDER_ID' => order['order_id'],
+                    'REFERENCE' => order['payment_reference'],
+                    'TOTAL_PRICE' => sprintf('%.2f', remaining)
+                }
+
+                rendered = render_manual_mail_template(reminder_type, replacements)
+
+                send_manual_mail(
+                    to_email: order['user_email'],
+                    subject: rendered[:subject],
+                    body: rendered[:body],
+                    template_key: reminder_type,
+                    sender_username: @session_user[:username],
+                    recipient_username: order['username'],
+                    order_id: order['order_id']
+                )
+
+                sent_count += 1
+            rescue => e
+                errors << {order_id: order['order_id'], error: e.message}
+            end
+        end
+
+        log("Bulk-Mahnung (#{reminder_type}) für Event #{event_id}: #{sent_count} gesendet, #{skipped_count} übersprungen")
+
+        respond(success: true, sent_count: sent_count, skipped_count: skipped_count, total_orders: orders.length, errors: errors)
+    end
+
+    # Bulk cancel unpaid orders for an event (only fully unpaid)
+    post "/api/bulk_cancel_unpaid" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:event_id])
+
+        event_id = data[:event_id]
+
+        # Get event dunning config
+        event = neo4j_query_expect_one(<<~END_OF_QUERY, {event_id: event_id})
+            MATCH (e:Event {id: $event_id})
+            WHERE e.active = true
+            RETURN e.cancellation_days AS cancellation_days
+        END_OF_QUERY
+
+        # Get all unpaid orders that have received payment request
+        orders = neo4j_query(<<~END_OF_QUERY, {event_id: event_id, excluded_statuses: DUNNING_EXCLUDED_STATUSES})
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
+            WHERE NOT o.status IN $excluded_statuses
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT_REQUEST]->(pr:PaymentRequest)
+            WITH o, u,
+                 COALESCE(SUM(DISTINCT pay.amount), 0) AS total_paid,
+                 COUNT(DISTINCT pr) AS payment_request_count,
+                 MAX(pr.sent_at) AS last_payment_request_sent
+            WHERE total_paid < o.total_price AND payment_request_count > 0
+            RETURN o.id AS order_id,
+                   o.total_price AS total_price,
+                   o.payment_reference AS payment_reference,
+                   o.cancellation_override_days AS cancellation_override_days,
+                   u.email AS user_email,
+                   u.name AS user_name,
+                   u.username AS username,
+                   total_paid,
+                   last_payment_request_sent
+        END_OF_QUERY
+
+        now = Time.now
+        cancelled_count = 0
+        skipped_count = 0
+        errors = []
+
+        orders.each do |order|
+            total_paid = order['total_paid'].to_f
+
+            # Skip partially paid orders
+            if total_paid > 0
+                skipped_count += 1
+                next
+            end
+
+            # Check if cancellation is due based on duration
+            sent_at = order['last_payment_request_sent']
+            next unless sent_at
+
+            begin
+                days_elapsed = ((now - Time.parse(sent_at.to_s)) / 86400).floor
+            rescue
+                next
+            end
+
+            effective_days = order['cancellation_override_days'] || event['cancellation_days']
+
+            unless effective_days && days_elapsed >= effective_days
+                skipped_count += 1
+                next
+            end
+
+            begin
+                neo4j_query(<<~END_OF_QUERY, {order_id: order['order_id']})
+                    MATCH (o:TicketOrder {id: $order_id})
+                    SET o.status = 'cancelled'
+                END_OF_QUERY
+
+                # Send cancellation email
+                template = get_manual_mail_template('order_cancelled')
+                if template
+                    replacements = {
+                        'NAME' => order['user_name'] || order['user_email'],
+                        'ORDER_ID' => order['order_id'],
+                        'REFERENCE' => order['payment_reference']
+                    }
+
+                    rendered = render_manual_mail_template('order_cancelled', replacements)
+
+                    send_manual_mail(
+                        to_email: order['user_email'],
+                        subject: rendered[:subject],
+                        body: rendered[:body],
+                        template_key: 'order_cancelled',
+                        sender_username: @session_user[:username],
+                        recipient_username: order['username'],
+                        order_id: order['order_id']
+                    )
+                end
+
+                cancelled_count += 1
+            rescue => e
+                errors << {order_id: order['order_id'], error: e.message}
+            end
+        end
+
+        log("Bulk-Stornierung für Event #{event_id}: #{cancelled_count} storniert, #{skipped_count} übersprungen")
+
+        respond(success: true, cancelled_count: cancelled_count, skipped_count: skipped_count, total_orders: orders.length, errors: errors)
+    end
+
+    # Update dunning overrides for a specific order
+    post "/api/update_order_dunning_overrides" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(
+            required_keys: [:order_id],
+            optional_keys: [:reminder_1_override_days, :reminder_2_override_days, :cancellation_override_days],
+            types: {reminder_1_override_days: Integer, reminder_2_override_days: Integer, cancellation_override_days: Integer}
+        )
+
+        order_id = data[:order_id]
+
+        updates = []
+        params = {order_id: order_id}
+
+        [:reminder_1_override_days, :reminder_2_override_days, :cancellation_override_days].each do |field|
+            if data.key?(field)
+                updates << "o.#{field} = $#{field}"
+                params[field] = data[field]
+            end
+        end
+
+        if updates.any?
+            neo4j_query(<<~END_OF_QUERY, params)
+                MATCH (o:TicketOrder {id: $order_id})
+                SET #{updates.join(', ')}
+            END_OF_QUERY
+        end
+
+        log("Dunning-Overrides für Bestellung #{order_id} aktualisiert: #{params.reject { |k, _| k == :order_id }.inspect}")
+
+        respond(success: true)
+    end
+
+    # Send a dunning reminder or cancellation for a single order
+    post "/api/send_order_dunning" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(
+            required_keys: [:order_id, :dunning_type],
+            max_body_length: 1024,
+            max_string_length: 512
+        )
+
+        order_id = data[:order_id]
+        dunning_type = data[:dunning_type]
+
+        unless ['order_reminder_1', 'order_reminder_2', 'order_cancelled', 'order_cancelled_no_payment'].include?(dunning_type)
+            respond(success: false, error: 'Ungültiger Mahnungstyp')
+            return
+        end
+
+        # Get order details with user info
+        order = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder {id: $order_id})
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+            WITH o, u, COALESCE(SUM(pay.amount), 0) AS total_paid
+            RETURN o.id AS order_id,
+                   o.total_price AS total_price,
+                   o.payment_reference AS payment_reference,
+                   o.status AS status,
+                   u.email AS user_email,
+                   u.name AS user_name,
+                   u.username AS username,
+                   total_paid
+        END_OF_QUERY
+
+        order = order.first
+        unless order
+            respond(success: false, error: 'Bestellung nicht gefunden')
+            return
+        end
+
+        remaining = (order['total_price'].to_f - order['total_paid'].to_f).round(2)
+
+        # For cancellation types, also set order status to cancelled
+        if ['order_cancelled', 'order_cancelled_no_payment'].include?(dunning_type)
+            neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+                MATCH (o:TicketOrder {id: $order_id})
+                SET o.status = 'cancelled'
+            END_OF_QUERY
+        end
+
+        template = get_manual_mail_template(dunning_type)
+        unless template
+            respond(success: false, error: 'Template nicht gefunden')
+            return
+        end
+
+        replacements = {
+            'NAME' => order['user_name'] || order['user_email'],
+            'ORDER_ID' => order['order_id'],
+            'REFERENCE' => order['payment_reference'] || 'N/A',
+            'TOTAL_PRICE' => sprintf('%.2f', remaining)
+        }
+
+        rendered = render_manual_mail_template(dunning_type, replacements)
+
+        begin
+            send_manual_mail(
+                to_email: order['user_email'],
+                subject: rendered[:subject],
+                body: rendered[:body],
+                template_key: dunning_type,
+                sender_username: @session_user[:username],
+                recipient_username: order['username'],
+                order_id: order['order_id']
+            )
+
+            type_labels = {
+                'order_reminder_1' => '1. Mahnung',
+                'order_reminder_2' => '2. Mahnung',
+                'order_cancelled' => 'Stornierung',
+                'order_cancelled_no_payment' => 'Stornierung (keine Zahlung)'
+            }
+            log("#{type_labels[dunning_type]} für Bestellung #{order_id} gesendet an #{order['user_email']}")
+
+            respond(success: true, message: "#{type_labels[dunning_type]} erfolgreich gesendet")
+        rescue => e
+            STDERR.puts "Error sending dunning mail: #{e.message}"
+            respond(success: false, error: "Fehler beim Senden: #{e.message}")
+        end
     end
 end

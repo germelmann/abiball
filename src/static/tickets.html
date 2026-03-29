@@ -409,6 +409,64 @@ function displayPreviousOrders(orders) {
         
         // Payment request status
         let paymentStatusHtml = '';
+        let paymentDetailsHtml = '';
+        
+        // Show payment details when payment request exists (and not offline/cancelled)
+        if (order.latest_payment_request && order.status !== 'offline_payment' && order.status !== 'cancelled' && order.status !== 'cancelled_by_user') {
+            let totalPrice = parseFloat(order.total_price) || 0;
+            let totalPaid = parseFloat(order.total_paid) || 0;
+            let remaining = parseFloat(order.remaining_balance) || 0;
+            let paymentStatus = order.payment_status || 'pending';
+            
+            let statusLabel = 'Ausstehend';
+            let statusBadgeClass = 'bg-warning text-dark';
+            if (paymentStatus === 'partially_paid') {
+                statusLabel = 'Teilweise bezahlt';
+                statusBadgeClass = 'bg-info';
+            } else if (paymentStatus === 'paid' || paymentStatus === 'overpaid') {
+                statusLabel = 'Bezahlt';
+                statusBadgeClass = 'bg-success';
+            }
+            
+            // Build download link if tickets are downloadable and order is paid AND tickets have been generated
+            let downloadLinkHtml = '';
+            if ((paymentStatus === 'paid' || paymentStatus === 'overpaid') && order.event_ticket_generation_enabled && order.tickets_generated) {
+                downloadLinkHtml = `
+                    <div class="text-center mt-2">
+                        <a href="/ticket_download" class="btn btn-success btn-sm">
+                            <i class="bi bi-download"></i>&nbsp;&nbsp;Tickets herunterladen
+                        </a>
+                    </div>`;
+            }
+            
+            paymentDetailsHtml = `
+                <div class="card mt-3 mb-0 border-primary">
+                    <div class="card-header bg-primary bg-opacity-10">
+                        <strong><i class="bi bi-cash-stack"></i>&nbsp;&nbsp;Zahlungsübersicht</strong>
+                    </div>
+                    <div class="card-body p-3">
+                        <div class="row text-center">
+                            <div class="col-4">
+                                <div class="fw-bold">${totalPrice.toFixed(2)}€</div>
+                                <small class="text-muted">Gesamt</small>
+                            </div>
+                            <div class="col-4">
+                                <div class="fw-bold text-success">${totalPaid.toFixed(2)}€</div>
+                                <small class="text-muted">Bezahlt</small>
+                            </div>
+                            <div class="col-4">
+                                <div class="fw-bold ${remaining > 0 ? 'text-danger' : 'text-success'}">${remaining.toFixed(2)}€</div>
+                                <small class="text-muted">Offen</small>
+                            </div>
+                        </div>
+                        <div class="text-center mt-2">
+                            <span class="badge ${statusBadgeClass}">${statusLabel}</span>
+                        </div>
+                        ${downloadLinkHtml}
+                    </div>
+                </div>`;
+        }
+        
         if (order.status !== 'paid') {
             if (order.status === 'offline_payment') {
                 // Offline payment - no payment request will be sent
@@ -495,28 +553,6 @@ function displayPreviousOrders(orders) {
                         `${order.total_price}€`
                     )
                 ),
-                // Show payment breakdown when there are actual payments or payment request was sent
-                (order.total_paid > 0 || (order.latest_payment_request && order.latest_payment_request.status === 'sent')) ?
-                    $('<div>').addClass('row mb-2 mt-1').append(
-                        $('<div>').addClass('col-md-12').append(
-                            $('<div>').addClass('border rounded p-2').append(
-                                $('<div>').addClass('row text-center').append(
-                                    $('<div>').addClass('col-md-4').append(
-                                        $('<small>').addClass('text-muted d-block').text('Gesamt'),
-                                        $('<strong>').text(`${Number(order.total_price || 0).toFixed(2)}€`)
-                                    ),
-                                    $('<div>').addClass('col-md-4').append(
-                                        $('<small>').addClass('text-muted d-block').text('Bezahlt'),
-                                        $('<strong>').addClass('text-success').text(`${Number(order.total_paid || 0).toFixed(2)}€`)
-                                    ),
-                                    $('<div>').addClass('col-md-4').append(
-                                        $('<small>').addClass('text-muted d-block').text('Offen'),
-                                        $('<strong>').addClass(Number(order.remaining_balance || 0) > 0 ? 'text-danger' : 'text-success').text(`${Number(order.remaining_balance || 0).toFixed(2)}€`)
-                                    )
-                                )
-                            )
-                        )
-                    ) : '',
                 order.participants && order.participants.length > 0 ? 
                     $('<div>').addClass('mt-3').append(
                         $('<strong>').text('Teilnehmer:'),
@@ -536,6 +572,7 @@ function displayPreviousOrders(orders) {
                         $('<strong>').html('<i class="bi bi-sticky"></i>&nbsp;&nbsp;Anmerkung vom Abikomitee: '),
                         order.notes
                     ) : '',
+                paymentDetailsHtml,
                 paymentStatusHtml
             )
         );

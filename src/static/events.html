@@ -187,6 +187,39 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Dunning Configuration (Optional) -->
+                    <div class="mb-3">
+                        <h6 class="mb-3">Mahnwesen (optional)</h6>
+                        <small class="form-text text-muted d-block mb-2">Fristen in Tagen nach Versand der Zahlungsaufforderung</small>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="event_reminder_1_days_input" class="form-label">1. Mahnung nach (Tage)</label>
+                                    <input type="number" class="form-control" id="event_reminder_1_days_input" min="1" placeholder="z.B. 14">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="event_reminder_2_days_input" class="form-label">2. Mahnung nach (Tage)</label>
+                                    <input type="number" class="form-control" id="event_reminder_2_days_input" min="1" placeholder="z.B. 21">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="event_cancellation_days_input" class="form-label">Stornierung nach (Tage)</label>
+                                    <input type="number" class="form-control" id="event_cancellation_days_input" min="1" placeholder="z.B. 28">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="event_auto_cancel_enabled_input">
+                            <label class="form-check-label" for="event_auto_cancel_enabled_input">
+                                Stornierungen automatisch durchführen
+                            </label>
+                            <small class="form-text text-muted d-block">Wenn deaktiviert, werden unbezahlte Bestellungen nur markiert</small>
+                        </div>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -348,6 +381,39 @@
                                     <small class="form-text text-muted">Erwartete Anzahl Besteller (für Verkaufsprognose)</small>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Dunning Configuration (Optional) -->
+                    <div class="mb-3">
+                        <h6 class="mb-3">Mahnwesen (optional)</h6>
+                        <small class="form-text text-muted d-block mb-2">Fristen in Tagen nach Versand der Zahlungsaufforderung</small>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="edit_event_reminder_1_days_input" class="form-label">1. Mahnung nach (Tage)</label>
+                                    <input type="number" class="form-control" id="edit_event_reminder_1_days_input" min="1" placeholder="z.B. 14">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="edit_event_reminder_2_days_input" class="form-label">2. Mahnung nach (Tage)</label>
+                                    <input type="number" class="form-control" id="edit_event_reminder_2_days_input" min="1" placeholder="z.B. 21">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="edit_event_cancellation_days_input" class="form-label">Stornierung nach (Tage)</label>
+                                    <input type="number" class="form-control" id="edit_event_cancellation_days_input" min="1" placeholder="z.B. 28">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="edit_event_auto_cancel_enabled_input">
+                            <label class="form-check-label" for="edit_event_auto_cancel_enabled_input">
+                                Stornierungen automatisch durchführen
+                            </label>
+                            <small class="form-text text-muted d-block">Wenn deaktiviert, werden unbezahlte Bestellungen nur markiert</small>
                         </div>
                     </div>
                     
@@ -613,6 +679,18 @@
             formData.expected_users = parseInt($('#event_expected_users_input').val());
         }
 
+        // Dunning configuration
+        if ($('#event_reminder_1_days_input').val()) {
+            formData.reminder_1_days = parseInt($('#event_reminder_1_days_input').val());
+        }
+        if ($('#event_reminder_2_days_input').val()) {
+            formData.reminder_2_days = parseInt($('#event_reminder_2_days_input').val());
+        }
+        if ($('#event_cancellation_days_input').val()) {
+            formData.cancellation_days = parseInt($('#event_cancellation_days_input').val());
+        }
+        formData.auto_cancel_enabled = $('#event_auto_cancel_enabled_input').is(':checked');
+
         if (formData.visibility === 'password_protected') {
             formData.password = $('#event_password_input').val();
         }
@@ -681,6 +759,15 @@
         } else {
             formData.expected_users = null;
         }
+
+        // Dunning configuration (can be cleared to null)
+        let r1Val = $('#edit_event_reminder_1_days_input').val();
+        formData.reminder_1_days = (r1Val !== '' && r1Val !== null) ? parseInt(r1Val) : null;
+        let r2Val = $('#edit_event_reminder_2_days_input').val();
+        formData.reminder_2_days = (r2Val !== '' && r2Val !== null) ? parseInt(r2Val) : null;
+        let cVal = $('#edit_event_cancellation_days_input').val();
+        formData.cancellation_days = (cVal !== '' && cVal !== null) ? parseInt(cVal) : null;
+        formData.auto_cancel_enabled = $('#edit_event_auto_cancel_enabled_input').is(':checked');
 
         if (formData.visibility === 'password_protected' && $('#edit_event_password_input').val()) {
             formData.password = $('#edit_event_password_input').val();
@@ -908,6 +995,12 @@
         // Handle sales targets & forecasting fields (optional)
         $('#edit_event_target_tickets_input').val(event.target_tickets || '');
         $('#edit_event_expected_users_input').val(event.expected_users || '');
+        
+        // Handle dunning configuration
+        $('#edit_event_reminder_1_days_input').val(event.reminder_1_days || '');
+        $('#edit_event_reminder_2_days_input').val(event.reminder_2_days || '');
+        $('#edit_event_cancellation_days_input').val(event.cancellation_days || '');
+        $('#edit_event_auto_cancel_enabled_input').prop('checked', event.auto_cancel_enabled === true);
         
         // Handle password section visibility
         if (event.visibility === 'password_protected') {

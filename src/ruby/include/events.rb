@@ -22,6 +22,10 @@ class Main < Sinatra::Base
             e.target_tickets AS target_tickets,
             e.expected_users AS expected_users,
             e.payment_required AS payment_required,
+            e.reminder_1_days AS reminder_1_days,
+            e.reminder_2_days AS reminder_2_days,
+            e.cancellation_days AS cancellation_days,
+            e.auto_cancel_enabled AS auto_cancel_enabled,
             e.created_by AS created_by,
             e.created_at AS created_at
         FIELDS
@@ -79,8 +83,8 @@ class Main < Sinatra::Base
         require_user_with_permission!("create_events")
         data = parse_request_data(
             required_keys: [:name, :year, :location], 
-            optional_keys: [:description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :target_tickets, :expected_users, :payment_required],
-            types: {year: Integer, max_tickets: Integer, max_tickets_per_user: Integer, ticket_generation_enabled: :boolean, target_tickets: Integer, expected_users: Integer, payment_required: :boolean}
+            optional_keys: [:description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :target_tickets, :expected_users, :payment_required, :reminder_1_days, :reminder_2_days, :cancellation_days, :auto_cancel_enabled],
+            types: {year: Integer, max_tickets: Integer, max_tickets_per_user: Integer, ticket_generation_enabled: :boolean, target_tickets: Integer, expected_users: Integer, payment_required: :boolean, reminder_1_days: Integer, reminder_2_days: Integer, cancellation_days: Integer, auto_cancel_enabled: :boolean}
         )
         
         # Generate unique event ID
@@ -125,6 +129,10 @@ class Main < Sinatra::Base
             target_tickets: data[:target_tickets],
             expected_users: data[:expected_users],
             payment_required: payment_required,
+            reminder_1_days: data[:reminder_1_days],
+            reminder_2_days: data[:reminder_2_days],
+            cancellation_days: data[:cancellation_days],
+            auto_cancel_enabled: data[:auto_cancel_enabled] == true,
             created_by: @session_user[:username],
             created_at: DateTime.now.to_s,
             active: true
@@ -150,6 +158,10 @@ class Main < Sinatra::Base
                 target_tickets: $target_tickets,
                 expected_users: $expected_users,
                 payment_required: $payment_required,
+                reminder_1_days: $reminder_1_days,
+                reminder_2_days: $reminder_2_days,
+                cancellation_days: $cancellation_days,
+                auto_cancel_enabled: $auto_cancel_enabled,
                 created_by: $created_by,
                 created_at: $created_at,
                 active: $active
@@ -221,6 +233,10 @@ class Main < Sinatra::Base
                    e.target_tickets AS target_tickets,
                    e.expected_users AS expected_users,
                    e.payment_required AS payment_required,
+                   e.reminder_1_days AS reminder_1_days,
+                   e.reminder_2_days AS reminder_2_days,
+                   e.cancellation_days AS cancellation_days,
+                   e.auto_cancel_enabled AS auto_cancel_enabled,
                    e.created_by AS created_by,
                    e.created_at AS created_at,
                    e.password AS password
@@ -267,8 +283,8 @@ class Main < Sinatra::Base
         require_user_with_permission!("create_events")
         data = parse_request_data(
             required_keys: [:event_id],
-            optional_keys: [:name, :year, :location, :description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :target_tickets, :expected_users, :payment_required, :active],
-            types: {year: Integer, max_tickets: Integer, ticket_price: Float, max_tickets_per_user: Integer, ticket_generation_enabled: :boolean, target_tickets: Integer, expected_users: Integer, payment_required: :boolean, active: :boolean},
+            optional_keys: [:name, :year, :location, :description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :target_tickets, :expected_users, :payment_required, :active, :reminder_1_days, :reminder_2_days, :cancellation_days, :auto_cancel_enabled],
+            types: {year: Integer, max_tickets: Integer, ticket_price: Float, max_tickets_per_user: Integer, ticket_generation_enabled: :boolean, target_tickets: Integer, expected_users: Integer, payment_required: :boolean, active: :boolean, reminder_1_days: Integer, reminder_2_days: Integer, cancellation_days: Integer, auto_cancel_enabled: :boolean},
             max_body_length: 10 * 1024 * 1024,
             max_string_length: 5 * 1024 * 1024,
         )
@@ -280,7 +296,7 @@ class Main < Sinatra::Base
         updates = []
         params = {event_id: data[:event_id]}
         
-        [:name, :year, :location, :description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :target_tickets, :expected_users, :payment_required, :active].each do |field|
+        [:name, :year, :location, :description, :password, :visibility, :max_tickets, :ticket_price, :start_datetime, :end_datetime, :max_tickets_per_user, :ticket_generation_enabled, :ticket_sale_start_datetime, :ticket_sale_end_datetime, :target_tickets, :expected_users, :payment_required, :active, :reminder_1_days, :reminder_2_days, :cancellation_days, :auto_cancel_enabled].each do |field|
             if data.key?(field)
                 updates << "e.#{field} = $#{field}"
                 params[field] = data[field]

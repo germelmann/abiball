@@ -111,24 +111,6 @@ a.nav-link {
     }
 }
 
-@media (max-width: 992px) {
-    a.nav-link {
-        margin-left: 0.5em;
-        text-align: left;
-    }
-}
-
-@media (min-width: 1200px) {
-    .nav-link.active {
-        background-color: #e20000;
-        border-radius: 0.5em;
-        padding-left: 1em!important;
-        padding-right: 1em!important;
-        box-shadow: 1px 1px 5px rgba(0,0,0,0.2);
-        outline: 1px solid #ccc;
-    }
-}
-
 /* .navbar {
     backdrop-filter: blur(5px);
 }
