@@ -337,13 +337,18 @@
                         <small class="text-muted" id="order_date_header_display"></small>
                     </div>
                     <span class="badge bg-info fs-6" id="event_badge"><i class="bi bi-calendar-event"></i> <span id="event_name_display"></span></span>
-                    <span class="badge fs-6" id="order_status_header_badge"></span>
                 </div>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <!-- Quick Info Summary Bar -->
                 <div class="row mb-3 g-2" id="order_summary_bar">
+                    <div class="col-md-2">
+                        <div class="card border-0 bg-body-secondary text-center p-2">
+                            <small class="text-body-secondary">Status</small>
+                            <span class="badge fs-6" id="order_status_header_badge"></span>
+                        </div>
+                    </div>
                     <div class="col-md-2">
                         <div class="card border-0 bg-body-secondary text-center p-2">
                             <small class="text-body-secondary">Tickets</small>
@@ -371,10 +376,10 @@
                     <div class="col-md-2">
                         <div class="card border-0 bg-body-secondary text-center p-2">
                             <small class="text-body-secondary">Referenz</small>
-                            <strong id="summary_reference" class="text-truncate d-block" style="font-size: 0.85rem;">-</strong>
+                            <strong id="summary_reference" class="text-truncate d-block">-</strong>
                         </div>
                     </div>
-                    <div class="col-md-2">
+                    <!-- <div class="col-md-2">
                         <div class="card border-0 bg-body-secondary text-center p-2">
                             <small class="text-body-secondary">PDF & Tickets</small>
                             <div>
@@ -389,7 +394,7 @@
                                 </span>
                             </div>
                         </div>
-                    </div>
+                    </div> -->
                 </div>
 
                 <!-- Tab Navigation -->
@@ -448,7 +453,7 @@
                                         <div class="col-md-2">
                                             <label class="form-label">&nbsp;</label>
                                             <div>
-                                                <a href="#" id="user_profile_link" class="btn btn-sm btn-outline-primary w-100" target="_blank" rel="noopener noreferrer">
+                                                <a href="#" id="user_profile_link" class="btn btn-outline-primary w-100" target="_blank" rel="noopener noreferrer">
                                                     <i class="bi bi-person"></i> Profil
                                                 </a>
                                             </div>
@@ -497,6 +502,19 @@
                                         <div class="col-md-2">
                                             <label for="paid_at_input" class="form-label">Bezahlt am</label>
                                             <input disabled type="text" class="form-control" id="paid_at_input">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label">PDF</label>   
+                                            <button type="button" class="btn btn-outline-primary form-control" onclick="generateOrderPDF()">
+                                                <i class="bi bi-file-pdf"></i> Bestellbestätigung
+                                            </button>
+                                        </div>
+                                        <div class="col-md-2" id="tickets_box">
+                                            <label class="form-label">Tickets</label>
+                                            <button type="button" class="btn btn-outline-success form-control" id="generate_tickets_btn" onclick="generateTickets()" style="display:none;">
+                                                <i class="bi bi-ticket-detailed"></i> Tickets generieren
+                                            </button>
+                                            <button id="tickets_status" type="button" class="btn btn-outline-success form-control" style="display:none;"><i class="bi bi-ticket"></i> Tickets</button>
                                         </div>
                                     </div>
                                 </div>
@@ -592,22 +610,15 @@
                             <div class="card-header">
                                 <div class="d-flex justify-content-between align-items-center">
                                     <h6 class="mb-0"><i class="bi bi-credit-card"></i> Zahlungsaufforderungen</h6>
-                                    <div id="send_payment_request_section" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
-                                        <button type="button" class="btn btn-sm btn-info" id="send_payment_request_btn" style="display:none;">
-                                            <i class="bi bi-envelope-paper"></i> Zahlungsaufforderung senden
-                                        </button>
-                                    </div>
                                 </div>
                             </div>
-                            <div class="card-body" id="payment_requests_section">
-                            </div>
-                        </div>
-
-                        <!-- Per-Order Dunning Actions -->
-                        <div class="card mb-3" id="order_dunning_actions_section" #{user_has_permission?("manage_orders") ? "" : "style='display:none'"}>
-                            <div class="card-header"><h6 class="mb-0"><i class="bi bi-bell"></i> Mahnung / Stornierung</h6></div>
                             <div class="card-body">
+                                <div id="payment_requests_section">
+                                </div>
                                 <div class="d-flex flex-wrap gap-2" id="dunning_action_buttons">
+                                    <button type="button" class="btn btn-outline-primary" id="send_payment_request_btn" style="display:none;">
+                                        <i class="bi bi-envelope-paper"></i> Zahlungsaufforderung senden
+                                    </button>
                                     <button type="button" class="btn btn-outline-info btn-sm dunning-action-btn" id="send_reminder_1_btn" data-type="order_reminder_1">
                                         <i class="bi bi-envelope"></i> 1. Mahnung senden
                                     </button>
@@ -1204,9 +1215,9 @@
         // Show/hide dunning actions based on order status
         const dunningExcluded = ['cancelled', 'cancelled_by_user', 'paid', 'overpaid', 'offline_payment'];
         if (dunningExcluded.includes(order.status)) {
-            $('#order_dunning_actions_section').hide();
+            $('#dunning_action_buttons').hide();
         } else {
-            $('#order_dunning_actions_section').show();
+            $('#dunning_action_buttons').show();
         }
         
         // Render participants
@@ -1229,6 +1240,11 @@
                 new bootstrap.Tab(overviewTab).show();
             }
         }
+        $("#tickets_status").on('click', function() {
+            const triggerEl = document.querySelector('#tab-participants');
+            const tab = new bootstrap.Tab(triggerEl);
+            tab.show();
+        });
     }
     
     function enableEditMode() {
@@ -1683,12 +1699,15 @@
                         $('#generate_tickets_btn').hide();
                         $('#tickets_status').hide();
                     }
+                    $('#tickets_box').show();
                 } else {
+                    $('#tickets_box').hide();
                     $('#generate_tickets_btn').hide();
                     $('#tickets_status').hide();
                 }
             });
         } else {
+            $('#tickets_box').hide();
             $('#tickets_status').hide();
             $('#generate_tickets_btn').hide();
         }
