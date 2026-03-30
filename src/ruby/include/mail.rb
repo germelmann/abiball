@@ -83,7 +83,7 @@ class Main < Sinatra::Base
                 <p>Hallo [NAME],</p>
                 <p>dies ist unsere letzte Erinnerung bezüglich der ausstehenden Zahlung für deine Bestellung #[ORDER_ID] ([REFERENCE]).</p>
                 <p>Offener Betrag: <strong>[TOTAL_PRICE] €</strong></p>
-                <p>Sollte die Zahlung nicht innerhalb von [X] Tagen eingehen, wird die Bestellung automatisch storniert.</p>
+                <p>Sollte die Zahlung nicht innerhalb von sieben Tagen eingehen, wird die Bestellung automatisch storniert.</p>
             BODY
             category: 'order',
             label: 'Zahlungserinnerung 2'
