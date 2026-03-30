@@ -669,8 +669,8 @@ class Main < Sinatra::Base
         note = data[:note]
         send_email = data[:send_email] != false  # default true
 
-        if amount <= 0
-            respond(success: false, error: "Betrag muss größer als 0 sein")
+        if amount == 0
+            respond(success: false, error: "Betrag darf nicht 0 sein")
             return
         end
 

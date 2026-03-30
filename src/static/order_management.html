@@ -862,8 +862,8 @@
             <div class="modal-body">
                 <div class="mb-3">
                     <label for="payment_amount_input" class="form-label">Betrag (€)</label>
-                    <input type="number" class="form-control" id="payment_amount_input" min="0.01" step="0.01" required>
-                    <small class="text-muted">Offener Betrag: <span id="payment_remaining_hint">0,00</span> €</small>
+                    <input type="number" class="form-control" id="payment_amount_input" step="0.01" required>
+                    <small class="text-muted">Offener Betrag: <span id="payment_remaining_hint">0,00</span> € — Negativer Betrag für Rückerstattung</small>
                 </div>
                 <div class="mb-3">
                     <label for="payment_note_input" class="form-label">Notiz (optional)</label>
@@ -1294,9 +1294,17 @@
             $('#payment_history_section').show();
             payments.forEach(function(payment) {
                 const row = $('<tr>');
+                const paymentAmount = Number(payment.amount || 0);
+                if (paymentAmount < 0) {
+                    row.addClass('table-warning');
+                }
                 const timestamp = payment.timestamp ? new Date(payment.timestamp).toLocaleString('de-DE') : '-';
                 row.append($('<td>').text(timestamp));
-                row.append($('<td>').text(Number(payment.amount || 0).toFixed(2) + ' €'));
+                if (paymentAmount < 0) {
+                    row.append($('<td>').html('<span class="text-danger">' + paymentAmount.toFixed(2) + ' € (Rückerstattung)</span>'));
+                } else {
+                    row.append($('<td>').text(paymentAmount.toFixed(2) + ' €'));
+                }
                 row.append($('<td>').text(payment.recorded_by || '-'));
                 row.append($('<td>').text(payment.note || '-'));
                 const revertBtn = $('<button>')
@@ -1916,7 +1924,7 @@
         const note = $('#payment_note_input').val();
         const sendEmail = $('#payment_send_email_check').is(':checked');
         
-        if (!amount || amount <= 0) {
+        if (!amount || amount === 0) {
             showTemplateModal('Fehler', 'Bitte gib einen gültigen Betrag ein.', 'OK', 'btn-primary', null, null, function() {});
             return;
         }

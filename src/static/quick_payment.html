@@ -19,7 +19,7 @@
                         <div class='col-md-3'>
                             <label for="payment_amount_input" class="form-label">Betrag (€)</label>
                             <input type="number" class="form-control form-control-lg" id="payment_amount_input" 
-                                   min="0.01" step="0.01" placeholder="0,00"
+                                   step="0.01" placeholder="0,00"
                                    onkeypress="handleEnterKey(event)">
                         </div>
                         <div class='col-md-3 d-flex align-items-end'>
@@ -142,7 +142,7 @@ function searchAndProcess() {
         return;
     }
     
-    if (!amount || amount <= 0) {
+    if (!amount || amount === 0) {
         showTemplateModal('Fehler', 'Bitte einen gültigen Betrag eingeben.', 'OK', 'btn-secondary', '', '', function() {
             $('#payment_amount_input').focus();
         });
@@ -261,7 +261,7 @@ function confirmPayment() {
     if (!currentPaymentReference || !currentOrder) return;
     
     const incomingAmount = parseFloat($('#payment_amount_input').val());
-    if (!incomingAmount || incomingAmount <= 0) return;
+    if (!incomingAmount || incomingAmount === 0) return;
     
     const sendEmail = $('#send_email_check').is(':checked');
     
@@ -337,6 +337,9 @@ function addRecentActivity(ref, amount, overpayment, isError) {
     if (isError) {
         badge = '<span class="badge bg-danger me-1">Fehler</span>';
         text = ref;
+    } else if (Number(amount) < 0) {
+        badge = '<span class="badge bg-warning text-dark me-1">Rückerstattung</span>';
+        text = `${ref} – ${Number(amount).toFixed(2)}€`;
     } else if (overpayment > 0) {
         badge = '<span class="badge bg-warning text-dark me-1">Überzahlung</span>';
         text = `${ref} – ${Number(amount).toFixed(2)}€ (+${Number(overpayment).toFixed(2)}€)`;
