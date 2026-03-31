@@ -1,0 +1,402 @@
+#{site_for_users!}
+
+<div class="container" id="yearbook_unavailable" style="display: none;">
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i>
+        <strong>Das Jahrbuch ist derzeit nicht verfügbar.</strong>
+        <p class="mb-0 mt-2">Bitte versuche es später erneut oder wende dich an das Abikomitee.</p>
+    </div>
+</div>
+
+<div class="container" id="yearbook_content" style="display: none;">
+    <h1 class="mb-4"><i class="bi bi-book"></i> Jahrbuch</h1>
+
+    <ul class="nav nav-tabs mb-4" id="yearbookTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="profile-tab" data-bs-toggle="tab" data-bs-target="#profile-section"
+                type="button" role="tab" aria-controls="profile-section" aria-selected="true">
+                <i class="bi bi-person-badge"></i> Steckbrief
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="questions-tab" data-bs-toggle="tab" data-bs-target="#questions-section"
+                type="button" role="tab" aria-controls="questions-section" aria-selected="false">
+                <i class="bi bi-chat-square-text"></i> Fragen
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="surveys-tab" data-bs-toggle="tab" data-bs-target="#surveys-section"
+                type="button" role="tab" aria-controls="surveys-section" aria-selected="false">
+                <i class="bi bi-bar-chart"></i> Umfragen
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="yearbookTabContent">
+        <div class="tab-pane fade show active" id="profile-section" role="tabpanel" aria-labelledby="profile-tab">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="bi bi-person-badge"></i> Mein Steckbrief</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-body-secondary mb-3">
+                        Erstelle deinen persönlichen Steckbrief für das Jahrbuch. Änderungen werden automatisch gespeichert.
+                    </p>
+                    <div id="profile_fields_container"></div>
+                    <div id="profile_save_status" class="mt-2"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="questions-section" role="tabpanel" aria-labelledby="questions-tab">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="bi bi-chat-square-text"></i> Meine Antworten</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-body-secondary mb-3">
+                        Beantworte die folgenden Fragen. Änderungen werden automatisch gespeichert.
+                    </p>
+                    <div id="questions_container"></div>
+                    <div id="no_questions_msg" class="text-body-secondary" style="display: none;">
+                        <i class="bi bi-info-circle"></i> Keine persönlichen Fragen vorhanden.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="surveys-section" role="tabpanel" aria-labelledby="surveys-tab">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="bi bi-bar-chart"></i> Anonyme Umfragen</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-body-secondary mb-3">
+                        Diese Umfragen sind anonym – Änderungen werden automatisch gespeichert.
+                    </p>
+                    <div id="surveys_container"></div>
+                    <div id="no_surveys_msg" class="text-body-secondary" style="display: none;">
+                        <i class="bi bi-info-circle"></i> Keine Umfragen vorhanden.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="api_messages"></div>
+
+<style>
+    .yearbook-question {
+        border: 1px solid var(--bs-border-color);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+    .yearbook-question .question-label {
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+    }
+    .yearbook-question .badge-anonymous { font-size: 0.75rem; }
+    .search-select-container { position: relative; }
+    .search-select-input { width: 100%; }
+    .search-select-dropdown {
+        position: absolute; z-index: 1050; width: 100%;
+        max-height: 250px; overflow-y: auto;
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-top: none; border-radius: 0 0 0.375rem 0.375rem;
+        display: none;
+    }
+    .search-select-dropdown .search-select-option { padding: 0.5rem 0.75rem; cursor: pointer; }
+    .search-select-dropdown .search-select-option:hover,
+    .search-select-dropdown .search-select-option.active { background: var(--bs-primary); color: white; }
+    .save-indicator { display: inline-block; }
+</style>
+
+<script>
+let yearbookQuestions = [];
+let yearbookProfileFields = [];
+let myAnswers = {};
+let myProfile = {};
+let usersList = [];
+let profileSaveTimer = null;
+let answerSaveTimers = {};
+
+$(document).ready(function() { loadYearbookData(); });
+
+function loadYearbookData() {
+    let configLoaded = false, answersLoaded = false, profileLoaded = false, usersLoaded = false;
+
+    function checkAllLoaded() {
+        if (configLoaded && answersLoaded && profileLoaded && usersLoaded) renderYearbook();
+    }
+
+    api_call('/api/yearbook/config', {}, function(data) {
+        if (data.success) {
+            yearbookQuestions = data.questions;
+            yearbookProfileFields = data.profile_fields;
+            configLoaded = true;
+            $('#yearbook_content').show();
+            checkAllLoaded();
+        } else { $('#yearbook_unavailable').show(); }
+    }, function() { $('#yearbook_unavailable').show(); });
+
+    api_call('/api/yearbook/get_my_answers', {}, function(data) {
+        if (data.success) myAnswers = data.answers || {};
+        answersLoaded = true; checkAllLoaded();
+    }, function() { answersLoaded = true; checkAllLoaded(); });
+
+    api_call('/api/yearbook/get_my_profile', {}, function(data) {
+        if (data.success) myProfile = data.profile || {};
+        profileLoaded = true; checkAllLoaded();
+    }, function() { profileLoaded = true; checkAllLoaded(); });
+
+    api_call('/api/yearbook/get_users_list', {}, function(data) {
+        if (data.success) usersList = data.users || [];
+        usersLoaded = true; checkAllLoaded();
+    }, function() { usersLoaded = true; checkAllLoaded(); });
+}
+
+function renderYearbook() {
+    renderProfileFields();
+    renderQuestions();
+    renderSurveys();
+}
+
+function renderProfileFields() {
+    const container = $('#profile_fields_container');
+    container.empty();
+
+    yearbookProfileFields.forEach(function(field) {
+        const value = myProfile[field.id] || '';
+        let inputEl;
+
+        if (field.type === 'textarea') {
+            inputEl = '<textarea class="form-control yearbook-profile-field" id="yb_profile_' +
+                escapeHtml(field.id) + '" rows="3" maxlength="2000">' + escapeHtml(value) + '</textarea>';
+        } else {
+            inputEl = '<input type="text" class="form-control yearbook-profile-field" id="yb_profile_' +
+                escapeHtml(field.id) + '" value="' + escapeAttr(value) + '" maxlength="500">';
+        }
+
+        container.append(
+            '<div class="mb-3">' +
+            '  <label class="form-label fw-semibold" for="yb_profile_' + escapeHtml(field.id) + '">' + escapeHtml(field.label) + '</label>' +
+            '  ' + inputEl +
+            '</div>'
+        );
+    });
+
+    // Auto-save profile on change with debounce
+    container.find('.yearbook-profile-field').on('input change', function() {
+        if (profileSaveTimer) clearTimeout(profileSaveTimer);
+        profileSaveTimer = setTimeout(function() { saveProfile(); }, 800);
+    });
+}
+
+function renderQuestions() {
+    const container = $('#questions_container');
+    container.empty();
+    let hasQuestions = false;
+
+    yearbookQuestions.forEach(function(q) {
+        if (q.anonymous) return;
+        hasQuestions = true;
+        const existingAnswer = myAnswers[q.id] || '';
+        const questionDiv = $('<div class="yearbook-question">');
+        questionDiv.append('<div class="question-label">' + escapeHtml(q.question) + '</div>');
+        questionDiv.append(renderQuestionInput(q, existingAnswer, false));
+        container.append(questionDiv);
+    });
+
+    if (!hasQuestions) $('#no_questions_msg').show();
+}
+
+function renderSurveys() {
+    const container = $('#surveys_container');
+    container.empty();
+    let hasSurveys = false;
+
+    yearbookQuestions.forEach(function(q) {
+        if (!q.anonymous) return;
+        hasSurveys = true;
+        const existingAnswer = myAnswers[q.id] || '';
+        const questionDiv = $('<div class="yearbook-question">');
+        questionDiv.append(
+            '<div class="question-label">' + escapeHtml(q.question) +
+            ' <span class="badge bg-secondary badge-anonymous"><i class="bi bi-incognito"></i> Anonym</span></div>'
+        );
+        questionDiv.append(renderQuestionInput(q, existingAnswer, true));
+        container.append(questionDiv);
+    });
+
+    if (!hasSurveys) $('#no_surveys_msg').show();
+}
+
+function renderQuestionInput(question, existingAnswer, isAnonymous) {
+    const wrapper = $('<div>');
+    const qId = 'yb_q_' + question.id;
+    const saveStatus = $('<span class="save-indicator ms-2">');
+
+    if (question.type === 'text') {
+        const input = $('<input type="text" class="form-control">')
+            .attr('id', qId).attr('maxlength', '2000').val(existingAnswer);
+        wrapper.append(input);
+
+        // Auto-save on input with debounce
+        input.on('input', function() {
+            debounceAnswerSave(question.id, function() {
+                saveAnswer(question.id, input.val(), saveStatus);
+            });
+        });
+        wrapper.append(saveStatus);
+
+    } else if (question.type === 'single_choice') {
+        if (question.options && question.options.length > 15) {
+            wrapper.append(createSearchableSelect(qId, question.options, existingAnswer, function(val) {
+                saveAnswer(question.id, val, saveStatus);
+            }));
+        } else {
+            const select = $('<select class="form-select">').attr('id', qId);
+            select.append('<option value="">-- Bitte wählen --</option>');
+            (question.options || []).forEach(function(opt) {
+                const option = $('<option>').val(opt).text(opt);
+                if (opt === existingAnswer) option.attr('selected', true);
+                select.append(option);
+            });
+            wrapper.append(select);
+
+            // Auto-save on change
+            select.on('change', function() {
+                saveAnswer(question.id, select.val(), saveStatus);
+            });
+        }
+        wrapper.append(saveStatus);
+
+    } else if (question.type === 'multiple_choice') {
+        let selectedValues = [];
+        try {
+            selectedValues = typeof existingAnswer === 'string' && existingAnswer.startsWith('[')
+                ? JSON.parse(existingAnswer) : (Array.isArray(existingAnswer) ? existingAnswer : []);
+        } catch(e) { selectedValues = []; }
+
+        const checkboxContainer = $('<div class="row">');
+        (question.options || []).forEach(function(opt) {
+            const cbId = qId + '_' + opt.replace(/[^a-zA-Z0-9]/g, '_');
+            const isChecked = selectedValues.includes(opt);
+            const col = $('<div class="col-md-6 col-lg-4">');
+            col.append(
+                '<div class="form-check mb-2">' +
+                '  <input class="form-check-input yb-mc-checkbox" type="checkbox" id="' + escapeAttr(cbId) + '"' +
+                '    data-question="' + escapeAttr(question.id) + '" value="' + escapeAttr(opt) + '"' +
+                (isChecked ? ' checked' : '') + '>' +
+                '  <label class="form-check-label" for="' + escapeAttr(cbId) + '">' + escapeHtml(opt) + '</label>' +
+                '</div>'
+            );
+            checkboxContainer.append(col);
+        });
+        wrapper.append(checkboxContainer);
+
+        // Auto-save on checkbox change
+        wrapper.find('.yb-mc-checkbox').on('change', function() {
+            const selected = [];
+            wrapper.find('.yb-mc-checkbox:checked').each(function() { selected.push($(this).val()); });
+            saveAnswer(question.id, selected, saveStatus);
+        });
+        wrapper.append(saveStatus);
+    }
+
+    return wrapper;
+}
+
+function debounceAnswerSave(questionId, callback) {
+    if (answerSaveTimers[questionId]) clearTimeout(answerSaveTimers[questionId]);
+    answerSaveTimers[questionId] = setTimeout(callback, 800);
+}
+
+function createSearchableSelect(id, options, selectedValue, onSelect) {
+    const container = $('<div class="search-select-container">');
+    const input = $('<input type="text" class="form-control search-select-input">')
+        .attr('id', id).attr('placeholder', 'Suchen...').val(selectedValue || '');
+    const dropdown = $('<div class="search-select-dropdown">');
+
+    function renderOptions(filter) {
+        dropdown.empty();
+        const filterLower = (filter || '').toLowerCase();
+        let count = 0;
+        options.forEach(function(opt) {
+            if (filterLower && opt.toLowerCase().indexOf(filterLower) === -1) return;
+            if (count >= 50) return;
+            count++;
+            const optDiv = $('<div class="search-select-option">').text(opt);
+            optDiv.on('mousedown', function(e) {
+                e.preventDefault();
+                input.val(opt);
+                dropdown.hide();
+                if (onSelect) onSelect(opt);
+            });
+            dropdown.append(optDiv);
+        });
+        if (count === 0) dropdown.append('<div class="search-select-option text-body-secondary">Keine Ergebnisse</div>');
+    }
+
+    input.on('focus', function() { renderOptions(input.val()); dropdown.show(); });
+    input.on('input', function() { renderOptions(input.val()); dropdown.show(); });
+    input.on('blur', function() {
+        // Delay hiding to allow mousedown on options to complete
+        setTimeout(function() { dropdown.hide(); }, 200);
+    });
+
+    container.append(input).append(dropdown);
+    return container;
+}
+
+function saveAnswer(questionId, answer, statusEl) {
+    if (statusEl) statusEl.html('<span class="text-body-secondary"><i class="bi bi-arrow-repeat"></i></span>');
+    api_call('/api/yearbook/save_answer', {
+        question_id: questionId, answer: answer
+    }, function(data) {
+        if (data.success) {
+            myAnswers[questionId] = answer;
+            showSaveStatus(statusEl, true);
+        } else { showSaveStatus(statusEl, false, data.error || 'Fehler'); }
+    }, function() { showSaveStatus(statusEl, false, 'Netzwerkfehler'); });
+}
+
+function saveProfile() {
+    const fields = {};
+    yearbookProfileFields.forEach(function(field) {
+        fields[field.id] = $('#yb_profile_' + field.id).val() || '';
+    });
+    const statusEl = $('#profile_save_status');
+    statusEl.html('<span class="text-body-secondary"><i class="bi bi-arrow-repeat"></i> Speichert...</span>');
+    api_call('/api/yearbook/save_profile', { fields: fields }, function(data) {
+        if (data.success) {
+            statusEl.html('<span class="text-success"><i class="bi bi-check-circle"></i> Gespeichert</span>');
+        } else {
+            statusEl.html('<span class="text-danger"><i class="bi bi-x-circle"></i> ' + escapeHtml(data.error || 'Fehler') + '</span>');
+        }
+        setTimeout(function() { statusEl.html(''); }, 3000);
+    }, function() {
+        statusEl.html('<span class="text-danger"><i class="bi bi-x-circle"></i> Netzwerkfehler</span>');
+    });
+}
+
+function showSaveStatus(el, success, errorMsg) {
+    if (!el || !el.length) return;
+    if (success) {
+        el.html('<span class="text-success"><i class="bi bi-check-circle"></i></span>');
+    } else {
+        el.html('<span class="text-danger"><i class="bi bi-x-circle"></i> ' + escapeHtml(errorMsg || 'Fehler') + '</span>');
+    }
+    setTimeout(function() { el.html(''); }, 3000);
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
+}
+function escapeAttr(text) { return escapeHtml(text); }
+</script>

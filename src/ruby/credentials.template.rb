@@ -46,6 +46,42 @@ SUPPORT_EMAIL = 'support@example.com'
 
 GLOBAL_BANNER = nil
 
+# Yearbook Configuration
+YEARBOOK_ENABLED = false
+YEARBOOK_START_AT = nil  # e.g. '2026-01-01T00:00:00' or nil for no start restriction
+YEARBOOK_END_AT = nil    # e.g. '2026-06-30T23:59:59' or nil for no end restriction
+
+YEARBOOK_QUESTIONS = [
+    # {
+    #     id: "late_person",
+    #     type: "single_choice",
+    #     question: "Wer ist am häufigsten zu spät?",
+    #     options: ["Person A", "Person B", "Person C"],
+    #     anonymous: true
+    # },
+    # {
+    #     id: "quote",
+    #     type: "text",
+    #     question: "Dein Motto:",
+    #     anonymous: false
+    # },
+    # {
+    #     id: "best_memory",
+    #     type: "multiple_choice",
+    #     question: "Beste Erinnerungen?",
+    #     options: ["Klassenfahrt", "Abiball", "Projektwoche", "Sportfest"],
+    #     anonymous: false
+    # }
+]
+
+YEARBOOK_PROFILE_FIELDS = [
+    { id: "nickname", label: "Spitzname", type: "text" },
+    { id: "life_motto", label: "Lebensmotto", type: "text" },
+    { id: "future_plans", label: "Zukunftspläne", type: "text" },
+    { id: "best_memory", label: "Beste Erinnerung", type: "text" },
+    { id: "message_to_class", label: "Nachricht an die Stufe", type: "textarea" }
+]
+
 if defined? Mail
     Mail.defaults do
     delivery_method :smtp, {

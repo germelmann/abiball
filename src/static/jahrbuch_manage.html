@@ -1,0 +1,322 @@
+#{site_for_users!}
+
+<div class="container" id="yearbook_manage_unavailable" style="display: none;">
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i>
+        <strong>Das Jahrbuch ist derzeit nicht verfügbar.</strong>
+    </div>
+</div>
+
+<div class="container" id="yearbook_manage_no_permission" style="display: none;">
+    <div class="alert alert-danger">
+        <i class="bi bi-shield-exclamation"></i>
+        <strong>Keine Berechtigung.</strong> Du benötigst die Berechtigung "Jahrbucheinträge ansehen" oder "Jahrbucheinträge verwalten".
+    </div>
+</div>
+
+<div class="container" id="yearbook_manage_content" style="display: none;">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="mb-0"><i class="bi bi-book"></i> Jahrbuch verwalten</h1>
+        <div>
+            <button type="button" class="btn btn-outline-primary me-1" id="export_json_btn" title="Als JSON exportieren">
+                <i class="bi bi-filetype-json"></i> JSON
+            </button>
+            <button type="button" class="btn btn-outline-primary" id="export_csv_btn" title="Als CSV exportieren">
+                <i class="bi bi-filetype-csv"></i> CSV
+            </button>
+        </div>
+    </div>
+
+    <ul class="nav nav-tabs mb-4" id="manageYearbookTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="manage-profiles-tab" data-bs-toggle="tab" data-bs-target="#manage-profiles-section"
+                type="button" role="tab" aria-controls="manage-profiles-section" aria-selected="true">
+                <i class="bi bi-person-badge"></i> Steckbriefe
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="manage-answers-tab" data-bs-toggle="tab" data-bs-target="#manage-answers-section"
+                type="button" role="tab" aria-controls="manage-answers-section" aria-selected="false">
+                <i class="bi bi-chat-square-text"></i> Antworten
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="manage-surveys-tab" data-bs-toggle="tab" data-bs-target="#manage-surveys-section"
+                type="button" role="tab" aria-controls="manage-surveys-section" aria-selected="false">
+                <i class="bi bi-bar-chart"></i> Umfragen (Anonym)
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="manageYearbookTabContent">
+        <div class="tab-pane fade show active" id="manage-profiles-section" role="tabpanel" aria-labelledby="manage-profiles-tab">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0"><i class="bi bi-person-badge"></i> Steckbriefe</h5>
+                    <span class="badge bg-primary" id="profiles_count">0</span>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <input type="text" class="form-control" id="profiles_search" placeholder="Suchen...">
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="profiles_table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Benutzername</th>
+                                    <th>Status</th>
+                                    <th>Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="profiles_table_body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="manage-answers-section" role="tabpanel" aria-labelledby="manage-answers-tab">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="bi bi-chat-square-text"></i> Antworten (namentlich)</h5>
+                </div>
+                <div class="card-body">
+                    <div id="manage_answers_container"></div>
+                    <div id="manage_no_answers" class="text-body-secondary" style="display: none;">
+                        <i class="bi bi-info-circle"></i> Keine namentlichen Fragen konfiguriert.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="manage-surveys-section" role="tabpanel" aria-labelledby="manage-surveys-tab">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="bi bi-bar-chart"></i> Anonyme Umfragen – Ergebnisse</h5>
+                </div>
+                <div class="card-body">
+                    <div id="manage_surveys_container"></div>
+                    <div id="manage_no_surveys" class="text-body-secondary" style="display: none;">
+                        <i class="bi bi-info-circle"></i> Keine anonymen Umfragen konfiguriert.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="api_messages"></div>
+
+<script>
+let manageQuestions = [];
+let manageProfileFields = [];
+let allUserAnswers = {};
+let allProfiles = [];
+
+$(document).ready(function() {
+    loadManageData();
+
+    // Export buttons
+    $('#export_json_btn').on('click', function() { exportData('json'); });
+    $('#export_csv_btn').on('click', function() { exportData('csv'); });
+});
+
+function exportData(format) {
+    window.location.href = '/api/yearbook/export_' + format;
+}
+
+function loadManageData() {
+    api_call('/api/yearbook/get_all_entries', {}, function(data) {
+        if (data.success) {
+            manageQuestions = data.questions || [];
+            allUserAnswers = data.user_answers || {};
+            allProfiles = data.profiles || [];
+
+            $('#yearbook_manage_content').show();
+
+            api_call('/api/yearbook/config', {}, function(configData) {
+                if (configData.success) {
+                    manageProfileFields = configData.profile_fields || [];
+                }
+                renderManageView();
+            }, function() {
+                renderManageView();
+            });
+        } else {
+            $('#yearbook_manage_no_permission').show();
+        }
+    }, function(errorData) {
+        if (errorData && !errorData.success) {
+            $('#yearbook_manage_no_permission').show();
+        } else {
+            $('#yearbook_manage_unavailable').show();
+        }
+    });
+}
+
+function renderManageView() {
+    renderManageProfiles();
+    renderManageAnswers();
+    renderManageSurveys();
+}
+
+function renderManageProfiles() {
+    const tbody = $('#profiles_table_body');
+    tbody.empty();
+
+    allProfiles.forEach(function(profile) {
+        const tr = $('<tr>');
+        tr.append($('<td>').text(profile.name || '-'));
+        tr.append($('<td>').text(profile.username));
+
+        let hasData = false;
+        manageProfileFields.forEach(function(field) {
+            if (profile.profile[field.id] && profile.profile[field.id].trim()) hasData = true;
+        });
+        tr.append($('<td>').html(hasData ?
+            '<span class="badge bg-success">Ausgefüllt</span>' :
+            '<span class="badge bg-secondary">Leer</span>'));
+
+        const actions = $('<td>');
+        const viewBtn = $('<button type="button" class="btn btn-sm btn-outline-primary">')
+            .html('<i class="bi bi-eye"></i>')
+            .attr('title', 'Eintrag ansehen')
+            .on('click', function() { window.location.href = '/jahrbuch_entry/' + encodeURIComponent(profile.username); });
+        actions.append(viewBtn);
+
+        tr.append(actions);
+        tbody.append(tr);
+    });
+
+    $('#profiles_count').text(allProfiles.length);
+
+    $('#profiles_search').off('input').on('input', function() {
+        const term = $(this).val().toLowerCase();
+        tbody.find('tr').each(function() {
+            $(this).toggle($(this).text().toLowerCase().indexOf(term) !== -1);
+        });
+    });
+}
+
+function renderManageAnswers() {
+    const container = $('#manage_answers_container');
+    container.empty();
+    let hasNonAnonymous = false;
+
+    manageQuestions.forEach(function(q) {
+        if (q.anonymous) return;
+        hasNonAnonymous = true;
+
+        const section = $('<div class="mb-4">');
+        section.append('<h6 class="fw-bold">' + escapeHtml(q.question) + '</h6>');
+
+        const answersTable = $('<table class="table table-sm">');
+        answersTable.append('<thead><tr><th>Name</th><th>Antwort</th></tr></thead>');
+        const tbody = $('<tbody>');
+
+        Object.keys(allUserAnswers).forEach(function(username) {
+            if (username === '__anonymous') return;
+            const userData = allUserAnswers[username];
+            if (userData.answers && userData.answers[q.id]) {
+                let answerDisplay = userData.answers[q.id];
+                try {
+                    const parsed = JSON.parse(answerDisplay);
+                    if (Array.isArray(parsed)) answerDisplay = parsed.join(', ');
+                } catch(e) {}
+                tbody.append(
+                    '<tr><td><a href="/jahrbuch_entry/' + encodeURIComponent(username) + '">' + escapeHtml(userData.name || username) + '</a></td><td>' + escapeHtml(answerDisplay) + '</td></tr>'
+                );
+            }
+        });
+
+        if (tbody.children().length === 0) {
+            tbody.append('<tr><td colspan="2" class="text-body-secondary">Noch keine Antworten</td></tr>');
+        }
+
+        answersTable.append(tbody);
+        section.append(answersTable);
+        container.append(section);
+    });
+
+    if (!hasNonAnonymous) $('#manage_no_answers').show();
+}
+
+function renderManageSurveys() {
+    const container = $('#manage_surveys_container');
+    container.empty();
+    let hasAnonymous = false;
+
+    manageQuestions.forEach(function(q) {
+        if (!q.anonymous) return;
+        hasAnonymous = true;
+
+        const section = $('<div class="mb-4">');
+        section.append('<h6 class="fw-bold">' + escapeHtml(q.question) +
+            ' <span class="badge bg-secondary"><i class="bi bi-incognito"></i> Anonym</span></h6>');
+
+        const anonymousAnswers = (allUserAnswers['__anonymous'] || {})[q.id] || [];
+
+        if (q.type === 'single_choice' || q.type === 'multiple_choice') {
+            const voteCounts = {};
+            (q.options || []).forEach(function(opt) { voteCounts[opt] = 0; });
+
+            anonymousAnswers.forEach(function(answer) {
+                try {
+                    const parsed = JSON.parse(answer);
+                    if (Array.isArray(parsed)) {
+                        parsed.forEach(function(a) { voteCounts[a] = (voteCounts[a] || 0) + 1; });
+                    } else {
+                        voteCounts[answer] = (voteCounts[answer] || 0) + 1;
+                    }
+                } catch(e) {
+                    voteCounts[answer] = (voteCounts[answer] || 0) + 1;
+                }
+            });
+
+            const totalVotes = anonymousAnswers.length;
+            const barContainer = $('<div>');
+
+            Object.keys(voteCounts).sort(function(a, b) { return voteCounts[b] - voteCounts[a]; }).forEach(function(opt) {
+                const count = voteCounts[opt];
+                const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+                barContainer.append(
+                    '<div class="d-flex align-items-center mb-2">' +
+                    '  <div style="min-width: 120px;">' + escapeHtml(opt) + '</div>' +
+                    '  <div class="flex-grow-1 mx-2">' +
+                    '    <div class="progress" style="height: 24px;">' +
+                    '      <div class="progress-bar" role="progressbar" style="width: ' + pct + '%">' + pct + '%</div>' +
+                    '    </div>' +
+                    '  </div>' +
+                    '  <div style="min-width: 50px; text-align: right;">' + count + ' Stimmen</div>' +
+                    '</div>'
+                );
+            });
+
+            barContainer.append('<div class="text-body-secondary mt-1"><small>Gesamt: ' + totalVotes + ' Antworten</small></div>');
+            section.append(barContainer);
+
+        } else if (q.type === 'text') {
+            const list = $('<ul class="list-group">');
+            if (anonymousAnswers.length === 0) {
+                list.append('<li class="list-group-item text-body-secondary">Noch keine Antworten</li>');
+            } else {
+                anonymousAnswers.forEach(function(answer) {
+                    list.append('<li class="list-group-item">' + escapeHtml(answer) + '</li>');
+                });
+            }
+            section.append(list);
+        }
+
+        container.append(section);
+    });
+
+    if (!hasAnonymous) $('#manage_no_surveys').show();
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
+}
+</script>

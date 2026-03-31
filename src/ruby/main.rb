@@ -3,6 +3,7 @@ require './include/users.rb'
 require './include/tags.rb'
 require './include/tickets.rb'
 require './include/events.rb'
+require './include/yearbook.rb'
 require './include/log.rb'
 require 'base64'
 require 'cgi'
@@ -199,7 +200,11 @@ class SetupDatabase
             # Permission constraints
             { name: 'permission_name_unique', query: 'CREATE CONSTRAINT permission_name_unique IF NOT EXISTS FOR (p:Permission) REQUIRE p.name IS UNIQUE' },
             # TicketTier constraints
-            { name: 'ticket_tier_id_unique', query: 'CREATE CONSTRAINT ticket_tier_id_unique IF NOT EXISTS FOR (t:TicketTier) REQUIRE t.id IS UNIQUE' }
+            { name: 'ticket_tier_id_unique', query: 'CREATE CONSTRAINT ticket_tier_id_unique IF NOT EXISTS FOR (t:TicketTier) REQUIRE t.id IS UNIQUE' },
+            # YearbookEntry constraints
+            { name: 'yearbook_entry_id_unique', query: 'CREATE CONSTRAINT yearbook_entry_id_unique IF NOT EXISTS FOR (y:YearbookEntry) REQUIRE y.id IS UNIQUE' },
+            # YearbookProfile constraints
+            { name: 'yearbook_profile_id_unique', query: 'CREATE CONSTRAINT yearbook_profile_id_unique IF NOT EXISTS FOR (yp:YearbookProfile) REQUIRE yp.id IS UNIQUE' }
         ]
         
         constraints.each do |constraint|
@@ -716,6 +721,12 @@ class Main < Sinatra::Base
             event_id = $1
             path = '/live_dashboard.html'
             @event_id = event_id
+        end
+
+        if path =~ /^\/jahrbuch_entry\/(.+)$/
+            yb_username = $1
+            path = '/jahrbuch_entry.html'
+            @yearbook_entry_username = yb_username
         end
 
         if path == '/site.webmanifest'

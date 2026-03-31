@@ -9,6 +9,9 @@ class Main < Sinatra::Base
         { key: 'manual_mail_send', icon: 'bi-envelope', label: 'Manuelle E-Mails senden', group: 'Kommunikation', edit: false },
         { key: 'create_invites', icon: 'bi-person-plus', label: 'Einladungen erstellen', group: 'Benutzer verwalten', edit: false },
         { key: 'create_events', icon: 'bi-calendar-plus', label: 'Events erstellen', group: 'Events', edit: false },
+        { key: 'yearbook_create', icon: 'bi-book', label: 'Jahrbucheintrag erstellen', group: 'Jahrbuch', edit: false },
+        { key: 'yearbook_view', icon: 'bi-book', label: 'Jahrbucheinträge ansehen', group: 'Jahrbuch', edit: false },
+        { key: 'yearbook_manage', icon: 'bi-book', label: 'Jahrbucheinträge verwalten', group: 'Jahrbuch', edit: true },
         { key: 'view_logs', icon: 'bi-file-text', label: 'Logs ansehen', group: 'Admin', edit: false },
         { key: 'admin', icon: 'bi-gear', label: 'Admin', group: 'Admin', edit: nil }
     ];
@@ -102,6 +105,14 @@ class Main < Sinatra::Base
                 io.puts '    </a>'
                 io.puts '</li>'
                 
+                if yearbook_accessible? && user_has_permission?("yearbook_create")
+                    io.puts '<li class="nav-item">'
+                    io.puts '    <a class="nav-link" href="/jahrbuch">'
+                    io.puts '        <i class="bi bi-book"></i>&nbsp;Jahrbuch'
+                    io.puts '    </a>'
+                    io.puts '</li>'
+                end
+                
             end
             
             # Administration dropdown
@@ -145,6 +156,10 @@ class Main < Sinatra::Base
             
             if user_has_permission?("view_logs")
                 admin_items << {label: 'Log', icon: 'bi-file-text', url: '/log'}
+            end
+
+            if user_has_permission?("yearbook_view") || user_has_permission?("yearbook_manage")
+                admin_items << {label: 'Jahrbuch verwalten', icon: 'bi-book', url: '/jahrbuch_manage'}
             end
 
             if user_has_permission?("admin")

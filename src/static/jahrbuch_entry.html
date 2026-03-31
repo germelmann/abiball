@@ -1,0 +1,357 @@
+#{site_for_users!}
+
+<div class="container" id="entry_loading">
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-2 text-body-secondary">Lade Jahrbucheintrag...</p>
+    </div>
+</div>
+
+<div class="container" id="entry_error" style="display: none;">
+    <div class="alert alert-danger">
+        <i class="bi bi-exclamation-triangle"></i>
+        <strong id="entry_error_msg">Eintrag konnte nicht geladen werden.</strong>
+    </div>
+    <a href="/jahrbuch_manage" class="btn btn-outline-primary"><i class="bi bi-arrow-left"></i> Zurück</a>
+</div>
+
+<div class="container" id="entry_content" style="display: none;">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="mb-0"><i class="bi bi-person-badge"></i> <span id="entry_user_name"></span></h1>
+        <a href="/jahrbuch_manage" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Zurück</a>
+    </div>
+
+    <!-- Profile / Steckbrief -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0"><i class="bi bi-person-badge"></i> Steckbrief</h5>
+            <button type="button" class="btn btn-sm btn-outline-warning edit-btn" id="edit_profile_btn" style="display:none;">
+                <i class="bi bi-pencil"></i> Bearbeiten
+            </button>
+        </div>
+        <div class="card-body" id="entry_profile_container">
+            <p class="text-body-secondary">Kein Steckbrief vorhanden.</p>
+        </div>
+    </div>
+
+    <!-- Answers (non-anonymous) -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0"><i class="bi bi-chat-square-text"></i> Antworten</h5>
+            <button type="button" class="btn btn-sm btn-outline-warning edit-btn" id="edit_answers_btn" style="display:none;">
+                <i class="bi bi-pencil"></i> Bearbeiten
+            </button>
+        </div>
+        <div class="card-body" id="entry_answers_container">
+            <p class="text-body-secondary">Keine Antworten vorhanden.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Profile Modal -->
+<div class="modal fade" id="editProfileModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> Steckbrief bearbeiten</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <h6 id="edit_profile_user_label"></h6>
+                <div id="edit_profile_fields_container"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="save_edit_profile_btn">
+                    <i class="bi bi-save"></i> Speichern
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Answers Modal -->
+<div class="modal fade" id="editAnswersModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> Antworten bearbeiten</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <h6 id="edit_answers_user_label"></h6>
+                <div id="edit_answers_container"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="api_messages"></div>
+
+<style>
+    .entry-field-row {
+        border-bottom: 1px solid var(--bs-border-color);
+        padding: 0.5rem 0;
+    }
+    .entry-field-row:last-child { border-bottom: none; }
+    .save-indicator { display: inline-block; }
+</style>
+
+<script>
+const pathParts = window.location.pathname.split('/');
+const entryUsername = decodeURIComponent(pathParts[pathParts.length - 1]);
+
+let entryData = null;
+
+$(document).ready(function() {
+    if (!entryUsername) {
+        showError('Kein Benutzer angegeben.');
+        return;
+    }
+    loadEntry();
+});
+
+function showError(msg) {
+    $('#entry_loading').hide();
+    $('#entry_error_msg').text(msg);
+    $('#entry_error').show();
+}
+
+function loadEntry() {
+    api_call('/api/yearbook/get_user_entry', { target_username: entryUsername }, function(data) {
+        $('#entry_loading').hide();
+        if (data.success) {
+            entryData = data;
+            renderEntry(data);
+        } else {
+            showError(data.error || 'Eintrag konnte nicht geladen werden.');
+        }
+    }, function() {
+        showError('Fehler beim Laden des Eintrags.');
+    });
+}
+
+function renderEntry(data) {
+    $('#entry_user_name').text(data.name + ' (' + data.username + ')');
+    $('#entry_content').show();
+
+    // Show edit buttons if user has yearbook_manage permission
+    if (data.can_manage) {
+        $('.edit-btn').show();
+        $('#edit_profile_btn').off('click').on('click', function() { openEditProfileModal(); });
+        $('#edit_answers_btn').off('click').on('click', function() { openEditAnswersModal(); });
+    }
+
+    renderProfile(data);
+    renderAnswers(data);
+}
+
+function renderProfile(data) {
+    const profileContainer = $('#entry_profile_container');
+    const profileFields = data.profile_fields || [];
+    const profile = data.profile || {};
+    let hasProfile = false;
+
+    let profileHtml = '';
+    profileFields.forEach(function(field) {
+        const val = profile[field.id] || '';
+        if (val) hasProfile = true;
+        profileHtml += '<div class="entry-field-row"><strong>' + escapeHtml(field.label) + ':</strong> ' +
+            (val ? escapeHtml(val) : '<span class="text-body-secondary">–</span>') + '</div>';
+    });
+
+    if (hasProfile || profileFields.length > 0) {
+        profileContainer.html(profileHtml);
+    }
+}
+
+function renderAnswers(data) {
+    const answersContainer = $('#entry_answers_container');
+    const questions = data.questions || [];
+    const answers = data.answers || {};
+    let hasAnswers = false;
+
+    let answersHtml = '';
+    questions.forEach(function(q) {
+        if (q.anonymous) return;
+        let answer = answers[q.id] || '';
+        if (!answer) return;
+        hasAnswers = true;
+
+        let displayAnswer = answer;
+        try {
+            const parsed = JSON.parse(answer);
+            if (Array.isArray(parsed)) displayAnswer = parsed.join(', ');
+        } catch(e) {}
+
+        answersHtml += '<div class="entry-field-row"><strong>' + escapeHtml(q.question) + ':</strong> ' + escapeHtml(displayAnswer) + '</div>';
+    });
+
+    if (hasAnswers) {
+        answersContainer.html(answersHtml);
+    }
+}
+
+// --- Edit Profile ---
+
+function openEditProfileModal() {
+    const data = entryData;
+    const profileFields = data.profile_fields || [];
+    const profile = data.profile || {};
+
+    $('#edit_profile_user_label').text(data.name + ' (' + data.username + ')');
+    const container = $('#edit_profile_fields_container');
+    container.empty();
+
+    profileFields.forEach(function(field) {
+        const val = profile[field.id] || '';
+        let inputHtml;
+        if (field.type === 'textarea') {
+            inputHtml = '<textarea class="form-control edit-profile-field" data-field="' + escapeAttr(field.id) +
+                '" rows="3" maxlength="2000">' + escapeHtml(val) + '</textarea>';
+        } else {
+            inputHtml = '<input type="text" class="form-control edit-profile-field" data-field="' + escapeAttr(field.id) +
+                '" value="' + escapeAttr(val) + '" maxlength="500">';
+        }
+        container.append(
+            '<div class="mb-3"><label class="form-label fw-semibold">' + escapeHtml(field.label) + '</label>' + inputHtml + '</div>'
+        );
+    });
+
+    $('#save_edit_profile_btn').off('click').on('click', function() {
+        const fields = {};
+        container.find('.edit-profile-field').each(function() {
+            fields[$(this).data('field')] = $(this).val() || '';
+        });
+
+        api_call('/api/yearbook/admin_save_profile', {
+            target_username: data.username,
+            fields: fields
+        }, function(resp) {
+            if (resp.success) {
+                $('#editProfileModal').modal('hide');
+                loadEntry();
+            } else {
+                alert('Fehler: ' + (resp.error || 'Unbekannter Fehler'));
+            }
+        });
+    });
+
+    new bootstrap.Modal($('#editProfileModal')[0]).show();
+}
+
+// --- Edit Answers ---
+
+function openEditAnswersModal() {
+    const data = entryData;
+    const questions = data.questions || [];
+    const answers = data.answers || {};
+
+    $('#edit_answers_user_label').text(data.name + ' (' + data.username + ')');
+    const container = $('#edit_answers_container');
+    container.empty();
+
+    questions.forEach(function(q) {
+        if (q.anonymous) return;
+
+        const qDiv = $('<div class="mb-4">');
+        qDiv.append('<label class="form-label fw-semibold">' + escapeHtml(q.question) + '</label>');
+
+        const existingAnswer = answers[q.id] || '';
+        const saveStatus = $('<span class="save-indicator ms-2">');
+
+        if (q.type === 'text') {
+            const input = $('<input type="text" class="form-control">')
+                .attr('maxlength', '2000').val(existingAnswer);
+            qDiv.append(input);
+            input.on('change', function() {
+                adminSaveAnswer(data.username, q.id, input.val(), saveStatus);
+            });
+        } else if (q.type === 'single_choice') {
+            const select = $('<select class="form-select">');
+            select.append('<option value="">-- Bitte wählen --</option>');
+            (q.options || []).forEach(function(opt) {
+                const option = $('<option>').val(opt).text(opt);
+                if (opt === existingAnswer) option.attr('selected', true);
+                select.append(option);
+            });
+            qDiv.append(select);
+            select.on('change', function() {
+                adminSaveAnswer(data.username, q.id, select.val(), saveStatus);
+            });
+        } else if (q.type === 'multiple_choice') {
+            let selectedValues = [];
+            try {
+                selectedValues = typeof existingAnswer === 'string' && existingAnswer.startsWith('[')
+                    ? JSON.parse(existingAnswer) : (Array.isArray(existingAnswer) ? existingAnswer : []);
+            } catch(e) { selectedValues = []; }
+
+            const checkboxContainer = $('<div class="row">');
+            (q.options || []).forEach(function(opt) {
+                const cbId = 'edit_' + q.id + '_' + opt.replace(/[^a-zA-Z0-9]/g, '_');
+                const isChecked = selectedValues.includes(opt);
+                const col = $('<div class="col-md-6 col-lg-4">');
+                col.append(
+                    '<div class="form-check mb-2">' +
+                    '  <input class="form-check-input edit-mc-cb" type="checkbox" id="' + escapeAttr(cbId) + '"' +
+                    '    data-question="' + escapeAttr(q.id) + '" value="' + escapeAttr(opt) + '"' +
+                    (isChecked ? ' checked' : '') + '>' +
+                    '  <label class="form-check-label" for="' + escapeAttr(cbId) + '">' + escapeHtml(opt) + '</label>' +
+                    '</div>'
+                );
+                checkboxContainer.append(col);
+            });
+            qDiv.append(checkboxContainer);
+            qDiv.find('.edit-mc-cb').on('change', function() {
+                const selected = [];
+                qDiv.find('.edit-mc-cb:checked').each(function() { selected.push($(this).val()); });
+                adminSaveAnswer(data.username, q.id, selected, saveStatus);
+            });
+        }
+
+        qDiv.append(saveStatus);
+        container.append(qDiv);
+    });
+
+    new bootstrap.Modal($('#editAnswersModal')[0]).show();
+}
+
+function adminSaveAnswer(username, questionId, answer, statusEl) {
+    if (statusEl) statusEl.html('<span class="text-body-secondary"><i class="bi bi-arrow-repeat"></i></span>');
+    api_call('/api/yearbook/admin_save_answer', {
+        target_username: username,
+        question_id: questionId,
+        answer: answer
+    }, function(resp) {
+        if (resp.success) {
+            // Update local data
+            if (entryData) entryData.answers[questionId] = (Array.isArray(answer) ? JSON.stringify(answer) : answer);
+            showSaveStatus(statusEl, true);
+        } else {
+            showSaveStatus(statusEl, false, resp.error || 'Fehler');
+        }
+    }, function() {
+        showSaveStatus(statusEl, false, 'Netzwerkfehler');
+    });
+}
+
+function showSaveStatus(el, success, errorMsg) {
+    if (!el || !el.length) return;
+    if (success) {
+        el.html('<span class="text-success"><i class="bi bi-check-circle"></i></span>');
+    } else {
+        el.html('<span class="text-danger"><i class="bi bi-x-circle"></i> ' + escapeHtml(errorMsg || 'Fehler') + '</span>');
+    }
+    setTimeout(function() { el.html(''); }, 3000);
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
+}
+function escapeAttr(text) { return escapeHtml(text); }
+</script>
