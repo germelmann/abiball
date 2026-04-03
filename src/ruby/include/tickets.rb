@@ -693,7 +693,51 @@ class Main < Sinatra::Base
             payment_status = result[:payment_info][:status]
             
             begin
-                if payment_status == 'paid' || payment_status == 'overpaid'
+                if amount < 0
+                    # Negative amount (correction/refund) - send negative_payment_recorded email
+                    rendered = render_manual_mail_template('negative_payment_recorded', {
+                        'NAME' => order['user_name'] || 'Nutzer',
+                        'ORDER_ID' => order['order_id'],
+                        'PAYMENT_AMOUNT' => sprintf("%.2f", amount.to_f),
+                        'TOTAL_PRICE' => sprintf("%.2f", order['total_price'] || 0),
+                        'TOTAL_PAID' => sprintf("%.2f", result[:payment_info][:total_paid]),
+                        'REMAINING' => sprintf("%.2f", result[:payment_info][:remaining]),
+                        'REFERENCE' => order['payment_reference'] || 'N/A'
+                    })
+                    if rendered
+                        send_manual_mail(
+                            to_email: order['user_email'],
+                            subject: rendered[:subject],
+                            body: rendered[:body],
+                            template_key: 'negative_payment_recorded',
+                            sender_username: @session_user[:username],
+                            recipient_username: order['user_username'],
+                            order_id: order_id
+                        )
+                    end
+                elsif payment_status == 'overpaid'
+                    # Overpayment - send overpayment_received email
+                    rendered = render_manual_mail_template('overpayment_received', {
+                        'NAME' => order['user_name'] || 'Nutzer',
+                        'ORDER_ID' => order['order_id'],
+                        'PAYMENT_AMOUNT' => sprintf("%.2f", amount.to_f),
+                        'TOTAL_PRICE' => sprintf("%.2f", order['total_price'] || 0),
+                        'TOTAL_PAID' => sprintf("%.2f", result[:payment_info][:total_paid]),
+                        'REFUND' => sprintf("%.2f", result[:payment_info][:overpayment]),
+                        'REFERENCE' => order['payment_reference'] || 'N/A'
+                    })
+                    if rendered
+                        send_manual_mail(
+                            to_email: order['user_email'],
+                            subject: rendered[:subject],
+                            body: rendered[:body],
+                            template_key: 'overpayment_received',
+                            sender_username: @session_user[:username],
+                            recipient_username: order['user_username'],
+                            order_id: order_id
+                        )
+                    end
+                elsif payment_status == 'paid'
                     # Fully paid - send payment_received email
                     rendered = render_manual_mail_template('payment_received', {
                         'NAME' => order['user_name'] || 'Nutzer',

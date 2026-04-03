@@ -238,6 +238,7 @@ class Main < Sinatra::Base
                    u.phone AS phone,
                    COALESCE(u.email_verified, false) AS email_verified,
                    COALESCE(u.scanner_only, false) AS scanner_only,
+                   COALESCE(u.disabled, false) AS disabled,
                    permissions,
                    order_count
         END_OF_QUERY
@@ -257,6 +258,64 @@ class Main < Sinatra::Base
         END_OF_QUERY
         log("Benutzer #{username} gelöscht")
         respond(success: true)
+    end
+
+    # Enable or disable a user account
+    post "/api/toggle_user_disabled" do
+        require_user_with_permission!("manage_users")
+        data = parse_request_data(required_keys: [:username, :disabled], optional_keys: [:reason])
+
+        target_username = data[:username]
+        disabled = data[:disabled] ? true : false
+        reason = data[:reason] || ''
+
+        # Prevent disabling yourself
+        if target_username == @session_user[:username]
+            respond(success: false, error: "Du kannst dich nicht selbst sperren")
+            return
+        end
+
+        # Check if user exists
+        user_exists = neo4j_query(<<~END_OF_QUERY, {username: target_username})
+            MATCH (u:User {username: $username})
+            RETURN u.username AS username
+        END_OF_QUERY
+
+        if user_exists.empty?
+            respond(success: false, error: "Benutzer nicht gefunden")
+            return
+        end
+
+        if disabled
+            # Disable user and destroy all their sessions
+            neo4j_query(<<~END_OF_QUERY, {username: target_username, timestamp: DateTime.now.to_s, reason: reason})
+                MATCH (u:User {username: $username})
+                SET u.disabled = true,
+                    u.disabled_at = $timestamp,
+                    u.disabled_reason = $reason,
+                    u.failed_login_attempts = 0
+            END_OF_QUERY
+            neo4j_query(<<~END_OF_QUERY, {username: target_username})
+                MATCH (s:Session)-[:FOR]->(u:User {username: $username})
+                DETACH DELETE s
+            END_OF_QUERY
+            neo4j_query(<<~END_OF_QUERY, {username: target_username})
+                MATCH (r:LoginRequest)-[:FOR]->(u:User {username: $username})
+                DETACH DELETE r
+            END_OF_QUERY
+            log("Benutzer #{target_username} gesperrt. Grund: #{reason.empty? ? 'Kein Grund angegeben' : reason}")
+        else
+            # Enable user
+            neo4j_query(<<~END_OF_QUERY, {username: target_username})
+                MATCH (u:User {username: $username})
+                SET u.disabled = false,
+                    u.failed_login_attempts = 0
+                REMOVE u.disabled_at, u.disabled_reason
+            END_OF_QUERY
+            log("Benutzer #{target_username} entsperrt")
+        end
+
+        respond(success: true, message: disabled ? "Benutzer wurde gesperrt" : "Benutzer wurde entsperrt")
     end
 
     post "/api/impersonate_user" do
@@ -353,20 +412,25 @@ class Main < Sinatra::Base
     end
 
     def require_user_with_permission!(permission)
-        assert(user_has_permission?(permission))
+        unless user_has_permission?(permission)
+            who = @session_user ? @session_user[:username] : 'Unbekannt'
+            log("Unerlaubter Zugriff von #{who} auf #{request.path_info} (benötigt: #{permission})")
+            assert(false, "insufficient_permissions")
+        end
     end
 
     def site_for_user_with_permission!(permission)
         unless user_has_permission?(permission)
+            who = @session_user ? @session_user[:username] : 'Nicht angemeldet'
+            log("Zugriffsversuch auf Seite #{request.path_info} von #{who} fehlgeschlagen (benötigt: #{permission})")
             redirect "#{WEB_ROOT}/no_permission"
-            log("Zugriffsversuch auf #{permission} fehlgeschlagen.")
         end
     end
 
     def site_for_users!
         unless user_logged_in?
+            log("Zugriffsversuch auf geschützte Seite #{request.path_info} ohne Anmeldung")
             redirect "#{WEB_ROOT}/no_permission"
-            log("Zugriffsversuch auf geschützte Seite fehlgeschlagen.")
         end
     end
     
@@ -386,8 +450,9 @@ class Main < Sinatra::Base
     def site_for_scanner_or_permission!(permission)
         # Allow access if user is scanner-only OR has the required permission
         unless user_logged_in? && (user_is_scanner_only? || user_has_permission?(permission))
+            who = @session_user ? @session_user[:username] : 'Nicht angemeldet'
+            log("Zugriffsversuch auf Seite #{request.path_info} von #{who} fehlgeschlagen (benötigt: #{permission} oder Scanner)")
             redirect "#{WEB_ROOT}/no_permission"
-            log("Zugriffsversuch auf #{permission} fehlgeschlagen.")
         end
     end
     
@@ -845,6 +910,9 @@ class Main < Sinatra::Base
                    COALESCE(u.email_verified, false) AS email_verified,
                    COALESCE(u.scanner_only, false) AS scanner_only,
                    COALESCE(u.admin, false) AS admin,
+                   COALESCE(u.disabled, false) AS disabled,
+                   u.disabled_reason AS disabled_reason,
+                   COALESCE(u.failed_login_attempts, 0) AS failed_login_attempts,
                    permissions,
                    COLLECT(DISTINCT {name: t.name, color: t.color}) AS tags
         END_OF_QUERY

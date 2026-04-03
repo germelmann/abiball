@@ -120,6 +120,16 @@
                     <h5 class='card-title mb-0'><i class='bi bi-gear'></i> Einstellungen & Berechtigungen</h5>
                 </div>
                 <div class='card-body'>
+                    <div class='row mb-3' #{user_has_permission?("manage_users") ? "" : "style='display:none'"}>
+                        <div class='col-sm-5'><strong>Konto-Status:</strong></div>
+                        <div class='col-sm-7'>
+                            <span id='user_disabled_status' class='badge'>-</span>
+                            <button type='button' class='btn btn-sm ms-2' id='toggle_disabled_btn' style='display:none;'>
+                                <i class='bi bi-shield-exclamation'></i> <span id='toggle_disabled_label'>Sperren</span>
+                            </button>
+                            <div id='disabled_reason_display' class='text-muted small mt-1' style='display:none;'></div>
+                        </div>
+                    </div>
                     <div class='row mb-3'>
                         <div class='col-sm-5'><strong>Scanner-Modus:</strong></div>
                         <div class='col-sm-7'>
@@ -501,6 +511,27 @@ function loadUserDetails() {
             } else {
                 adminBadge.text('Nein').removeClass('bg-danger').addClass('bg-secondary');
             }
+
+            // Disabled/Banned status
+            const disabledBadge = $('#user_disabled_status');
+            const toggleBtn = $('#toggle_disabled_btn');
+            const toggleLabel = $('#toggle_disabled_label');
+            const reasonDisplay = $('#disabled_reason_display');
+            if (user.disabled) {
+                disabledBadge.text('Gesperrt').removeClass('bg-success').addClass('bg-danger');
+                toggleBtn.show().removeClass('btn-danger').addClass('btn-success');
+                toggleLabel.text('Entsperren');
+                if (user.disabled_reason) {
+                    reasonDisplay.show().html('<i class="bi bi-info-circle"></i> Grund: ' + escapeHtml(user.disabled_reason));
+                } else {
+                    reasonDisplay.hide();
+                }
+            } else {
+                disabledBadge.text('Aktiv').removeClass('bg-danger').addClass('bg-success');
+                toggleBtn.show().removeClass('btn-success').addClass('btn-danger');
+                toggleLabel.text('Sperren');
+                reasonDisplay.hide();
+            }
             
             // Permissions
             if (currentUserData && currentUserData.permissions) {
@@ -792,6 +823,53 @@ $('#delete_user_btn').on('click', function() {
                 showTemplateModal('Fehler', 'Netzwerkfehler beim Löschen', 'OK', 'btn-secondary', '', '', function() {});
             });
         });
+});
+
+// Toggle user disabled/enabled status
+$('#toggle_disabled_btn').on('click', function() {
+    if (!currentUsername || !currentUserData) return;
+    
+    const isCurrentlyDisabled = currentUserData.disabled;
+    
+    if (isCurrentlyDisabled) {
+        // Enable user
+        showTemplateModal('Benutzer entsperren', 
+            `Möchtest du den Benutzer "${currentUserData.name}" wieder entsperren?`,
+            'Ja, entsperren', 'btn-success', 'Abbrechen', 'btn-secondary', function() {
+                api_call('/api/toggle_user_disabled', { username: currentUsername, disabled: false }, function(response) {
+                    if (response.success) {
+                        showTemplateModal('Erfolg', 'Benutzer wurde entsperrt', 'OK', 'btn-success', '', '', function() {
+                            loadUserDetails();
+                        });
+                    } else {
+                        showTemplateModal('Fehler', response.error || 'Unbekannter Fehler', 'OK', 'btn-secondary', '', '', function() {});
+                    }
+                });
+            });
+    } else {
+        // Disable user - ask for reason
+        const reasonHtml = `
+            <p>Möchtest du den Benutzer "${escapeHtml(currentUserData.name)}" sperren?</p>
+            <p>Der Benutzer wird sofort abgemeldet und kann sich nicht mehr anmelden.</p>
+            <div class="mb-3">
+                <label for="disable_reason" class="form-label">Grund (optional):</label>
+                <input type="text" class="form-control" id="disable_reason" placeholder="z.B. Zu viele fehlgeschlagene Login-Versuche">
+            </div>
+        `;
+        showTemplateModal('Benutzer sperren', reasonHtml,
+            'Ja, sperren', 'btn-danger', 'Abbrechen', 'btn-secondary', function() {
+                const reason = $('#disable_reason').val() || '';
+                api_call('/api/toggle_user_disabled', { username: currentUsername, disabled: true, reason: reason }, function(response) {
+                    if (response.success) {
+                        showTemplateModal('Erfolg', 'Benutzer wurde gesperrt', 'OK', 'btn-success', '', '', function() {
+                            loadUserDetails();
+                        });
+                    } else {
+                        showTemplateModal('Fehler', response.error || 'Unbekannter Fehler', 'OK', 'btn-secondary', '', '', function() {});
+                    }
+                });
+            });
+    }
 });
 
 // Impersonate user button handler

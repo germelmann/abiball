@@ -135,12 +135,19 @@
                 for (let user of data.permissions) {
                     let row = $('<tr>');
                     
-                    // Highlight users without orders using Bootstrap table-warning class
-                    if (user.order_count === 0) {
+                    // Highlight disabled users with danger, users without orders with warning
+                    if (user.disabled) {
+                        row.addClass('table-danger');
+                    } else if (user.order_count === 0) {
                         row.addClass('table-warning');
                     }
                     
-                    row.append($('<td>').text(user.name));
+                    // Name with disabled badge
+                    let nameHtml = escapeHtml(user.name);
+                    if (user.disabled) {
+                        nameHtml += ' <span class="badge bg-danger"><i class="bi bi-shield-exclamation"></i> Gesperrt</span>';
+                    }
+                    row.append($('<td>').html(nameHtml));
                     row.append($('<td>').text(user.username || ''));
                     row.append($('<td>').text(user.email));
                     row.append($('<td>').text(user.phone || ''));

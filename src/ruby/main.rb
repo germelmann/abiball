@@ -337,12 +337,22 @@ class Main < Sinatra::Base
                             user = results.first['u']
                             session_expiry = session[:expires]
                             if DateTime.parse(session_expiry) > DateTime.now
-                                @session_user = {
-                                    :email => results.first['u'][:email].downcase,
-                                    :name => results.first['u'][:name],
-                                    :admin => results.first['u'][:admin],
-                                    :username => results.first['u'][:username],
-                                }
+                                # Check if user is disabled
+                                if user[:disabled]
+                                    # User is disabled, destroy session and don't log them in
+                                    neo4j_query(<<~END_OF_QUERY, :sid => first_sid)
+                                        MATCH (s:Session {sid: $sid})
+                                        DETACH DELETE s;
+                                    END_OF_QUERY
+                                    @session_user = nil
+                                else
+                                    @session_user = {
+                                        :email => results.first['u'][:email].downcase,
+                                        :name => results.first['u'][:name],
+                                        :admin => results.first['u'][:admin],
+                                        :username => results.first['u'][:username],
+                                    }
+                                end
                             end
                         rescue
                             # something went wrong, delete the session
@@ -377,11 +387,18 @@ class Main < Sinatra::Base
 
 
     def require_user!
-        assert(user_logged_in?)
+        unless user_logged_in?
+            log("Unautorisierter API-Zugriff auf #{request.path_info}")
+            assert(false, "not_logged_in")
+        end
     end
 
     def require_admin!
-        assert(admin_logged_in?)
+        unless admin_logged_in?
+            who = @session_user ? @session_user[:username] : 'Unbekannt'
+            log("Unerlaubter Admin-Zugriff von #{who} auf #{request.path_info}")
+            assert(false, "not_admin")
+        end
     end
 
     def require_chef!
@@ -393,21 +410,35 @@ class Main < Sinatra::Base
         email = data[:username].downcase
         STDERR.puts "Login request for #{email}"
 
+        # Check if user exists and is not disabled
+        user = neo4j_query(<<~END_OF_QUERY, {:email => email}).first
+            MATCH (u:User {email: $email})
+            RETURN u.email AS email, u.name AS name, u.username AS username,
+                   COALESCE(u.disabled, false) AS disabled;
+        END_OF_QUERY
+
+        unless user
+            # Don't reveal that user doesn't exist - use generic delay
+            sleep(3.0)
+            respond(:success => false, :error => 'login_failed')
+            return
+        end
+
+        if user['disabled']
+            log("Login-Versuch von gesperrtem Benutzer: #{email}")
+            respond(:success => false, :error => 'user_disabled')
+            return
+        end
+
+        name = user['name'] || 'Nutzer'
+        username = user['username'] || 'Benutzer'
+
         tag = RandomTag::generate(12)
         srand(Digest::SHA2.hexdigest(LOGIN_CODE_SALT).to_i + (Time.now.to_f * 1000000).to_i)
         random_code = (0..5).map { |x| rand(10).to_s }.join('')
         random_code = '123456' if DEVELOPMENT && !SEND_MAILS_IN_DEVELOPMENT
 
         log("Code #{random_code} für #{email}")
-
-        # Verify user exists by email
-        user = neo4j_query_expect_one(<<~END_OF_QUERY, {:email => email})
-            MATCH (u:User {email: $email})
-            RETURN u.email, u.name, u.username;
-        END_OF_QUERY
-
-        name = user['u.name'] || 'Nutzer'
-        username = user['u.username'] || 'Benutzer'
 
         STDERR.puts "Sending code #{random_code} to #{email}"
 
@@ -488,6 +519,7 @@ class Main < Sinatra::Base
             'refund' => 'Rückerstattung',
             'datenschutz' => 'Datenschutz',
             'impressum' => 'Impressum',
+            'account_banned' => 'Konto gesperrt',
             'other' => 'Sonstiges'
         }
 
@@ -650,10 +682,80 @@ class Main < Sinatra::Base
             code = rest[1]
             begin
                 STDERR.puts "Trying to log in with tag #{tag} and code #{code}"
-                username = neo4j_query_expect_one(<<~END_OF_QUERY, {:tag => tag, :code => code})['username']
-                    MATCH (r:LoginRequest {tag: $tag, code: $code})-[:FOR]->(u:User)
-                    RETURN u.username AS username;
+
+                # Find the login request and associated user
+                login_result = neo4j_query(<<~END_OF_QUERY, {:tag => tag, :code => code}).first
+                    MATCH (r:LoginRequest {tag: $tag})-[:FOR]->(u:User)
+                    RETURN u.username AS username, r.code AS stored_code,
+                           COALESCE(u.disabled, false) AS disabled,
+                           COALESCE(u.failed_login_attempts, 0) AS failed_login_attempts;
                 END_OF_QUERY
+
+                if login_result.nil?
+                    STDERR.puts "Login request not found for tag #{tag}"
+                    redirect "#{WEB_ROOT}/login", 302
+                    return
+                end
+
+                # Check if user is disabled/banned
+                if login_result['disabled']
+                    log("Login-Versuch von gesperrtem Benutzer: #{login_result['username']}")
+                    # Delete the login request
+                    neo4j_query(<<~END_OF_QUERY, {:tag => tag})
+                        MATCH (r:LoginRequest {tag: $tag})
+                        DETACH DELETE r;
+                    END_OF_QUERY
+                    redirect "#{WEB_ROOT}/banned", 302
+                    return
+                end
+
+                # Verify the code matches
+                if login_result['stored_code'] != code
+                    # Increment failed login attempts
+                    new_attempts = (login_result['failed_login_attempts'] || 0) + 1
+                    username = login_result['username']
+
+                    if new_attempts >= MAX_LOGIN_ATTEMPTS
+                        # Ban the user
+                        neo4j_query(<<~END_OF_QUERY, {:username => username, :timestamp => DateTime.now.to_s})
+                            MATCH (u:User {username: $username})
+                            SET u.disabled = true,
+                                u.disabled_at = $timestamp,
+                                u.disabled_reason = 'Zu viele fehlgeschlagene Login-Versuche',
+                                u.failed_login_attempts = 0
+                        END_OF_QUERY
+                        # Delete all sessions for this user
+                        neo4j_query(<<~END_OF_QUERY, {:username => username})
+                            MATCH (s:Session)-[:FOR]->(u:User {username: $username})
+                            DETACH DELETE s
+                        END_OF_QUERY
+                        # Delete all login requests for this user
+                        neo4j_query(<<~END_OF_QUERY, {:username => username})
+                            MATCH (r:LoginRequest)-[:FOR]->(u:User {username: $username})
+                            DETACH DELETE r
+                        END_OF_QUERY
+                        log("Benutzer #{username} wurde nach #{new_attempts} fehlgeschlagenen Login-Versuchen automatisch gesperrt")
+                        redirect "#{WEB_ROOT}/banned", 302
+                        return
+                    else
+                        neo4j_query(<<~END_OF_QUERY, {:username => username, :attempts => new_attempts})
+                            MATCH (u:User {username: $username})
+                            SET u.failed_login_attempts = $attempts
+                        END_OF_QUERY
+                        log("Fehlgeschlagener Login-Versuch für #{username} (#{new_attempts}/#{MAX_LOGIN_ATTEMPTS})")
+                    end
+                    redirect "#{WEB_ROOT}/login", 302
+                    return
+                end
+
+                username = login_result['username']
+
+                # Successful login - reset failed attempts
+                neo4j_query(<<~END_OF_QUERY, {:username => username})
+                    MATCH (u:User {username: $username})
+                    SET u.failed_login_attempts = 0
+                END_OF_QUERY
+
                 neo4j_query(<<~END_OF_QUERY, {:tag => tag, :code => code})
                     MATCH (r:LoginRequest {tag: $tag, code: $code})-[:FOR]->(u:User)
                     DETACH DELETE r;

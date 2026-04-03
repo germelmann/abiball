@@ -230,11 +230,23 @@
                 <button type="button" class="btn btn-outline-success manual-mail-btn" data-template="payment_received">
                     <i class="bi bi-envelope"></i> Zahlung eingegangen <span class="badge bg-secondary mail-counter" data-template="payment_received">0</span>
                 </button>
+                <button type="button" class="btn btn-outline-success manual-mail-btn" data-template="partial_payment_received">
+                    <i class="bi bi-envelope"></i> Teilzahlung eingegangen <span class="badge bg-secondary mail-counter" data-template="partial_payment_received">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-success manual-mail-btn" data-template="overpayment_received">
+                    <i class="bi bi-envelope"></i> Überzahlung eingegangen <span class="badge bg-secondary mail-counter" data-template="overpayment_received">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-warning manual-mail-btn" data-template="negative_payment_recorded">
+                    <i class="bi bi-envelope"></i> Korrektur/Rückbuchung <span class="badge bg-secondary mail-counter" data-template="negative_payment_recorded">0</span>
+                </button>
                 <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled">
                     <i class="bi bi-envelope"></i> Bestellung storniert <span class="badge bg-secondary mail-counter" data-template="order_cancelled">0</span>
                 </button>
                 <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled_user_request">
                     <i class="bi bi-envelope"></i> Storniert (auf Wunsch) <span class="badge bg-secondary mail-counter" data-template="order_cancelled_user_request">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-danger manual-mail-btn" data-template="order_cancelled_no_payment">
+                    <i class="bi bi-envelope"></i> Storniert (keine Zahlung) <span class="badge bg-secondary mail-counter" data-template="order_cancelled_no_payment">0</span>
                 </button>
                 <button type="button" class="btn btn-outline-info manual-mail-btn" data-template="order_reminder_1">
                     <i class="bi bi-envelope"></i> Erinnerung 1 <span class="badge bg-secondary mail-counter" data-template="order_reminder_1">0</span>
@@ -248,8 +260,14 @@
                 <button type="button" class="btn btn-outline-secondary manual-mail-btn" data-template="order_adjusted_user_request">
                     <i class="bi bi-envelope"></i> Angepasst (auf Wunsch) <span class="badge bg-secondary mail-counter" data-template="order_adjusted_user_request">0</span>
                 </button>
+                <button type="button" class="btn btn-outline-secondary manual-mail-btn" data-template="price_adjustment">
+                    <i class="bi bi-envelope"></i> Preisanpassung <span class="badge bg-secondary mail-counter" data-template="price_adjustment">0</span>
+                </button>
                 <button type="button" class="btn btn-outline-warning manual-mail-btn" data-template="order_issue">
                     <i class="bi bi-envelope"></i> Problem mit Bestellung <span class="badge bg-secondary mail-counter" data-template="order_issue">0</span>
+                </button>
+                <button type="button" class="btn btn-outline-primary manual-mail-btn" data-template="manual_mail">
+                    <i class="bi bi-pencil-square"></i> Freie E-Mail <span class="badge bg-secondary mail-counter" data-template="manual_mail">0</span>
                 </button>
             </div>
 

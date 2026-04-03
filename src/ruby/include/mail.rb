@@ -270,6 +270,31 @@ class Main < Sinatra::Base
             category: 'order',
             label: 'Überzahlung eingegangen'
         },
+        'negative_payment_recorded' => {
+            key: 'negative_payment_recorded',
+            subject: 'Korrektur/Rückbuchung zu deiner Bestellung',
+            body: <<~BODY,
+                <p>Hallo [NAME],</p>
+                <p>für deine Bestellung #[ORDER_ID] ([REFERENCE]) wurde eine Korrektur in Höhe von <strong>[PAYMENT_AMOUNT] €</strong> verbucht.</p>
+                <p><strong>Gesamtbetrag:</strong> [TOTAL_PRICE] €</p>
+                <p><strong>Bereits bezahlt:</strong> [TOTAL_PAID] €</p>
+                <p><strong>Offener Restbetrag:</strong> [REMAINING] €</p>
+                <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>
+            BODY
+            category: 'order',
+            label: 'Korrektur/Rückbuchung'
+        },
+        'manual_mail' => {
+            key: 'manual_mail',
+            subject: '[SUBJECT]',
+            body: <<~BODY,
+                <p>Hallo [NAME],</p>
+                <p>[MESSAGE]</p>
+                <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>
+            BODY
+            category: 'order',
+            label: 'Freie E-Mail'
+        },
     }
 
     # Get template by key

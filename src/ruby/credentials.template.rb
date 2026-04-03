@@ -24,6 +24,9 @@ ALLOW_USER_TICKET_DOWNLOAD = true
 
 LOGIN_CODE_SALT = 'ein_schoenes_langes_salt_bitte_hier_einfuegen'
 
+# Maximum failed login attempts before a user gets banned
+MAX_LOGIN_ATTEMPTS = 10
+
 ADMIN_USERS = ['youremailhere@example.com']
 
 SMTP_SERVER = 'smtp_server'

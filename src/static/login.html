@@ -30,6 +30,12 @@
                     tag = data.tag;
                     $('#part1').slideDown();
                     $('#ti_code').focus();
+                } else if (data.error === 'user_disabled') {
+                    window.location.href = '/banned';
+                } else {
+                    code_requested = false;
+                    $('#bu_submit_username').prop('disabled', false);
+                    $('#ti_username').prop('readonly', false).prop('disabled', false);
                 }
             });
         });
