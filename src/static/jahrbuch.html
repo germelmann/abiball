@@ -251,6 +251,18 @@ function renderQuestionInput(question, existingAnswer, isAnonymous) {
             });
         });
         wrapper.append(saveStatus);
+    } else if (question.type === 'textarea') {
+        const input = $('<textarea class="form-control">')
+            .attr('id', qId).attr('maxlength', '2000').attr('rows', '3').val(existingAnswer);
+        wrapper.append(input);
+
+        // Auto-save on input with debounce
+        input.on('input', function() {
+            debounceAnswerSave(question.id, function() {
+                saveAnswer(question.id, input.val(), saveStatus);
+            });
+        });
+        wrapper.append(saveStatus);
 
     } else if (question.type === 'single_choice') {
         if (question.options && question.options.length > 15) {

@@ -296,7 +296,7 @@ function renderManageSurveys() {
             barContainer.append('<div class="text-body-secondary mt-1"><small>Gesamt: ' + totalVotes + ' Antworten</small></div>');
             section.append(barContainer);
 
-        } else if (q.type === 'text') {
+        } else if (q.type === 'text' || q.type === 'textarea') {
             const list = $('<ul class="list-group">');
             if (anonymousAnswers.length === 0) {
                 list.append('<li class="list-group-item text-body-secondary">Noch keine Antworten</li>');
