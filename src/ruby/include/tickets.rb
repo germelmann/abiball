@@ -2486,14 +2486,19 @@ class Main < Sinatra::Base
         security_id = SecureRandom.hex(8).upcase
         
         Prawn::Document.new(page_size: 'A4', margin: [50, 50, 50, 50]) do |pdf|
-            # Add watermark
-            pdf.transparent(0.1) do
-                pdf.rotate(45, origin: [pdf.bounds.width/2, pdf.bounds.height/2]) do
-                    pdf.draw_text "#{EVENT_NAME} - ORIGINAL TICKET", 
-                                  at: [pdf.bounds.width/2 - 120, pdf.bounds.height/2], 
-                                  size: 36, style: :bold
-                end
-            end
+            font_normal = '/src/static/include/fonts/Ubuntu/Ubuntu-Regular.ttf'
+            font_bold = '/src/static/include/fonts/Ubuntu/Ubuntu-Bold.ttf'
+            font_italic = '/src/static/include/fonts/Ubuntu/Ubuntu-Italic.ttf'
+            pdf.font_families.update("Ubuntu" => { normal: font_normal, bold: font_bold, italic: font_italic })
+            pdf.font("Ubuntu")
+            # # Add watermark
+            # pdf.transparent(0.1) do
+            #     pdf.rotate(45, origin: [pdf.bounds.width/2, pdf.bounds.height/2]) do
+            #         pdf.draw_text "#{EVENT_NAME} - ORIGINAL TICKET", 
+            #                       at: [pdf.bounds.width/2 - 120, pdf.bounds.height/2], 
+            #                       size: 36, style: :bold
+            #     end
+            # end
             
             # Title with security ID and age badge
             pdf.text "#{EVENT_NAME} - Ticket", size: 24, style: :bold, align: :center
