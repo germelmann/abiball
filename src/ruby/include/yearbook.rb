@@ -81,7 +81,6 @@ class Main < Sinatra::Base
     def save_yearbook_answer(username, question_id, answer)
         question = yearbook_questions.find { |q| q[:id] == question_id }
         assert(question, "Ungültige Frage")
-        puts question
 
         case question[:type]
         when 'single_choice'
