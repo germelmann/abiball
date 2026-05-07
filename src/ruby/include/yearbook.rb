@@ -1,8 +1,11 @@
 require 'csv'
+require 'fileutils'
 
 class Main < Sinatra::Base
 
     MAX_YEARBOOK_FIELD_LENGTH = 2000
+    MAX_YEARBOOK_COMMENT_LENGTH = 1000
+    YEARBOOK_UPLOAD_PATH = '/raw/yearbook_uploads'
 
     def yearbook_timestamp
         DateTime.now.to_s
@@ -37,9 +40,13 @@ class Main < Sinatra::Base
         YEARBOOK_PROFILE_FIELDS
     end
 
-    # Helper: build profile RETURN clause with individual properties (avoids datetime parsing issues)
+    def yearbook_allow_delete_all?
+        defined?(YEARBOOK_ALLOW_DELETE_ALL) && YEARBOOK_ALLOW_DELETE_ALL
+    end
+
+    # Helper: build profile RETURN clause for non-upload fields
     def yearbook_profile_return_fields
-        yearbook_profile_fields.map { |f|
+        yearbook_profile_fields.select { |f| f[:type] != 'upload' }.map { |f|
             assert(f[:id] =~ /\A[a-zA-Z_][a-zA-Z0-9_]*\z/, "Ungültige Feld-ID")
             "yp.#{f[:id]} AS yp_#{f[:id]}"
         }.join(', ')
@@ -49,6 +56,7 @@ class Main < Sinatra::Base
     def extract_profile_from_row(row)
         profile_data = {}
         yearbook_profile_fields.each do |field|
+            next if field[:type] == 'upload'
             profile_data[field[:id]] = row["yp_#{field[:id]}"] || ''
         end
         profile_data
@@ -56,7 +64,7 @@ class Main < Sinatra::Base
 
     # Helper: build and execute yearbook profile save query
     def save_yearbook_profile(username, fields)
-        valid_fields = yearbook_profile_fields.map { |f| f[:id] }
+        valid_fields = yearbook_profile_fields.select { |f| f[:type] != 'upload' }.map { |f| f[:id] }
         set_parts = []
         params = { username: username, profile_id: "yp_#{username}", now: yearbook_timestamp }
 
@@ -66,6 +74,18 @@ class Main < Sinatra::Base
             param_key = "field_#{field_id}".to_sym
             params[param_key] = value
             set_parts << "yp.#{field_id} = $#{param_key}"
+        end
+
+        if set_parts.empty?
+            # Edge case: all profile fields are upload type (no text/textarea fields).
+            # Still ensure the profile node exists so uploads can be associated with it
+            # and the user appears in the profiles list.
+            neo4j_query(<<~END_OF_QUERY, { username: username, profile_id: "yp_#{username}", now: yearbook_timestamp })
+                MATCH (u:User {username: $username})
+                MERGE (u)-[:HAS_YEARBOOK_PROFILE]->(yp:YearbookProfile {id: $profile_id})
+                SET yp.updated_at = $now
+            END_OF_QUERY
+            return
         end
 
         set_clause = set_parts.join(", ")
@@ -81,6 +101,7 @@ class Main < Sinatra::Base
     def save_yearbook_answer(username, question_id, answer)
         question = yearbook_questions.find { |q| q[:id] == question_id }
         assert(question, "Ungültige Frage")
+        assert(question[:type] != 'upload', "Upload-Felder werden separat verwaltet")
 
         case question[:type]
         when 'single_choice'
@@ -112,15 +133,42 @@ class Main < Sinatra::Base
     # Helper: get yearbook profile data for a user
     def get_yearbook_profile_data(username)
         return_fields = yearbook_profile_return_fields
-        return {} if return_fields.empty?
+
+        if return_fields.empty?
+            result = neo4j_query(<<~END_OF_QUERY, {username: username})
+                MATCH (u:User {username: $username})-[:HAS_YEARBOOK_PROFILE]->(yp:YearbookProfile)
+                RETURN 1 AS exists
+            END_OF_QUERY
+            return result.empty? ? nil : {}
+        end
 
         result = neo4j_query(<<~END_OF_QUERY, {username: username})
             MATCH (u:User {username: $username})-[:HAS_YEARBOOK_PROFILE]->(yp:YearbookProfile)
             RETURN #{return_fields}
         END_OF_QUERY
 
-        return {} if result.empty?
+        return nil if result.empty?
         extract_profile_from_row(result.first)
+    end
+
+    # Helper: get uploads for a user filtered by context and optionally field_id
+    def get_yearbook_uploads_for_user(username, context, field_id = nil)
+        if field_id
+            results = neo4j_query(<<~END_OF_QUERY, {username: username, context: context, field_id: field_id})
+                MATCH (u:User {username: $username})-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload {context: $context, field_id: $field_id})
+                RETURN up.id AS id, up.original_filename AS filename, up.mimetype AS mimetype,
+                       up.field_id AS field_id, up.context AS context
+                ORDER BY up.created_at
+            END_OF_QUERY
+        else
+            results = neo4j_query(<<~END_OF_QUERY, {username: username, context: context})
+                MATCH (u:User {username: $username})-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload {context: $context})
+                RETURN up.id AS id, up.original_filename AS filename, up.mimetype AS mimetype,
+                       up.field_id AS field_id, up.context AS context
+                ORDER BY up.created_at
+            END_OF_QUERY
+        end
+        results.map { |r| { id: r['id'], filename: r['filename'], mimetype: r['mimetype'], field_id: r['field_id'], context: r['context'] } }
     end
 
     # Helper: collect all yearbook data for export/management
@@ -133,7 +181,10 @@ class Main < Sinatra::Base
 
         return_fields = yearbook_profile_return_fields
         profiles = if return_fields.empty?
-            []
+            neo4j_query(<<~END_OF_QUERY)
+                MATCH (u:User)-[:HAS_YEARBOOK_PROFILE]->(yp:YearbookProfile)
+                RETURN u.username AS username, u.name AS name
+            END_OF_QUERY
         else
             neo4j_query(<<~END_OF_QUERY)
                 MATCH (u:User)-[:HAS_YEARBOOK_PROFILE]->(yp:YearbookProfile)
@@ -144,14 +195,26 @@ class Main < Sinatra::Base
         questions = yearbook_questions
 
         user_answers = {}
+        # Attributed anonymous answers: keyed by question_id -> [{username, name, answer}]
+        # Only included in the response for yearbook_manage users.
+        attributed_anonymous = {}
+
         entries.each do |entry|
             q = questions.find { |qq| qq[:id] == entry['question_id'] }
             next unless q
+            next if q[:type] == 'upload'
 
             if q[:anonymous]
                 user_answers['__anonymous'] ||= {}
                 user_answers['__anonymous'][entry['question_id']] ||= []
                 user_answers['__anonymous'][entry['question_id']] << entry['answer']
+
+                attributed_anonymous[entry['question_id']] ||= []
+                attributed_anonymous[entry['question_id']] << {
+                    username: entry['username'],
+                    name: entry['name'],
+                    answer: entry['answer']
+                }
             else
                 uname = entry['username']
                 user_answers[uname] ||= { name: entry['name'], answers: {} }
@@ -163,15 +226,49 @@ class Main < Sinatra::Base
             {
                 username: p['username'],
                 name: p['name'],
-                profile: extract_profile_from_row(p)
+                profile: return_fields.empty? ? {} : extract_profile_from_row(p)
             }
         end
 
         {
             user_answers: user_answers,
+            attributed_anonymous: attributed_anonymous,
             profiles: profile_list,
             questions: questions
         }
+    end
+
+    # Helper: delete all yearbook data for a user
+    def delete_yearbook_entry_for_user(username)
+        uploads = neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username})-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload)
+            RETURN up.id AS id, up.original_filename AS filename
+        END_OF_QUERY
+        uploads.each do |up|
+            file_path = File.join(YEARBOOK_UPLOAD_PATH, "#{up['id']}_#{up['filename']}")
+            File.delete(file_path) if File.exist?(file_path)
+        end
+
+        neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username})-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload)
+            DETACH DELETE up
+        END_OF_QUERY
+        neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username})-[:HAS_YEARBOOK_ENTRY]->(y:YearbookEntry)
+            DETACH DELETE y
+        END_OF_QUERY
+        neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username})-[:HAS_YEARBOOK_PROFILE]->(yp:YearbookProfile)
+            DETACH DELETE yp
+        END_OF_QUERY
+        neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username})-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)
+            DETACH DELETE c
+        END_OF_QUERY
+        neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(u:User {username: $username})
+            DETACH DELETE c
+        END_OF_QUERY
     end
 
     # Get yearbook configuration (questions + profile fields)
@@ -185,14 +282,27 @@ class Main < Sinatra::Base
                 type: q[:type],
                 question: q[:question],
                 options: q[:options] || [],
-                anonymous: q[:anonymous] || false
+                anonymous: q[:anonymous] || false,
+                max_file_size: q[:max_file_size],
+                max_uploads: q[:max_uploads]
+            }
+        end
+
+        profile_fields_config = yearbook_profile_fields.map do |f|
+            {
+                id: f[:id],
+                label: f[:label],
+                type: f[:type],
+                max_file_size: f[:max_file_size],
+                max_uploads: f[:max_uploads]
             }
         end
 
         respond(
             success: true,
             questions: questions_config,
-            profile_fields: yearbook_profile_fields
+            profile_fields: profile_fields_config,
+            allow_delete_all: yearbook_allow_delete_all?
         )
     end
 
@@ -247,7 +357,7 @@ class Main < Sinatra::Base
         username = @session_user[:username]
         profile_data = get_yearbook_profile_data(username)
 
-        respond(success: true, profile: profile_data)
+        respond(success: true, profile: profile_data || {})
     end
 
     # Save current user's yearbook profile (Steckbrief)
@@ -271,6 +381,156 @@ class Main < Sinatra::Base
         respond(success: true, message: "Steckbrief gespeichert")
     end
 
+    # Upload a file for a yearbook field (profile or question)
+    post '/api/yearbook/upload_file' do
+        require_user!
+        require_yearbook_accessible!
+        require_user_with_permission!("yearbook_create")
+
+        file = params[:file]
+        field_id = params[:field_id].to_s.strip
+        context = params[:context].to_s.strip
+
+        assert(file && file[:tempfile], "Keine Datei hochgeladen")
+        assert(!field_id.empty? && field_id =~ /\A[a-zA-Z_][a-zA-Z0-9_]*\z/, "Ungültige Feld-ID")
+        assert(['profile', 'answer'].include?(context), "Ungültiger Kontext")
+
+        field_config = if context == 'profile'
+            yearbook_profile_fields.find { |f| f[:id] == field_id }
+        else
+            yearbook_questions.find { |q| q[:id] == field_id }
+        end
+        assert(field_config, "Ungültiges Feld")
+        assert(field_config[:type] == 'upload', "Feld ist kein Upload-Feld")
+
+        max_file_size = (field_config[:max_file_size] || 10_000_000).to_i
+        max_uploads = (field_config[:max_uploads] || 5).to_i
+
+        file_size = file[:tempfile].size
+        assert(file_size > 0, "Leere Datei")
+        assert(file_size <= max_file_size, "Datei zu groß (max. #{(max_file_size / 1_000_000.0).ceil} MB)")
+
+        username = @session_user[:username]
+        current_uploads = get_yearbook_uploads_for_user(username, context, field_id)
+        assert(current_uploads.size < max_uploads, "Maximale Anzahl Uploads (#{max_uploads}) erreicht")
+
+        upload_id = RandomTag.generate(16)
+        # Sanitize filename: allow only safe characters, strip directory traversal sequences
+        raw_name = File.basename(file[:filename] || 'upload')
+        original_filename = raw_name
+            .gsub(/[^a-zA-Z0-9._-]/, '_')
+            .gsub(/\.{2,}/, '_')   # prevent .. sequences
+            .gsub(/^[._-]+/, '')   # strip leading dots/dashes/underscores
+        original_filename = 'upload' if original_filename.empty?
+        original_filename = original_filename[0, 100]
+        mimetype = file[:type] || 'application/octet-stream'
+
+        FileUtils.mkdir_p(YEARBOOK_UPLOAD_PATH)
+        dest_path = File.join(YEARBOOK_UPLOAD_PATH, "#{upload_id}_#{original_filename}")
+        File.open(dest_path, 'wb') { |f| f.write(file[:tempfile].read) }
+
+        neo4j_query(<<~END_OF_QUERY, { username: username, upload_id: upload_id, original_filename: original_filename, mimetype: mimetype, field_id: field_id, context: context, now: yearbook_timestamp })
+            MATCH (u:User {username: $username})
+            CREATE (u)-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload {
+                id: $upload_id,
+                original_filename: $original_filename,
+                mimetype: $mimetype,
+                field_id: $field_id,
+                context: $context,
+                created_at: $now
+            })
+        END_OF_QUERY
+
+        respond(success: true, upload_id: upload_id, filename: original_filename)
+    end
+
+    # Download a yearbook upload file
+    get '/api/yearbook/file/:upload_id' do
+        require_user!
+        upload_id = params[:upload_id].to_s.strip
+        assert(upload_id =~ /\A[a-zA-Z0-9]+\z/, "Ungültige Datei-ID")
+
+        result = neo4j_query(<<~END_OF_QUERY, {upload_id: upload_id})
+            MATCH (u:User)-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload {id: $upload_id})
+            RETURN u.username AS owner_username, up.original_filename AS filename, up.mimetype AS mimetype
+        END_OF_QUERY
+        assert(!result.empty?, "Datei nicht gefunden")
+
+        upload = result.first
+        owner_username = upload['owner_username']
+        can_access = (@session_user[:username] == owner_username) ||
+                     user_has_permission?("yearbook_view") ||
+                     user_has_permission?("yearbook_manage")
+        assert(can_access, "Keine Berechtigung")
+
+        original_filename = upload['filename']
+        file_path = File.join(YEARBOOK_UPLOAD_PATH, "#{upload_id}_#{original_filename}")
+        assert(File.exist?(file_path), "Datei nicht gefunden")
+
+        content = File.binread(file_path)
+        respond_raw_with_mimetype_and_filename(content, upload['mimetype'] || 'application/octet-stream', original_filename)
+    end
+
+    # Delete a yearbook upload
+    post '/api/yearbook/delete_upload' do
+        require_user!
+        require_yearbook_accessible!
+
+        data = parse_request_data(required_keys: [:upload_id])
+        upload_id = data[:upload_id].to_s.strip
+
+        result = neo4j_query(<<~END_OF_QUERY, {upload_id: upload_id})
+            MATCH (u:User)-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload {id: $upload_id})
+            RETURN u.username AS owner_username, up.original_filename AS filename
+        END_OF_QUERY
+        assert(!result.empty?, "Upload nicht gefunden")
+
+        owner_username = result.first['owner_username']
+        original_filename = result.first['filename']
+        can_delete = (@session_user[:username] == owner_username) || user_has_permission?("yearbook_manage")
+        assert(can_delete, "Keine Berechtigung")
+
+        file_path = File.join(YEARBOOK_UPLOAD_PATH, "#{upload_id}_#{original_filename}")
+        File.delete(file_path) if File.exist?(file_path)
+
+        neo4j_query(<<~END_OF_QUERY, {upload_id: upload_id})
+            MATCH (up:YearbookUpload {id: $upload_id})
+            DETACH DELETE up
+        END_OF_QUERY
+
+        respond(success: true)
+    end
+
+    # Get uploads for a user
+    post '/api/yearbook/get_uploads' do
+        require_user!
+        require_yearbook_accessible!
+
+        data = parse_request_data(optional_keys: [:target_username, :context, :field_id])
+        target_username = (data[:target_username] || @session_user[:username]).to_s.strip
+        context = (data[:context] || '').to_s.strip
+        field_id = (data[:field_id] || '').to_s.strip
+
+        if target_username != @session_user[:username]
+            assert(user_has_permission?("yearbook_view") || user_has_permission?("yearbook_manage"), "Keine Berechtigung")
+        end
+
+        if !context.empty? && !field_id.empty?
+            assert(context =~ /\A[a-zA-Z]+\z/ && field_id =~ /\A[a-zA-Z_][a-zA-Z0-9_]*\z/, "Ungültige Parameter")
+            uploads = get_yearbook_uploads_for_user(target_username, context, field_id)
+        else
+            uploads_raw = neo4j_query(<<~END_OF_QUERY, {username: target_username})
+                MATCH (u:User {username: $username})-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload)
+                RETURN up.id AS id, up.original_filename AS filename, up.mimetype AS mimetype,
+                       up.field_id AS field_id, up.context AS context
+                ORDER BY up.created_at
+            END_OF_QUERY
+            uploads = uploads_raw.map { |r| { id: r['id'], filename: r['filename'], mimetype: r['mimetype'], field_id: r['field_id'], context: r['context'] } }
+        end
+
+        respond(success: true, uploads: uploads)
+    end
+
     # Get all yearbook entries (for yearbook_view or yearbook_manage roles)
     post '/api/yearbook/get_all_entries' do
         require_user!
@@ -285,22 +545,29 @@ class Main < Sinatra::Base
         respond(
             success: true,
             user_answers: data[:user_answers],
+            # Only expose attributed anonymous answers to yearbook_manage users
+            attributed_anonymous: has_manage ? data[:attributed_anonymous] : {},
             profiles: data[:profiles],
-            questions: data[:questions].map { |q| { id: q[:id], question: q[:question], type: q[:type], anonymous: q[:anonymous], options: q[:options] || [] } }
+            questions: data[:questions].map { |q| { id: q[:id], question: q[:question], type: q[:type], anonymous: q[:anonymous], options: q[:options] || [] } },
+            allow_delete_all: yearbook_allow_delete_all?
         )
     end
 
-    # Get a specific user's yearbook entry (for yearbook_view or yearbook_manage)
+    # Get a specific user's yearbook entry (for yearbook_view or yearbook_manage, or own entry)
     post '/api/yearbook/get_user_entry' do
         require_user!
         require_yearbook_accessible!
 
         has_view = user_has_permission?("yearbook_view")
         has_manage = user_has_permission?("yearbook_manage")
-        assert(has_view || has_manage, "Keine Berechtigung")
 
         data = parse_request_data(required_keys: [:target_username])
         target_username = data[:target_username].to_s.strip
+
+        is_own = (@session_user[:username] == target_username)
+        unless is_own || has_view || has_manage
+            assert(false, "Keine Berechtigung")
+        end
 
         user_info = neo4j_query(<<~END_OF_QUERY, {username: target_username})
             MATCH (u:User {username: $username})
@@ -320,17 +587,34 @@ class Main < Sinatra::Base
 
         profile_data = get_yearbook_profile_data(target_username)
 
-        questions = yearbook_questions.map { |q| { id: q[:id], question: q[:question], type: q[:type], anonymous: q[:anonymous], options: q[:options] || [] } }
+        uploads_raw = neo4j_query(<<~END_OF_QUERY, {username: target_username})
+            MATCH (u:User {username: $username})-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload)
+            RETURN up.id AS id, up.original_filename AS filename, up.mimetype AS mimetype,
+                   up.field_id AS field_id, up.context AS context
+            ORDER BY up.created_at
+        END_OF_QUERY
+        uploads = uploads_raw.map { |r| { id: r['id'], filename: r['filename'], mimetype: r['mimetype'], field_id: r['field_id'], context: r['context'] } }
+
+        questions = yearbook_questions.map { |q| {
+            id: q[:id], question: q[:question], type: q[:type],
+            anonymous: q[:anonymous], options: q[:options] || [],
+            max_file_size: q[:max_file_size], max_uploads: q[:max_uploads]
+        } }
 
         respond(
             success: true,
             username: user_info.first['username'],
             name: user_info.first['name'],
             answers: answers,
-            profile: profile_data,
+            profile: profile_data || {},
             questions: questions,
-            profile_fields: yearbook_profile_fields,
-            can_manage: has_manage
+            profile_fields: yearbook_profile_fields.map { |f| {
+                id: f[:id], label: f[:label], type: f[:type],
+                max_file_size: f[:max_file_size], max_uploads: f[:max_uploads]
+            } },
+            uploads: uploads,
+            can_manage: has_manage,
+            is_own: is_own
         )
     end
 
@@ -390,19 +674,269 @@ class Main < Sinatra::Base
         respond(success: true, message: "Steckbrief gespeichert")
     end
 
-    # Get list of all users for selection dropdowns in yearbook questions
+    # Delete a specific user's yearbook entry (yearbook_manage only)
+    post '/api/yearbook/delete_entry' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        data = parse_request_data(required_keys: [:target_username])
+        target_username = data[:target_username].to_s.strip
+
+        delete_yearbook_entry_for_user(target_username)
+
+        log("Jahrbuch-Eintrag für #{target_username} gelöscht durch #{@session_user[:username]}")
+        respond(success: true, message: "Eintrag gelöscht")
+    end
+
+    # Delete ALL yearbook entries (requires YEARBOOK_ALLOW_DELETE_ALL credential)
+    post '/api/yearbook/delete_all_entries' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+        assert(yearbook_allow_delete_all?, "Löschen aller Einträge ist nicht aktiviert")
+
+        all_uploads = neo4j_query("MATCH (up:YearbookUpload) RETURN up.id AS id, up.original_filename AS filename")
+        all_uploads.each do |up|
+            file_path = File.join(YEARBOOK_UPLOAD_PATH, "#{up['id']}_#{up['filename']}")
+            File.delete(file_path) if File.exist?(file_path)
+        end
+
+        neo4j_query("MATCH (up:YearbookUpload) DETACH DELETE up")
+        neo4j_query("MATCH (y:YearbookEntry) DETACH DELETE y")
+        neo4j_query("MATCH (yp:YearbookProfile) DETACH DELETE yp")
+        neo4j_query("MATCH (c:YearbookComment) DETACH DELETE c")
+
+        log("Alle Jahrbuch-Einträge gelöscht durch #{@session_user[:username]}")
+        respond(success: true, message: "Alle Einträge gelöscht")
+    end
+
+    # Get list of users who have yearbook_create permission (for comment targeting)
+    # Returns all users with yearbook_create permission, excluding the current user.
+    # Admins (who implicitly have all permissions) are also included.
     post '/api/yearbook/get_users_list' do
         require_user!
         require_yearbook_accessible!
 
-        users = neo4j_query(<<~END_OF_QUERY)
+        current_username = @session_user[:username]
+
+        users = neo4j_query(<<~END_OF_QUERY, {current_username: current_username})
             MATCH (u:User)
             WHERE COALESCE(u.scanner_only, false) = false
+              AND u.username <> $current_username
+              AND (COALESCE(u.admin, false) = true
+                   OR (u)-[:HAS_PERMISSION]->(:Permission {name: 'yearbook_create'}))
             RETURN u.username AS username, u.name AS name
             ORDER BY u.name
         END_OF_QUERY
 
         respond(success: true, users: users)
+    end
+
+    # Post a comment on another user's yearbook entry.
+    # Both commenter and target must have yearbook_create permission.
+    # New comments start with status 'pending'; the entry owner must approve them.
+    post '/api/yearbook/post_comment' do
+        require_user!
+        require_yearbook_accessible!
+        require_user_with_permission!("yearbook_create")
+
+        data = parse_request_data(
+            required_keys: [:target_username, :text],
+            max_body_length: 4096,
+            max_string_length: 2048
+        )
+
+        target_username = data[:target_username].to_s.strip
+        text = data[:text].to_s.strip[0, MAX_YEARBOOK_COMMENT_LENGTH]
+        assert(!text.empty?, "Kommentar darf nicht leer sein")
+
+        commenter_username = @session_user[:username]
+        assert(commenter_username != target_username, "Du kannst nicht auf deinem eigenen Eintrag kommentieren")
+
+        # Verify target exists
+        target_exists = neo4j_query(<<~END_OF_QUERY, {username: target_username})
+            MATCH (u:User {username: $username})
+            RETURN u.username AS username
+        END_OF_QUERY
+        assert(!target_exists.empty?, "Benutzer nicht gefunden")
+
+        # Verify target has yearbook_create permission (or is admin)
+        target = neo4j_query(<<~END_OF_QUERY, {username: target_username})
+            MATCH (u:User {username: $username})
+            WHERE COALESCE(u.admin, false) = true
+               OR (u)-[:HAS_PERMISSION]->(:Permission {name: 'yearbook_create'})
+            RETURN u.username AS username
+        END_OF_QUERY
+        assert(!target.empty?, "Dieser Benutzer kann keine Jahrbuch-Kommentare erhalten")
+
+        comment_id = RandomTag.generate(16)
+        neo4j_query(<<~END_OF_QUERY, { commenter: commenter_username, target: target_username, comment_id: comment_id, text: text, now: yearbook_timestamp })
+            MATCH (commenter:User {username: $commenter})
+            MATCH (target:User {username: $target})
+            CREATE (commenter)-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment {
+                id: $comment_id,
+                text: $text,
+                created_at: $now,
+                status: 'pending'
+            })-[:ON_YEARBOOK_ENTRY_OF]->(target)
+        END_OF_QUERY
+
+        respond(success: true, message: "Kommentar gespeichert")
+    end
+
+    # Get comments received on current user's own entry.
+    # Returns pending and approved comments (not removed), with their status.
+    post '/api/yearbook/get_received_comments' do
+        require_user!
+        require_yearbook_accessible!
+
+        username = @session_user[:username]
+
+        results = neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (commenter:User)-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(target:User {username: $username})
+            WHERE COALESCE(c.status, 'pending') <> 'removed'
+            RETURN c.id AS id, c.text AS text, c.created_at AS created_at,
+                   COALESCE(c.status, 'pending') AS status,
+                   commenter.name AS commenter_name
+            ORDER BY c.created_at
+        END_OF_QUERY
+
+        comments = results.map { |r|
+            { id: r['id'], text: r['text'], created_at: r['created_at'],
+              status: r['status'], commenter_name: r['commenter_name'] }
+        }
+
+        respond(success: true, comments: comments)
+    end
+
+    # Approve a pending comment on own entry (or any entry for yearbook_manage)
+    post '/api/yearbook/approve_comment' do
+        require_user!
+        require_yearbook_accessible!
+
+        data = parse_request_data(required_keys: [:comment_id])
+        comment_id = data[:comment_id].to_s.strip
+
+        username = @session_user[:username]
+
+        result = if user_has_permission?("yearbook_manage")
+            neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id})
+                MATCH (c:YearbookComment {id: $comment_id})
+                RETURN c.id AS id
+            END_OF_QUERY
+        else
+            neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id, username: username})
+                MATCH (c:YearbookComment {id: $comment_id})-[:ON_YEARBOOK_ENTRY_OF]->(u:User {username: $username})
+                RETURN c.id AS id
+            END_OF_QUERY
+        end
+        assert(!result.empty?, "Kommentar nicht gefunden oder keine Berechtigung")
+
+        neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id, now: yearbook_timestamp})
+            MATCH (c:YearbookComment {id: $comment_id})
+            SET c.status = 'approved', c.approved_at = $now
+        END_OF_QUERY
+
+        respond(success: true, message: "Kommentar angenommen")
+    end
+
+    # Remove a comment from own entry (marks as removed; soft delete, not permanent)
+    # yearbook_manage users can remove comments on any entry
+    post '/api/yearbook/remove_comment' do
+        require_user!
+        require_yearbook_accessible!
+
+        data = parse_request_data(required_keys: [:comment_id])
+        comment_id = data[:comment_id].to_s.strip
+
+        username = @session_user[:username]
+
+        result = if user_has_permission?("yearbook_manage")
+            neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id})
+                MATCH (c:YearbookComment {id: $comment_id})
+                RETURN c.id AS id
+            END_OF_QUERY
+        else
+            neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id, username: username})
+                MATCH (c:YearbookComment {id: $comment_id})-[:ON_YEARBOOK_ENTRY_OF]->(u:User {username: $username})
+                RETURN c.id AS id
+            END_OF_QUERY
+        end
+        assert(!result.empty?, "Kommentar nicht gefunden oder keine Berechtigung")
+
+        neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id, now: yearbook_timestamp})
+            MATCH (c:YearbookComment {id: $comment_id})
+            SET c.status = 'removed', c.removed_at = $now
+        END_OF_QUERY
+
+        respond(success: true, message: "Kommentar entfernt")
+    end
+
+    # Get all comments for a user's entry including removed (yearbook_manage only)
+    post '/api/yearbook/admin_get_comments' do
+        require_user!
+        require_yearbook_accessible!
+        require_user_with_permission!("yearbook_manage")
+
+        data = parse_request_data(required_keys: [:target_username])
+        target_username = data[:target_username].to_s.strip
+
+        results = neo4j_query(<<~END_OF_QUERY, {username: target_username})
+            MATCH (commenter:User)-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(target:User {username: $username})
+            RETURN c.id AS id, c.text AS text, c.created_at AS created_at,
+                   COALESCE(c.status, 'pending') AS status,
+                   c.removed_at AS removed_at,
+                   commenter.name AS commenter_name, commenter.username AS commenter_username
+            ORDER BY c.created_at
+        END_OF_QUERY
+
+        comments = results.map { |r|
+            {
+                id: r['id'], text: r['text'], created_at: r['created_at'],
+                status: r['status'], removed_at: r['removed_at'],
+                commenter_name: r['commenter_name'], commenter_username: r['commenter_username']
+            }
+        }
+
+        respond(success: true, comments: comments)
+    end
+
+    # Admin: restore a removed comment back to pending state
+    post '/api/yearbook/admin_restore_comment' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        data = parse_request_data(required_keys: [:comment_id])
+        comment_id = data[:comment_id].to_s.strip
+
+        result = neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id})
+            MATCH (c:YearbookComment {id: $comment_id})
+            RETURN c.id AS id
+        END_OF_QUERY
+        assert(!result.empty?, "Kommentar nicht gefunden")
+
+        neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id})
+            MATCH (c:YearbookComment {id: $comment_id})
+            SET c.status = 'pending'
+            REMOVE c.removed_at
+        END_OF_QUERY
+
+        respond(success: true, message: "Kommentar wiederhergestellt")
+    end
+
+    # Admin: permanently delete a comment
+    post '/api/yearbook/admin_delete_comment' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        data = parse_request_data(required_keys: [:comment_id])
+        comment_id = data[:comment_id].to_s.strip
+
+        neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id})
+            MATCH (c:YearbookComment {id: $comment_id})
+            DETACH DELETE c
+        END_OF_QUERY
+
+        respond(success: true, message: "Kommentar gelöscht")
     end
 
     # Export yearbook data as JSON
@@ -437,22 +971,19 @@ class Main < Sinatra::Base
 
         data = collect_all_yearbook_data
         questions = data[:questions]
-        non_anon_questions = questions.select { |q| !q[:anonymous] }
-        profile_fields = yearbook_profile_fields
+        non_anon_questions = questions.select { |q| !q[:anonymous] && q[:type] != 'upload' }
+        profile_fields = yearbook_profile_fields.select { |f| f[:type] != 'upload' }
 
-        # Collect all usernames from answers and profiles
         all_usernames = Set.new
         data[:user_answers].each_key { |k| all_usernames << k unless k == '__anonymous' }
         data[:profiles].each { |p| all_usernames << p[:username] }
 
         csv_string = CSV.generate(col_sep: ';', encoding: 'UTF-8') do |csv|
-            # Header row
             header = ['Benutzername', 'Name']
             profile_fields.each { |f| header << f[:label] }
             non_anon_questions.each { |q| header << q[:question] }
             csv << header
 
-            # Data rows
             all_usernames.sort.each do |username|
                 row = [username]
 

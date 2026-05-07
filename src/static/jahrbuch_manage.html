@@ -15,14 +15,18 @@
 </div>
 
 <div class="container" id="yearbook_manage_content" style="display: none;">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
         <h1 class="mb-0"><i class="bi bi-book"></i> Jahrbuch verwalten</h1>
-        <div>
-            <button type="button" class="btn btn-outline-primary me-1" id="export_json_btn" title="Als JSON exportieren">
+        <div class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-outline-primary" id="export_json_btn" title="Als JSON exportieren">
                 <i class="bi bi-filetype-json"></i> JSON
             </button>
             <button type="button" class="btn btn-outline-primary" id="export_csv_btn" title="Als CSV exportieren">
                 <i class="bi bi-filetype-csv"></i> CSV
+            </button>
+            <button type="button" class="btn btn-outline-danger" id="delete_all_btn" style="display:none;"
+                title="Alle Jahrbuch-Einträge löschen">
+                <i class="bi bi-trash"></i> Alle löschen
             </button>
         </div>
     </div>
@@ -35,20 +39,15 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="manage-answers-tab" data-bs-toggle="tab" data-bs-target="#manage-answers-section"
-                type="button" role="tab" aria-controls="manage-answers-section" aria-selected="false">
-                <i class="bi bi-chat-square-text"></i> Antworten
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
             <button class="nav-link" id="manage-surveys-tab" data-bs-toggle="tab" data-bs-target="#manage-surveys-section"
                 type="button" role="tab" aria-controls="manage-surveys-section" aria-selected="false">
-                <i class="bi bi-bar-chart"></i> Umfragen (Anonym)
+                <i class="bi bi-chat-square-text"></i> Umfragen
             </button>
         </li>
     </ul>
 
     <div class="tab-content" id="manageYearbookTabContent">
+        <!-- Steckbriefe Tab -->
         <div class="tab-pane fade show active" id="manage-profiles-section" role="tabpanel" aria-labelledby="manage-profiles-tab">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -76,10 +75,12 @@
             </div>
         </div>
 
-        <div class="tab-pane fade" id="manage-answers-section" role="tabpanel" aria-labelledby="manage-answers-tab">
-            <div class="card">
+        <!-- Umfragen Tab (merged non-anonymous answers + anonymous surveys) -->
+        <div class="tab-pane fade" id="manage-surveys-section" role="tabpanel" aria-labelledby="manage-surveys-tab">
+            <!-- Non-anonymous questions section -->
+            <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-chat-square-text"></i> Antworten (namentlich)</h5>
+                    <h5 class="card-title mb-0"><i class="bi bi-person"></i> Namentliche Umfragen</h5>
                 </div>
                 <div class="card-body">
                     <div id="manage_answers_container"></div>
@@ -88,12 +89,10 @@
                     </div>
                 </div>
             </div>
-        </div>
-
-        <div class="tab-pane fade" id="manage-surveys-section" role="tabpanel" aria-labelledby="manage-surveys-tab">
+            <!-- Anonymous questions section -->
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-bar-chart"></i> Anonyme Umfragen – Ergebnisse</h5>
+                    <h5 class="card-title mb-0"><i class="bi bi-incognito"></i> Anonyme Umfragen</h5>
                 </div>
                 <div class="card-body">
                     <div id="manage_surveys_container"></div>
@@ -108,18 +107,54 @@
 
 <div class="api_messages"></div>
 
+<style>
+    .upload-badge { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--bs-secondary-bg); border-radius: 0.3rem; padding: 0.2rem 0.5rem; font-size: 0.8rem; }
+</style>
+
 <script>
 let manageQuestions = [];
 let manageProfileFields = [];
 let allUserAnswers = {};
 let allProfiles = [];
+let attributedAnonymous = {};
+let allowDeleteAll = false;
+let isManage = false;
 
 $(document).ready(function() {
     loadManageData();
 
-    // Export buttons
     $('#export_json_btn').on('click', function() { exportData('json'); });
     $('#export_csv_btn').on('click', function() { exportData('csv'); });
+
+    $('#delete_all_btn').on('click', function() {
+        showTemplateModal(
+            'Alle Einträge löschen',
+            '<strong class="text-danger">Wirklich ALLE Jahrbuch-Einträge unwiderruflich löschen?</strong><br>Diese Aktion kann nicht rückgängig gemacht werden!',
+            'Weiter', 'btn-danger',
+            'Abbrechen', 'btn-secondary',
+            function() {
+                showTemplateModal(
+                    'Letzte Bestätigung',
+                    'Bitte bestätige noch einmal: Alle Jahrbuch-Einträge werden gelöscht.',
+                    'Ja, alle löschen', 'btn-danger',
+                    'Abbrechen', 'btn-secondary',
+                    function() {
+                        api_call('/api/yearbook/delete_all_entries', {}, function(data) {
+                            if (data.success) {
+                                show_success_message('Alle Einträge gelöscht.');
+                                allProfiles = [];
+                                allUserAnswers = {};
+                                attributedAnonymous = {};
+                                renderManageView();
+                            } else {
+                                show_error_message('Fehler: ' + (data.error || 'Unbekannter Fehler'));
+                            }
+                        });
+                    }
+                );
+            }
+        );
+    });
 });
 
 function exportData(format) {
@@ -132,8 +167,15 @@ function loadManageData() {
             manageQuestions = data.questions || [];
             allUserAnswers = data.user_answers || {};
             allProfiles = data.profiles || [];
+            attributedAnonymous = data.attributed_anonymous || {};
+            allowDeleteAll = data.allow_delete_all || false;
+            isManage = true;
 
             $('#yearbook_manage_content').show();
+
+            if (allowDeleteAll) {
+                $('#delete_all_btn').show();
+            }
 
             api_call('/api/yearbook/config', {}, function(configData) {
                 if (configData.success) {
@@ -172,18 +214,37 @@ function renderManageProfiles() {
 
         let hasData = false;
         manageProfileFields.forEach(function(field) {
+            if (field.type === 'upload') return;
             if (profile.profile[field.id] && profile.profile[field.id].trim()) hasData = true;
         });
         tr.append($('<td>').html(hasData ?
             '<span class="badge bg-success">Ausgefüllt</span>' :
             '<span class="badge bg-secondary">Leer</span>'));
 
-        const actions = $('<td>');
+        const actions = $('<td class="d-flex gap-1 flex-wrap">');
+
         const viewBtn = $('<button type="button" class="btn btn-sm btn-outline-primary">')
             .html('<i class="bi bi-eye"></i>')
             .attr('title', 'Eintrag ansehen')
             .on('click', function() { window.location.href = '/jahrbuch_entry/' + encodeURIComponent(profile.username); });
         actions.append(viewBtn);
+
+        // Per-entry delete button (always visible for yearbook_manage)
+        if (isManage) {
+            const delBtn = $('<button type="button" class="btn btn-sm btn-outline-danger">')
+                .html('<i class="bi bi-trash"></i>')
+                .attr('title', 'Eintrag löschen')
+                .on('click', function() {
+                    showTemplateModal(
+                        'Eintrag löschen',
+                        'Jahrbuch-Eintrag von <strong>' + escapeHtml(profile.name) + '</strong> (' + escapeHtml(profile.username) + ') löschen?',
+                        'Ja, löschen', 'btn-danger',
+                        'Abbrechen', 'btn-secondary',
+                        function() { deleteEntry(profile.username, tr); }
+                    );
+                });
+            actions.append(delBtn);
+        }
 
         tr.append(actions);
         tbody.append(tr);
@@ -199,13 +260,26 @@ function renderManageProfiles() {
     });
 }
 
+function deleteEntry(username, trEl) {
+    api_call('/api/yearbook/delete_entry', { target_username: username }, function(data) {
+        if (data.success) {
+            allProfiles = allProfiles.filter(function(p) { return p.username !== username; });
+            if (trEl) trEl.remove();
+            $('#profiles_count').text(allProfiles.length);
+            show_success_message('Eintrag gelöscht.');
+        } else {
+            show_error_message('Fehler: ' + (data.error || 'Unbekannter Fehler'));
+        }
+    });
+}
+
 function renderManageAnswers() {
     const container = $('#manage_answers_container');
     container.empty();
     let hasNonAnonymous = false;
 
     manageQuestions.forEach(function(q) {
-        if (q.anonymous) return;
+        if (q.anonymous || q.type === 'upload') return;
         hasNonAnonymous = true;
 
         const section = $('<div class="mb-4">');
@@ -225,7 +299,8 @@ function renderManageAnswers() {
                     if (Array.isArray(parsed)) answerDisplay = parsed.join(', ');
                 } catch(e) {}
                 tbody.append(
-                    '<tr><td><a href="/jahrbuch_entry/' + encodeURIComponent(username) + '">' + escapeHtml(userData.name || username) + '</a></td><td>' + escapeHtml(answerDisplay) + '</td></tr>'
+                    '<tr><td><a href="/jahrbuch_entry/' + encodeURIComponent(username) + '">' + escapeHtml(userData.name || username) + '</a></td>' +
+                    '<td>' + escapeHtml(answerDisplay) + '</td></tr>'
                 );
             }
         });
@@ -248,7 +323,7 @@ function renderManageSurveys() {
     let hasAnonymous = false;
 
     manageQuestions.forEach(function(q) {
-        if (!q.anonymous) return;
+        if (!q.anonymous || q.type === 'upload') return;
         hasAnonymous = true;
 
         const section = $('<div class="mb-4">');
@@ -256,6 +331,7 @@ function renderManageSurveys() {
             ' <span class="badge bg-secondary"><i class="bi bi-incognito"></i> Anonym</span></h6>');
 
         const anonymousAnswers = (allUserAnswers['__anonymous'] || {})[q.id] || [];
+        const attributedList = (attributedAnonymous[q.id] || []);
 
         if (q.type === 'single_choice' || q.type === 'multiple_choice') {
             const voteCounts = {};
@@ -306,6 +382,30 @@ function renderManageSurveys() {
                 });
             }
             section.append(list);
+        }
+
+        // Admin attributed view: show who answered what (only if attributedAnonymous has data)
+        if (attributedList.length > 0) {
+            const details = $('<details class="mt-2">');
+            details.append('<summary class="text-body-secondary" style="cursor:pointer;"><small><i class="bi bi-shield-lock"></i> Admin: Antworten mit Nutzerzuordnung</small></summary>');
+            const attrTable = $('<table class="table table-sm table-bordered mt-2">');
+            attrTable.append('<thead><tr><th>Name</th><th>Antwort</th></tr></thead>');
+            const tbody = $('<tbody>');
+            attributedList.forEach(function(item) {
+                let answerDisplay = item.answer || '';
+                try {
+                    const parsed = JSON.parse(answerDisplay);
+                    if (Array.isArray(parsed)) answerDisplay = parsed.join(', ');
+                } catch(e) {}
+                tbody.append(
+                    '<tr><td><a href="/jahrbuch_entry/' + encodeURIComponent(item.username) + '">' +
+                    escapeHtml(item.name || item.username) + '</a></td>' +
+                    '<td>' + escapeHtml(answerDisplay) + '</td></tr>'
+                );
+            });
+            attrTable.append(tbody);
+            details.append(attrTable);
+            section.append(details);
         }
 
         container.append(section);

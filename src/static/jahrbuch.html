@@ -14,25 +14,27 @@
     <ul class="nav nav-tabs mb-4" id="yearbookTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="profile-tab" data-bs-toggle="tab" data-bs-target="#profile-section"
-                type="button" role="tab" aria-controls="profile-section" aria-selected="true">
+                type="button" role="tab" aria-selected="true">
                 <i class="bi bi-person-badge"></i> Steckbrief
             </button>
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="questions-tab" data-bs-toggle="tab" data-bs-target="#questions-section"
-                type="button" role="tab" aria-controls="questions-section" aria-selected="false">
-                <i class="bi bi-chat-square-text"></i> Fragen
+                type="button" role="tab" aria-selected="false">
+                <i class="bi bi-chat-square-text"></i> Umfragen
             </button>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="surveys-tab" data-bs-toggle="tab" data-bs-target="#surveys-section"
-                type="button" role="tab" aria-controls="surveys-section" aria-selected="false">
-                <i class="bi bi-bar-chart"></i> Umfragen
+            <button class="nav-link" id="comments-tab" data-bs-toggle="tab" data-bs-target="#comments-section"
+                type="button" role="tab" aria-selected="false">
+                <i class="bi bi-chat-dots"></i> Kommentare
+                <span class="badge bg-warning text-dark ms-1" id="pending_comments_badge" style="display:none;"></span>
             </button>
         </li>
     </ul>
 
     <div class="tab-content" id="yearbookTabContent">
+        <!-- Steckbrief Tab -->
         <div class="tab-pane fade show active" id="profile-section" role="tabpanel" aria-labelledby="profile-tab">
             <div class="card">
                 <div class="card-header">
@@ -48,35 +50,71 @@
             </div>
         </div>
 
+        <!-- Umfragen Tab (merged Fragen + Umfragen) -->
         <div class="tab-pane fade" id="questions-section" role="tabpanel" aria-labelledby="questions-tab">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-chat-square-text"></i> Meine Antworten</h5>
+                    <h5 class="card-title mb-0"><i class="bi bi-chat-square-text"></i> Umfragen</h5>
                 </div>
                 <div class="card-body">
                     <p class="text-body-secondary mb-3">
-                        Beantworte die folgenden Fragen. Änderungen werden automatisch gespeichert.
+                        Beantworte die folgenden Fragen. Namentliche Antworten sind deinem Profil zugeordnet; anonyme Antworten werden nicht mit deinem Namen gespeichert.
                     </p>
                     <div id="questions_container"></div>
                     <div id="no_questions_msg" class="text-body-secondary" style="display: none;">
-                        <i class="bi bi-info-circle"></i> Keine persönlichen Fragen vorhanden.
+                        <i class="bi bi-info-circle"></i> Keine Umfragen vorhanden.
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="tab-pane fade" id="surveys-section" role="tabpanel" aria-labelledby="surveys-tab">
-            <div class="card">
+        <!-- Kommentare Tab -->
+        <div class="tab-pane fade" id="comments-section" role="tabpanel" aria-labelledby="comments-tab">
+            <!-- Write a comment to another user -->
+            <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-bar-chart"></i> Anonyme Umfragen</h5>
+                    <h5 class="card-title mb-0"><i class="bi bi-pencil-square"></i> Kommentar schreiben</h5>
                 </div>
                 <div class="card-body">
                     <p class="text-body-secondary mb-3">
-                        Diese Umfragen sind anonym – Änderungen werden automatisch gespeichert.
+                        Schreibe einem anderen Schüler einen Kommentar in sein Jahrbuch. Der Empfänger kann deinen Kommentar annehmen oder entfernen.
                     </p>
-                    <div id="surveys_container"></div>
-                    <div id="no_surveys_msg" class="text-body-secondary" style="display: none;">
-                        <i class="bi bi-info-circle"></i> Keine Umfragen vorhanden.
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Empfänger</label>
+                        <div class="search-select-container">
+                            <input type="text" class="form-control search-select-input" id="comment_target_input"
+                                placeholder="Name suchen..." autocomplete="off">
+                            <div class="search-select-dropdown" id="comment_target_dropdown"></div>
+                        </div>
+                        <input type="hidden" id="comment_target_username">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Kommentar</label>
+                        <textarea class="form-control" id="comment_write_text" rows="3" maxlength="1000"
+                            placeholder="Schreibe hier deinen Kommentar..."></textarea>
+                        <div class="form-text">Max. 1000 Zeichen.</div>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="send_comment_btn">
+                        <i class="bi bi-send"></i> Kommentar senden
+                    </button>
+                </div>
+            </div>
+
+            <!-- Received comments with approval -->
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0"><i class="bi bi-inbox"></i> Erhaltene Kommentare</h5>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="refresh_comments_btn">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <p class="text-body-secondary mb-3">
+                        Neue Kommentare müssen von dir angenommen werden, bevor sie sichtbar sind.
+                        Du kannst Kommentare, die du nicht möchtest, auch entfernen.
+                    </p>
+                    <div id="received_comments_container">
+                        <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>
                     </div>
                 </div>
             </div>
@@ -93,10 +131,7 @@
         padding: 1rem;
         margin-bottom: 1rem;
     }
-    .yearbook-question .question-label {
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-    }
+    .yearbook-question .question-label { font-weight: 600; margin-bottom: 0.5rem; }
     .yearbook-question .badge-anonymous { font-size: 0.75rem; }
     .search-select-container { position: relative; }
     .search-select-input { width: 100%; }
@@ -112,6 +147,11 @@
     .search-select-dropdown .search-select-option:hover,
     .search-select-dropdown .search-select-option.active { background: var(--bs-primary); color: white; }
     .save-indicator { display: inline-block; }
+    .upload-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; background: var(--bs-secondary-bg); border-radius: 0.375rem; margin-bottom: 0.4rem; }
+    .upload-item .upload-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .comment-card { border: 1px solid var(--bs-border-color); border-radius: 0.5rem; padding: 0.75rem 1rem; margin-bottom: 0.75rem; }
+    .comment-card.pending { border-color: var(--bs-warning); background: rgba(var(--bs-warning-rgb), 0.05); }
+    .comment-card .comment-meta { font-size: 0.8rem; color: var(--bs-secondary-color); }
 </style>
 
 <script>
@@ -119,17 +159,23 @@ let yearbookQuestions = [];
 let yearbookProfileFields = [];
 let myAnswers = {};
 let myProfile = {};
-let usersList = [];
+let myUploads = [];
+let commentableUsers = [];
 let profileSaveTimer = null;
 let answerSaveTimers = {};
 
-$(document).ready(function() { loadYearbookData(); });
+$(document).ready(function() {
+    loadYearbookData();
+    $('#comments-tab').on('shown.bs.tab', function() { loadReceivedComments(); });
+    $('#refresh_comments_btn').on('click', function() { loadReceivedComments(); });
+    setupCommentWriter();
+});
 
 function loadYearbookData() {
-    let configLoaded = false, answersLoaded = false, profileLoaded = false, usersLoaded = false;
+    let configLoaded = false, answersLoaded = false, profileLoaded = false, usersLoaded = false, uploadsLoaded = false;
 
     function checkAllLoaded() {
-        if (configLoaded && answersLoaded && profileLoaded && usersLoaded) renderYearbook();
+        if (configLoaded && answersLoaded && profileLoaded && usersLoaded && uploadsLoaded) renderYearbook();
     }
 
     api_call('/api/yearbook/config', {}, function(data) {
@@ -153,25 +199,36 @@ function loadYearbookData() {
     }, function() { profileLoaded = true; checkAllLoaded(); });
 
     api_call('/api/yearbook/get_users_list', {}, function(data) {
-        if (data.success) usersList = data.users || [];
+        if (data.success) commentableUsers = data.users || [];
         usersLoaded = true; checkAllLoaded();
     }, function() { usersLoaded = true; checkAllLoaded(); });
+
+    api_call('/api/yearbook/get_uploads', {}, function(data) {
+        if (data.success) myUploads = data.uploads || [];
+        uploadsLoaded = true; checkAllLoaded();
+    }, function() { uploadsLoaded = true; checkAllLoaded(); });
 }
 
 function renderYearbook() {
     renderProfileFields();
     renderQuestions();
-    renderSurveys();
+    // Load comments in background to update badge
+    loadReceivedCommentsBadge();
 }
+
+// ─────────────────── Steckbrief ───────────────────
 
 function renderProfileFields() {
     const container = $('#profile_fields_container');
     container.empty();
 
     yearbookProfileFields.forEach(function(field) {
+        if (field.type === 'upload') {
+            container.append(renderUploadField(field, 'profile'));
+            return;
+        }
         const value = myProfile[field.id] || '';
         let inputEl;
-
         if (field.type === 'textarea') {
             inputEl = '<textarea class="form-control yearbook-profile-field" id="yb_profile_' +
                 escapeHtml(field.id) + '" rows="3" maxlength="2000">' + escapeHtml(value) + '</textarea>';
@@ -179,7 +236,6 @@ function renderProfileFields() {
             inputEl = '<input type="text" class="form-control yearbook-profile-field" id="yb_profile_' +
                 escapeHtml(field.id) + '" value="' + escapeAttr(value) + '" maxlength="500">';
         }
-
         container.append(
             '<div class="mb-3">' +
             '  <label class="form-label fw-semibold" for="yb_profile_' + escapeHtml(field.id) + '">' + escapeHtml(field.label) + '</label>' +
@@ -188,12 +244,13 @@ function renderProfileFields() {
         );
     });
 
-    // Auto-save profile on change with debounce
     container.find('.yearbook-profile-field').on('input change', function() {
         if (profileSaveTimer) clearTimeout(profileSaveTimer);
         profileSaveTimer = setTimeout(function() { saveProfile(); }, 800);
     });
 }
+
+// ─────────────────── Umfragen ───────────────────
 
 function renderQuestions() {
     const container = $('#questions_container');
@@ -201,69 +258,150 @@ function renderQuestions() {
     let hasQuestions = false;
 
     yearbookQuestions.forEach(function(q) {
-        if (q.anonymous) return;
         hasQuestions = true;
         const existingAnswer = myAnswers[q.id] || '';
         const questionDiv = $('<div class="yearbook-question">');
-        questionDiv.append('<div class="question-label">' + escapeHtml(q.question) + '</div>');
-        questionDiv.append(renderQuestionInput(q, existingAnswer, false));
+
+        let badge = q.anonymous
+            ? ' <span class="badge bg-secondary badge-anonymous"><i class="bi bi-incognito"></i> Anonym</span>'
+            : ' <span class="badge bg-primary badge-anonymous"><i class="bi bi-person"></i> Namentlich</span>';
+        questionDiv.append('<div class="question-label">' + escapeHtml(q.question) + badge + '</div>');
+
+        if (q.type === 'upload') {
+            questionDiv.append(renderUploadField(q, 'answer'));
+        } else {
+            questionDiv.append(renderQuestionInput(q, existingAnswer));
+        }
         container.append(questionDiv);
     });
 
     if (!hasQuestions) $('#no_questions_msg').show();
 }
 
-function renderSurveys() {
-    const container = $('#surveys_container');
-    container.empty();
-    let hasSurveys = false;
+// ─────────────────── Upload Field ───────────────────
 
-    yearbookQuestions.forEach(function(q) {
-        if (!q.anonymous) return;
-        hasSurveys = true;
-        const existingAnswer = myAnswers[q.id] || '';
-        const questionDiv = $('<div class="yearbook-question">');
-        questionDiv.append(
-            '<div class="question-label">' + escapeHtml(q.question) +
-            ' <span class="badge bg-secondary badge-anonymous"><i class="bi bi-incognito"></i> Anonym</span></div>'
-        );
-        questionDiv.append(renderQuestionInput(q, existingAnswer, true));
-        container.append(questionDiv);
+function renderUploadField(fieldConfig, context) {
+    const fieldId = fieldConfig.id;
+    const maxUploads = fieldConfig.max_uploads || 5;
+    const maxFileSizeMB = fieldConfig.max_file_size ? Math.ceil(fieldConfig.max_file_size / 1000000) : 10;
+    const wrapper = $('<div class="mb-3">');
+
+    if (context === 'profile') {
+        wrapper.append('<label class="form-label fw-semibold">' + escapeHtml(fieldConfig.label) + '</label>');
+    }
+
+    const uploadListEl = $('<div class="upload-list mb-2">');
+    wrapper.append(uploadListEl);
+    const statusEl = $('<span class="save-indicator ms-2">');
+    wrapper.append(statusEl);
+
+    const addBtnRow = $('<div class="mt-1">');
+    const fileInput = $('<input type="file" class="d-none">').attr('id', 'upload_input_' + fieldId);
+    const addBtn = $('<button type="button" class="btn btn-sm btn-outline-secondary">')
+        .html('<i class="bi bi-upload"></i> Datei hochladen')
+        .attr('title', 'Max. ' + maxFileSizeMB + ' MB');
+    addBtnRow.append(fileInput).append(addBtn)
+        .append(' <small class="text-body-secondary">Max. ' + maxFileSizeMB + ' MB, max. ' + maxUploads + ' Datei(en)</small>');
+    wrapper.append(addBtnRow);
+
+    function refreshUploads() {
+        uploadListEl.empty();
+        const fieldUploads = myUploads.filter(function(u) { return u.field_id === fieldId && u.context === context; });
+        fieldUploads.forEach(function(up) {
+            const item = $('<div class="upload-item">');
+            item.append('<i class="bi bi-paperclip"></i>');
+            item.append('<span class="upload-name">' + escapeHtml(up.filename) + '</span>');
+            const delBtn = $('<button type="button" class="btn btn-sm btn-outline-danger py-0 px-1">')
+                .html('<i class="bi bi-trash"></i>').attr('title', 'Löschen');
+            delBtn.on('click', function() {
+                showTemplateModal(
+                    'Datei löschen',
+                    'Möchtest du die Datei <strong>' + escapeHtml(up.filename) + '</strong> wirklich löschen?',
+                    'Ja, löschen', 'btn-danger',
+                    'Abbrechen', 'btn-secondary',
+                    function() {
+                        api_call('/api/yearbook/delete_upload', { upload_id: up.id }, function(resp) {
+                            if (resp.success) {
+                                myUploads = myUploads.filter(function(u) { return u.id !== up.id; });
+                                refreshUploads();
+                            } else {
+                                showTemplateModal('Fehler', escapeHtml(resp.error || 'Unbekannter Fehler'), 'OK', 'btn-primary', null, null, function() {});
+                            }
+                        });
+                    }
+                );
+            });
+            item.append(delBtn);
+            uploadListEl.append(item);
+        });
+        if (fieldUploads.length >= maxUploads) addBtnRow.hide();
+        else addBtnRow.show();
+    }
+
+    refreshUploads();
+    addBtn.on('click', function() { fileInput.click(); });
+    fileInput.on('change', function() {
+        const file = this.files[0];
+        if (!file) return;
+        if (file.size > (fieldConfig.max_file_size || 10000000)) {
+            showTemplateModal('Datei zu groß',
+                'Die Datei überschreitet die maximale Größe von ' + maxFileSizeMB + ' MB.',
+                'OK', 'btn-primary', null, null, function() {});
+            this.value = '';
+            return;
+        }
+        statusEl.html('<span class="text-body-secondary"><i class="bi bi-arrow-repeat"></i> Hochladen...</span>');
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('field_id', fieldId);
+        formData.append('context', context);
+        $.ajax({
+            url: '/api/yearbook/upload_file',
+            method: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            dataType: 'json',
+            success: function(resp) {
+                if (resp.success) {
+                    myUploads.push({ id: resp.upload_id, filename: resp.filename, field_id: fieldId, context: context });
+                    refreshUploads();
+                    statusEl.html('<span class="text-success"><i class="bi bi-check-circle"></i></span>');
+                    setTimeout(function() { statusEl.html(''); }, 2000);
+                } else {
+                    showTemplateModal('Upload-Fehler', escapeHtml(resp.error || 'Fehler beim Hochladen'), 'OK', 'btn-primary', null, null, function() {});
+                }
+                fileInput.val('');
+            },
+            error: function() {
+                showTemplateModal('Fehler', 'Netzwerkfehler beim Hochladen.', 'OK', 'btn-primary', null, null, function() {});
+                fileInput.val('');
+            }
+        });
     });
 
-    if (!hasSurveys) $('#no_surveys_msg').show();
+    return wrapper;
 }
 
-function renderQuestionInput(question, existingAnswer, isAnonymous) {
+// ─────────────────── Question Inputs ───────────────────
+
+function renderQuestionInput(question, existingAnswer) {
     const wrapper = $('<div>');
     const qId = 'yb_q_' + question.id;
     const saveStatus = $('<span class="save-indicator ms-2">');
 
     if (question.type === 'text') {
-        const input = $('<input type="text" class="form-control">')
-            .attr('id', qId).attr('maxlength', '2000').val(existingAnswer);
+        const input = $('<input type="text" class="form-control">').attr('id', qId).attr('maxlength', '2000').val(existingAnswer);
         wrapper.append(input);
-
-        // Auto-save on input with debounce
         input.on('input', function() {
-            debounceAnswerSave(question.id, function() {
-                saveAnswer(question.id, input.val(), saveStatus);
-            });
+            debounceAnswerSave(question.id, function() { saveAnswer(question.id, input.val(), saveStatus); });
         });
-        wrapper.append(saveStatus);
     } else if (question.type === 'textarea') {
-        const input = $('<textarea class="form-control">')
-            .attr('id', qId).attr('maxlength', '2000').attr('rows', '3').val(existingAnswer);
+        const input = $('<textarea class="form-control">').attr('id', qId).attr('maxlength', '2000').attr('rows', '3').val(existingAnswer);
         wrapper.append(input);
-
-        // Auto-save on input with debounce
         input.on('input', function() {
-            debounceAnswerSave(question.id, function() {
-                saveAnswer(question.id, input.val(), saveStatus);
-            });
+            debounceAnswerSave(question.id, function() { saveAnswer(question.id, input.val(), saveStatus); });
         });
-        wrapper.append(saveStatus);
-
     } else if (question.type === 'single_choice') {
         if (question.options && question.options.length > 15) {
             wrapper.append(createSearchableSelect(qId, question.options, existingAnswer, function(val) {
@@ -278,14 +416,8 @@ function renderQuestionInput(question, existingAnswer, isAnonymous) {
                 select.append(option);
             });
             wrapper.append(select);
-
-            // Auto-save on change
-            select.on('change', function() {
-                saveAnswer(question.id, select.val(), saveStatus);
-            });
+            select.on('change', function() { saveAnswer(question.id, select.val(), saveStatus); });
         }
-        wrapper.append(saveStatus);
-
     } else if (question.type === 'multiple_choice') {
         let selectedValues = [];
         try {
@@ -293,7 +425,7 @@ function renderQuestionInput(question, existingAnswer, isAnonymous) {
                 ? JSON.parse(existingAnswer) : (Array.isArray(existingAnswer) ? existingAnswer : []);
         } catch(e) { selectedValues = []; }
 
-        const checkboxContainer = $('<div class="row">');
+        const cbContainer = $('<div class="row">');
         (question.options || []).forEach(function(opt) {
             const cbId = qId + '_' + opt.replace(/[^a-zA-Z0-9]/g, '_');
             const isChecked = selectedValues.includes(opt);
@@ -306,21 +438,199 @@ function renderQuestionInput(question, existingAnswer, isAnonymous) {
                 '  <label class="form-check-label" for="' + escapeAttr(cbId) + '">' + escapeHtml(opt) + '</label>' +
                 '</div>'
             );
-            checkboxContainer.append(col);
+            cbContainer.append(col);
         });
-        wrapper.append(checkboxContainer);
-
-        // Auto-save on checkbox change
+        wrapper.append(cbContainer);
         wrapper.find('.yb-mc-checkbox').on('change', function() {
             const selected = [];
             wrapper.find('.yb-mc-checkbox:checked').each(function() { selected.push($(this).val()); });
             saveAnswer(question.id, selected, saveStatus);
         });
-        wrapper.append(saveStatus);
     }
 
+    wrapper.append(saveStatus);
     return wrapper;
 }
+
+// ─────────────────── Kommentare ───────────────────
+
+function setupCommentWriter() {
+    // Searchable user picker
+    const input = $('#comment_target_input');
+    const dropdown = $('#comment_target_dropdown');
+    const hiddenField = $('#comment_target_username');
+
+    function renderUserOptions(filter) {
+        dropdown.empty();
+        const fl = (filter || '').toLowerCase();
+        let count = 0;
+        commentableUsers.forEach(function(u) {
+            const label = u.name + ' (' + u.username + ')';
+            if (fl && label.toLowerCase().indexOf(fl) === -1) return;
+            if (count >= 50) return;
+            count++;
+            const opt = $('<div class="search-select-option">').text(label);
+            opt.on('mousedown', function(e) {
+                e.preventDefault();
+                input.val(label);
+                hiddenField.val(u.username);
+                dropdown.hide();
+            });
+            dropdown.append(opt);
+        });
+        if (count === 0) dropdown.append('<div class="search-select-option text-body-secondary">Keine Ergebnisse</div>');
+    }
+
+    input.on('focus', function() { renderUserOptions(input.val()); dropdown.show(); });
+    input.on('input', function() { hiddenField.val(''); renderUserOptions(input.val()); dropdown.show(); });
+    input.on('blur', function() { setTimeout(function() { dropdown.hide(); }, 200); });
+
+    $('#send_comment_btn').on('click', function() {
+        const targetUsername = hiddenField.val().trim();
+        const text = $('#comment_write_text').val().trim();
+
+        if (!targetUsername) {
+            showTemplateModal('Empfänger fehlt', 'Bitte wähle einen Empfänger aus der Liste aus.', 'OK', 'btn-primary', null, null, function() {});
+            return;
+        }
+        if (!text) {
+            showTemplateModal('Text fehlt', 'Bitte schreibe einen Kommentar.', 'OK', 'btn-primary', null, null, function() {});
+            return;
+        }
+
+        const targetUser = commentableUsers.find(function(u) { return u.username === targetUsername; });
+        const targetName = targetUser ? targetUser.name : targetUsername;
+
+        showTemplateModal(
+            'Kommentar senden',
+            'Möchtest du einen Kommentar an <strong>' + escapeHtml(targetName) + '</strong> senden?<br><em>"' + escapeHtml(text.substring(0, 100)) + (text.length > 100 ? '...' : '') + '"</em>',
+            'Senden', 'btn-primary',
+            'Abbrechen', 'btn-secondary',
+            function() {
+                api_call('/api/yearbook/post_comment', {
+                    target_username: targetUsername, text: text
+                }, function(resp) {
+                    if (resp.success) {
+                        $('#comment_write_text').val('');
+                        input.val('');
+                        hiddenField.val('');
+                        showTemplateModal('Gesendet', 'Dein Kommentar wurde gesendet. Der Empfänger muss ihn zuerst annehmen.', 'OK', 'btn-success', null, null, function() {});
+                    } else {
+                        showTemplateModal('Fehler', escapeHtml(resp.error || 'Unbekannter Fehler'), 'OK', 'btn-danger', null, null, function() {});
+                    }
+                }, function() {
+                    showTemplateModal('Fehler', 'Netzwerkfehler beim Senden.', 'OK', 'btn-danger', null, null, function() {});
+                });
+            }
+        );
+    });
+}
+
+function loadReceivedCommentsBadge() {
+    api_call('/api/yearbook/get_received_comments', {}, function(data) {
+        if (!data.success) return;
+        const pending = (data.comments || []).filter(function(c) { return c.status === 'pending'; }).length;
+        if (pending > 0) {
+            $('#pending_comments_badge').text(pending).show();
+        } else {
+            $('#pending_comments_badge').hide();
+        }
+    }, function() {});
+}
+
+function loadReceivedComments() {
+    const container = $('#received_comments_container');
+    container.html('<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>');
+
+    api_call('/api/yearbook/get_received_comments', {}, function(data) {
+        container.empty();
+        if (!data.success) {
+            container.html('<p class="text-danger">' + escapeHtml(data.error || 'Fehler beim Laden') + '</p>');
+            return;
+        }
+        const comments = data.comments || [];
+        if (comments.length === 0) {
+            container.html('<p class="text-body-secondary"><i class="bi bi-info-circle"></i> Noch keine Kommentare erhalten.</p>');
+            $('#pending_comments_badge').hide();
+            return;
+        }
+
+        let pendingCount = 0;
+        comments.forEach(function(c) {
+            const isPending = c.status === 'pending';
+            if (isPending) pendingCount++;
+
+            const card = $('<div class="comment-card' + (isPending ? ' pending' : '') + '">');
+
+            // Status badge
+            const headerRow = $('<div class="d-flex justify-content-between align-items-start mb-1">');
+            const badgeHtml = isPending
+                ? '<span class="badge bg-warning text-dark"><i class="bi bi-clock"></i> Ausstehend</span>'
+                : '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Angenommen</span>';
+            headerRow.append('<span>' + badgeHtml + '</span>');
+            headerRow.append('<span class="comment-meta"><i class="bi bi-person"></i> ' + escapeHtml(c.commenter_name || 'Unbekannt') + '</span>');
+            card.append(headerRow);
+
+            card.append('<div class="mb-2 mt-1">' + escapeHtml(c.text) + '</div>');
+
+            // Action buttons
+            const btnRow = $('<div class="d-flex gap-2">');
+            if (isPending) {
+                const approveBtn = $('<button type="button" class="btn btn-sm btn-success">')
+                    .html('<i class="bi bi-check-lg"></i> Annehmen');
+                approveBtn.on('click', function() {
+                    showTemplateModal(
+                        'Kommentar annehmen',
+                        'Möchtest du diesen Kommentar von <strong>' + escapeHtml(c.commenter_name || 'Unbekannt') + '</strong> annehmen?',
+                        'Annehmen', 'btn-success',
+                        'Abbrechen', 'btn-secondary',
+                        function() {
+                            api_call('/api/yearbook/approve_comment', { comment_id: c.id }, function(resp) {
+                                if (resp.success) { loadReceivedComments(); }
+                                else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
+                            }, function() {
+                                showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {});
+                            });
+                        }
+                    );
+                });
+                btnRow.append(approveBtn);
+            }
+
+            const removeBtn = $('<button type="button" class="btn btn-sm btn-outline-danger">')
+                .html('<i class="bi bi-x-lg"></i> Entfernen');
+            removeBtn.on('click', function() {
+                showTemplateModal(
+                    'Kommentar entfernen',
+                    'Möchtest du diesen Kommentar entfernen?',
+                    'Entfernen', 'btn-danger',
+                    'Abbrechen', 'btn-secondary',
+                    function() {
+                        api_call('/api/yearbook/remove_comment', { comment_id: c.id }, function(resp) {
+                            if (resp.success) { loadReceivedComments(); }
+                            else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
+                        }, function() {
+                            showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {});
+                        });
+                    }
+                );
+            });
+            btnRow.append(removeBtn);
+            card.append(btnRow);
+            container.append(card);
+        });
+
+        if (pendingCount > 0) {
+            $('#pending_comments_badge').text(pendingCount).show();
+        } else {
+            $('#pending_comments_badge').hide();
+        }
+    }, function() {
+        container.html('<p class="text-danger"><i class="bi bi-x-circle"></i> Kommentare konnten nicht geladen werden.</p>');
+    });
+}
+
+// ─────────────────── Save helpers ───────────────────
 
 function debounceAnswerSave(questionId, callback) {
     if (answerSaveTimers[questionId]) clearTimeout(answerSaveTimers[questionId]);
@@ -355,11 +665,7 @@ function createSearchableSelect(id, options, selectedValue, onSelect) {
 
     input.on('focus', function() { renderOptions(input.val()); dropdown.show(); });
     input.on('input', function() { renderOptions(input.val()); dropdown.show(); });
-    input.on('blur', function() {
-        // Delay hiding to allow mousedown on options to complete
-        setTimeout(function() { dropdown.hide(); }, 200);
-    });
-
+    input.on('blur', function() { setTimeout(function() { dropdown.hide(); }, 200); });
     container.append(input).append(dropdown);
     return container;
 }
@@ -379,6 +685,7 @@ function saveAnswer(questionId, answer, statusEl) {
 function saveProfile() {
     const fields = {};
     yearbookProfileFields.forEach(function(field) {
+        if (field.type === 'upload') return;
         fields[field.id] = $('#yb_profile_' + field.id).val() || '';
     });
     const statusEl = $('#profile_save_status');

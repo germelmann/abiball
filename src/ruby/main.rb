@@ -204,7 +204,11 @@ class SetupDatabase
             # YearbookEntry constraints
             { name: 'yearbook_entry_id_unique', query: 'CREATE CONSTRAINT yearbook_entry_id_unique IF NOT EXISTS FOR (y:YearbookEntry) REQUIRE y.id IS UNIQUE' },
             # YearbookProfile constraints
-            { name: 'yearbook_profile_id_unique', query: 'CREATE CONSTRAINT yearbook_profile_id_unique IF NOT EXISTS FOR (yp:YearbookProfile) REQUIRE yp.id IS UNIQUE' }
+            { name: 'yearbook_profile_id_unique', query: 'CREATE CONSTRAINT yearbook_profile_id_unique IF NOT EXISTS FOR (yp:YearbookProfile) REQUIRE yp.id IS UNIQUE' },
+            # YearbookUpload constraints
+            { name: 'yearbook_upload_id_unique', query: 'CREATE CONSTRAINT yearbook_upload_id_unique IF NOT EXISTS FOR (u:YearbookUpload) REQUIRE u.id IS UNIQUE' },
+            # YearbookComment constraints
+            { name: 'yearbook_comment_id_unique', query: 'CREATE CONSTRAINT yearbook_comment_id_unique IF NOT EXISTS FOR (c:YearbookComment) REQUIRE c.id IS UNIQUE' }
         ]
         
         constraints.each do |constraint|

@@ -34,16 +34,48 @@
         </div>
     </div>
 
-    <!-- Answers (non-anonymous) -->
-    <div class="card mb-4">
+    <!-- Answers (non-anonymous questions) -->
+    <div class="card mb-4" id="entry_answers_card">
         <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="card-title mb-0"><i class="bi bi-chat-square-text"></i> Antworten</h5>
+            <h5 class="card-title mb-0"><i class="bi bi-chat-square-text"></i> Umfragen (Namentlich)</h5>
             <button type="button" class="btn btn-sm btn-outline-warning edit-btn" id="edit_answers_btn" style="display:none;">
                 <i class="bi bi-pencil"></i> Bearbeiten
             </button>
         </div>
         <div class="card-body" id="entry_answers_container">
             <p class="text-body-secondary">Keine Antworten vorhanden.</p>
+        </div>
+    </div>
+
+    <!-- Comments section -->
+    <div class="card mb-4" id="comments_card">
+        <div class="card-header">
+            <h5 class="card-title mb-0"><i class="bi bi-chat-dots"></i> Kommentare</h5>
+        </div>
+        <div class="card-body">
+            <!-- Write a comment (shown to other users with yearbook_create) -->
+            <div id="write_comment_section" style="display:none;">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Kommentar schreiben</label>
+                    <textarea class="form-control" id="comment_text_input" rows="3" maxlength="1000"
+                        placeholder="Schreibe einen Kommentar..."></textarea>
+                    <div class="form-text">Max. 1000 Zeichen. Dein Name wird dem Eintrag-Eigentümer angezeigt.</div>
+                </div>
+                <button type="button" class="btn btn-primary" id="submit_comment_btn">
+                    <i class="bi bi-send"></i> Kommentar senden
+                </button>
+                <span id="comment_status" class="ms-2"></span>
+            </div>
+
+            <!-- Received comments (shown to entry owner or admin) -->
+            <div id="own_comments_section" style="display:none;">
+                <h6 class="mt-3 mb-2" id="own_comments_heading"><i class="bi bi-inbox"></i> Erhaltene Kommentare</h6>
+                <div id="own_comments_list"></div>
+            </div>
+
+            <div id="comments_no_content" style="display:none;">
+                <p class="text-body-secondary mb-0"><i class="bi bi-info-circle"></i> Keine Kommentare vorhanden.</p>
+            </div>
         </div>
     </div>
 </div>
@@ -98,6 +130,13 @@
     }
     .entry-field-row:last-child { border-bottom: none; }
     .save-indicator { display: inline-block; }
+    .upload-list-view { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem; }
+    .upload-item-view { display: inline-flex; align-items: center; gap: 0.4rem;
+        background: var(--bs-secondary-bg); border-radius: 0.375rem;
+        padding: 0.3rem 0.6rem; font-size: 0.875rem; }
+    .comment-card { border: 1px solid var(--bs-border-color); border-radius: 0.5rem; padding: 0.75rem 1rem; margin-bottom: 0.75rem; }
+    .comment-card.removed { opacity: 0.6; border-color: var(--bs-danger); }
+    .comment-meta { font-size: 0.8rem; color: var(--bs-secondary-color); }
 </style>
 
 <script>
@@ -138,7 +177,6 @@ function renderEntry(data) {
     $('#entry_user_name').text(data.name + ' (' + data.username + ')');
     $('#entry_content').show();
 
-    // Show edit buttons if user has yearbook_manage permission
     if (data.can_manage) {
         $('.edit-btn').show();
         $('#edit_profile_btn').off('click').on('click', function() { openEditProfileModal(); });
@@ -147,39 +185,80 @@ function renderEntry(data) {
 
     renderProfile(data);
     renderAnswers(data);
+    renderComments(data);
 }
+
+// ─────────────────── Profile ───────────────────
 
 function renderProfile(data) {
     const profileContainer = $('#entry_profile_container');
     const profileFields = data.profile_fields || [];
     const profile = data.profile || {};
-    let hasProfile = false;
+    const uploads = data.uploads || [];
+    let hasContent = false;
 
     let profileHtml = '';
     profileFields.forEach(function(field) {
-        const val = profile[field.id] || '';
-        if (val) hasProfile = true;
-        profileHtml += '<div class="entry-field-row"><strong>' + escapeHtml(field.label) + ':</strong> ' +
-            (val ? escapeHtml(val) : '<span class="text-body-secondary">–</span>') + '</div>';
+        if (field.type === 'upload') {
+            const fieldUploads = uploads.filter(function(u) { return u.field_id === field.id && u.context === 'profile'; });
+            if (fieldUploads.length === 0) {
+                profileHtml += '<div class="entry-field-row"><strong>' + escapeHtml(field.label) + ':</strong> <span class="text-body-secondary">–</span></div>';
+            } else {
+                hasContent = true;
+                let uploadLinks = '<div class="upload-list-view">';
+                fieldUploads.forEach(function(up) {
+                    const icon = getFileIcon(up.mimetype, up.filename);
+                    uploadLinks += '<a href="/api/yearbook/file/' + encodeURIComponent(up.id) + '" target="_blank" class="upload-item-view">' +
+                        icon + escapeHtml(up.filename) + '</a>';
+                });
+                uploadLinks += '</div>';
+                profileHtml += '<div class="entry-field-row"><strong>' + escapeHtml(field.label) + ':</strong>' + uploadLinks + '</div>';
+            }
+        } else {
+            const val = profile[field.id] || '';
+            if (val) hasContent = true;
+            profileHtml += '<div class="entry-field-row"><strong>' + escapeHtml(field.label) + ':</strong> ' +
+                (val ? escapeHtml(val) : '<span class="text-body-secondary">–</span>') + '</div>';
+        }
     });
 
-    if (hasProfile || profileFields.length > 0) {
-        profileContainer.html(profileHtml);
+    if (hasContent || profileFields.length > 0) {
+        profileContainer.html(profileHtml || '<p class="text-body-secondary">Kein Steckbrief vorhanden.</p>');
     }
 }
+
+// ─────────────────── Answers ───────────────────
 
 function renderAnswers(data) {
     const answersContainer = $('#entry_answers_container');
     const questions = data.questions || [];
     const answers = data.answers || {};
-    let hasAnswers = false;
+    const uploads = data.uploads || [];
+    let hasContent = false;
 
     let answersHtml = '';
     questions.forEach(function(q) {
         if (q.anonymous) return;
+
+        if (q.type === 'upload') {
+            const fieldUploads = uploads.filter(function(u) { return u.field_id === q.id && u.context === 'answer'; });
+            if (fieldUploads.length > 0) {
+                hasContent = true;
+                let uploadLinks = '<div class="upload-list-view">';
+                fieldUploads.forEach(function(up) {
+                    const icon = getFileIcon(up.mimetype, up.filename);
+                    uploadLinks += '<a href="/api/yearbook/file/' + encodeURIComponent(up.id) + '" target="_blank" class="upload-item-view">' +
+                        icon + escapeHtml(up.filename) + '</a>';
+                });
+                uploadLinks += '</div>';
+                answersHtml += '<div class="entry-field-row"><strong>' + escapeHtml(q.question) + ':</strong>' + uploadLinks + '</div>';
+            }
+            return;
+        }
+
         let answer = answers[q.id] || '';
         if (!answer) return;
-        hasAnswers = true;
+        hasContent = true;
 
         let displayAnswer = answer;
         try {
@@ -190,12 +269,192 @@ function renderAnswers(data) {
         answersHtml += '<div class="entry-field-row"><strong>' + escapeHtml(q.question) + ':</strong> ' + escapeHtml(displayAnswer) + '</div>';
     });
 
-    if (hasAnswers) {
+    if (hasContent) {
         answersContainer.html(answersHtml);
     }
 }
 
-// --- Edit Profile ---
+// ─────────────────── Comments ───────────────────
+
+function renderComments(data) {
+    const isOwn = data.is_own || false;
+    const canManage = data.can_manage || false;
+    const targetUsername = data.username;
+
+    // Show write-comment form if viewing someone else's entry
+    if (!isOwn) {
+        $('#write_comment_section').show();
+        $('#submit_comment_btn').off('click').on('click', function() {
+            const text = $('#comment_text_input').val().trim();
+            if (!text) { $('#comment_status').html('<span class="text-danger">Bitte Text eingeben</span>'); return; }
+            $('#submit_comment_btn').prop('disabled', true);
+            $('#comment_status').html('<span class="text-body-secondary"><i class="bi bi-arrow-repeat"></i></span>');
+            api_call('/api/yearbook/post_comment', { target_username: targetUsername, text: text }, function(resp) {
+                if (resp.success) {
+                    $('#comment_text_input').val('');
+                    $('#comment_status').html('<span class="text-success"><i class="bi bi-check-circle"></i> Kommentar gesendet</span>');
+                    setTimeout(function() { $('#comment_status').html(''); }, 3000);
+                } else {
+                    $('#comment_status').html('<span class="text-danger"><i class="bi bi-x-circle"></i> ' + escapeHtml(resp.error || 'Fehler') + '</span>');
+                }
+                $('#submit_comment_btn').prop('disabled', false);
+            }, function() {
+                $('#comment_status').html('<span class="text-danger">Netzwerkfehler</span>');
+                $('#submit_comment_btn').prop('disabled', false);
+            });
+        });
+    }
+
+    // Show received/all comments to entry owner or admin
+    if (isOwn || canManage) {
+        $('#own_comments_section').show();
+        if (canManage) {
+            $('#own_comments_heading').html('<i class="bi bi-shield"></i> Alle Kommentare');
+        }
+        loadComments(targetUsername, canManage);
+    }
+}
+
+function loadComments(targetUsername, isAdmin) {
+    const container = $('#own_comments_list');
+    container.html('<div class="text-center py-2"><div class="spinner-border spinner-border-sm text-primary"></div></div>');
+
+    const endpoint = isAdmin ? '/api/yearbook/admin_get_comments' : '/api/yearbook/get_received_comments';
+    const params = isAdmin ? { target_username: targetUsername } : {};
+
+    api_call(endpoint, params, function(data) {
+        container.empty();
+        if (!data.success) {
+            container.html('<p class="text-danger">' + escapeHtml(data.error || 'Fehler') + '</p>');
+            return;
+        }
+        const comments = data.comments || [];
+        if (comments.length === 0) {
+            container.html('<p class="text-body-secondary">' + (isAdmin ? 'Keine Kommentare vorhanden.' : 'Noch keine Kommentare erhalten.') + '</p>');
+            return;
+        }
+        comments.forEach(function(c) {
+            const isRemoved = c.status === 'removed';
+            const isPending = c.status === 'pending';
+            const card = $('<div class="comment-card' + (isRemoved ? ' removed' : '') + '">');
+
+            // Status badge
+            let badgeHtml;
+            if (isRemoved) {
+                badgeHtml = '<span class="badge bg-danger me-1"><i class="bi bi-x-circle"></i> Entfernt</span>';
+            } else if (isPending) {
+                badgeHtml = '<span class="badge bg-warning text-dark me-1"><i class="bi bi-clock"></i> Ausstehend</span>';
+            } else {
+                badgeHtml = '<span class="badge bg-success me-1"><i class="bi bi-check-circle"></i> Angenommen</span>';
+            }
+            const headerRow = $('<div class="d-flex justify-content-between align-items-start mb-1">');
+            headerRow.append('<span>' + badgeHtml + '</span>');
+            let commenterMeta = '<span class="comment-meta"><i class="bi bi-person"></i> ' + escapeHtml(c.commenter_name || 'Unbekannt');
+            if (isAdmin) commenterMeta += ' (' + escapeHtml(c.commenter_username || '') + ')';
+            commenterMeta += '</span>';
+            headerRow.append(commenterMeta);
+            card.append(headerRow);
+
+            const textDiv = $('<div class="mb-2 mt-1">');
+            if (isRemoved) textDiv.addClass('text-decoration-line-through text-body-secondary');
+            textDiv.text(c.text);
+            card.append(textDiv);
+
+            const btnRow = $('<div class="d-flex gap-2 flex-wrap">');
+
+            // Approve button (pending comments)
+            if (isPending) {
+                const approveBtn = $('<button type="button" class="btn btn-sm btn-success">').html('<i class="bi bi-check-lg"></i> Annehmen');
+                approveBtn.on('click', function() {
+                    showTemplateModal(
+                        'Kommentar annehmen',
+                        'Möchtest du diesen Kommentar von <strong>' + escapeHtml(c.commenter_name || 'Unbekannt') + '</strong> annehmen?',
+                        'Annehmen', 'btn-success', 'Abbrechen', 'btn-secondary',
+                        function() {
+                            api_call('/api/yearbook/approve_comment', { comment_id: c.id }, function(resp) {
+                                if (resp.success) { loadComments(targetUsername, isAdmin); }
+                                else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
+                            }, function() {
+                                showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {});
+                            });
+                        }
+                    );
+                });
+                btnRow.append(approveBtn);
+            }
+
+            // Remove button (non-removed comments)
+            if (!isRemoved) {
+                const removeBtn = $('<button type="button" class="btn btn-sm btn-outline-danger">').html('<i class="bi bi-x-lg"></i> Entfernen');
+                removeBtn.on('click', function() {
+                    showTemplateModal(
+                        'Kommentar entfernen',
+                        'Möchtest du diesen Kommentar entfernen?',
+                        'Entfernen', 'btn-danger', 'Abbrechen', 'btn-secondary',
+                        function() {
+                            api_call('/api/yearbook/remove_comment', { comment_id: c.id }, function(resp) {
+                                if (resp.success) { loadComments(targetUsername, isAdmin); }
+                                else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Unbekannter Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
+                            }, function() {
+                                showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {});
+                            });
+                        }
+                    );
+                });
+                btnRow.append(removeBtn);
+            }
+
+            // Admin-only: restore removed comments
+            if (isAdmin && isRemoved) {
+                const restoreBtn = $('<button type="button" class="btn btn-sm btn-outline-success">').html('<i class="bi bi-arrow-counterclockwise"></i> Wiederherstellen');
+                restoreBtn.on('click', function() {
+                    showTemplateModal(
+                        'Kommentar wiederherstellen',
+                        'Kommentar von <strong>' + escapeHtml(c.commenter_name || 'Unbekannt') + '</strong> wiederherstellen?<br><small class="text-body-secondary">Der Status wird auf "Ausstehend" gesetzt.</small>',
+                        'Wiederherstellen', 'btn-success', 'Abbrechen', 'btn-secondary',
+                        function() {
+                            api_call('/api/yearbook/admin_restore_comment', { comment_id: c.id }, function(resp) {
+                                if (resp.success) { loadComments(targetUsername, isAdmin); }
+                                else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
+                            }, function() {
+                                showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {});
+                            });
+                        }
+                    );
+                });
+                btnRow.append(restoreBtn);
+            }
+
+            // Admin-only: permanently delete
+            if (isAdmin) {
+                const delBtn = $('<button type="button" class="btn btn-sm btn-outline-danger">').html('<i class="bi bi-trash"></i> Endgültig löschen');
+                delBtn.on('click', function() {
+                    showTemplateModal(
+                        'Kommentar endgültig löschen',
+                        'Kommentar von <strong>' + escapeHtml(c.commenter_name || 'Unbekannt') + '</strong> endgültig löschen? Dies kann nicht rückgängig gemacht werden.',
+                        'Endgültig löschen', 'btn-danger', 'Abbrechen', 'btn-secondary',
+                        function() {
+                            api_call('/api/yearbook/admin_delete_comment', { comment_id: c.id }, function(resp) {
+                                if (resp.success) { loadComments(targetUsername, isAdmin); }
+                                else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Unbekannter Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
+                            }, function() {
+                                showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {});
+                            });
+                        }
+                    );
+                });
+                btnRow.append(delBtn);
+            }
+
+            card.append(btnRow);
+            container.append(card);
+        });
+    }, function() {
+        container.html('<p class="text-danger">Kommentare konnten nicht geladen werden.</p>');
+    });
+}
+
+// ─────────────────── Edit Profile Modal ───────────────────
 
 function openEditProfileModal() {
     const data = entryData;
@@ -207,6 +466,7 @@ function openEditProfileModal() {
     container.empty();
 
     profileFields.forEach(function(field) {
+        if (field.type === 'upload') return; // uploads managed separately
         const val = profile[field.id] || '';
         let inputHtml;
         if (field.type === 'textarea') {
@@ -235,7 +495,7 @@ function openEditProfileModal() {
                 $('#editProfileModal').modal('hide');
                 loadEntry();
             } else {
-                alert('Fehler: ' + (resp.error || 'Unbekannter Fehler'));
+                showTemplateModal('Fehler', escapeHtml(resp.error || 'Unbekannter Fehler'), 'OK', 'btn-danger', null, null, function() {});
             }
         });
     });
@@ -243,7 +503,7 @@ function openEditProfileModal() {
     new bootstrap.Modal($('#editProfileModal')[0]).show();
 }
 
-// --- Edit Answers ---
+// ─────────────────── Edit Answers Modal ───────────────────
 
 function openEditAnswersModal() {
     const data = entryData;
@@ -255,7 +515,7 @@ function openEditAnswersModal() {
     container.empty();
 
     questions.forEach(function(q) {
-        if (q.anonymous) return;
+        if (q.anonymous || q.type === 'upload') return;
 
         const qDiv = $('<div class="mb-4">');
         qDiv.append('<label class="form-label fw-semibold">' + escapeHtml(q.question) + '</label>');
@@ -264,12 +524,13 @@ function openEditAnswersModal() {
         const saveStatus = $('<span class="save-indicator ms-2">');
 
         if (q.type === 'text') {
-            const input = $('<input type="text" class="form-control">')
-                .attr('maxlength', '2000').val(existingAnswer);
+            const input = $('<input type="text" class="form-control">').attr('maxlength', '2000').val(existingAnswer);
             qDiv.append(input);
-            input.on('change', function() {
-                adminSaveAnswer(data.username, q.id, input.val(), saveStatus);
-            });
+            input.on('change', function() { adminSaveAnswer(data.username, q.id, input.val(), saveStatus); });
+        } else if (q.type === 'textarea') {
+            const input = $('<textarea class="form-control">').attr('maxlength', '2000').attr('rows', '3').val(existingAnswer);
+            qDiv.append(input);
+            input.on('change', function() { adminSaveAnswer(data.username, q.id, input.val(), saveStatus); });
         } else if (q.type === 'single_choice') {
             const select = $('<select class="form-select">');
             select.append('<option value="">-- Bitte wählen --</option>');
@@ -279,9 +540,7 @@ function openEditAnswersModal() {
                 select.append(option);
             });
             qDiv.append(select);
-            select.on('change', function() {
-                adminSaveAnswer(data.username, q.id, select.val(), saveStatus);
-            });
+            select.on('change', function() { adminSaveAnswer(data.username, q.id, select.val(), saveStatus); });
         } else if (q.type === 'multiple_choice') {
             let selectedValues = [];
             try {
@@ -327,7 +586,6 @@ function adminSaveAnswer(username, questionId, answer, statusEl) {
         answer: answer
     }, function(resp) {
         if (resp.success) {
-            // Update local data
             if (entryData) entryData.answers[questionId] = (Array.isArray(answer) ? JSON.stringify(answer) : answer);
             showSaveStatus(statusEl, true);
         } else {
@@ -336,6 +594,17 @@ function adminSaveAnswer(username, questionId, answer, statusEl) {
     }, function() {
         showSaveStatus(statusEl, false, 'Netzwerkfehler');
     });
+}
+
+// ─────────────────── Helpers ───────────────────
+
+function getFileIcon(mimetype, filename) {
+    if (!mimetype) mimetype = '';
+    if (mimetype.startsWith('image/')) return '<i class="bi bi-file-image me-1"></i>';
+    if (mimetype === 'application/pdf') return '<i class="bi bi-file-pdf me-1"></i>';
+    if (mimetype.startsWith('video/')) return '<i class="bi bi-file-play me-1"></i>';
+    if (mimetype.startsWith('audio/')) return '<i class="bi bi-file-music me-1"></i>';
+    return '<i class="bi bi-paperclip me-1"></i>';
 }
 
 function showSaveStatus(el, success, errorMsg) {

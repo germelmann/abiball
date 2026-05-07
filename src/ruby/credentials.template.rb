@@ -54,7 +54,19 @@ YEARBOOK_ENABLED = false
 YEARBOOK_START_AT = nil  # e.g. '2026-01-01T00:00:00' or nil for no start restriction
 YEARBOOK_END_AT = nil    # e.g. '2026-06-30T23:59:59' or nil for no end restriction
 
+# Allow yearbook_manage users to delete ALL yearbook entries at once.
+# Set to true to show the "Alle Einträge löschen" button in jahrbuch_manage.
+YEARBOOK_ALLOW_DELETE_ALL = false
+
 YEARBOOK_QUESTIONS = [
+    # Non-anonymous question (namentlich):
+    # {
+    #     id: "quote",
+    #     type: "text",
+    #     question: "Dein Motto:",
+    #     anonymous: false
+    # },
+    # Anonymous question (anonym):
     # {
     #     id: "late_person",
     #     type: "single_choice",
@@ -63,17 +75,20 @@ YEARBOOK_QUESTIONS = [
     #     anonymous: true
     # },
     # {
-    #     id: "quote",
-    #     type: "text",
-    #     question: "Dein Motto:",
-    #     anonymous: false
-    # },
-    # {
     #     id: "best_memory",
     #     type: "multiple_choice",
     #     question: "Beste Erinnerungen?",
     #     options: ["Klassenfahrt", "Abiball", "Projektwoche", "Sportfest"],
     #     anonymous: false
+    # },
+    # Upload question (namentlich):
+    # {
+    #     id: "fav_photo",
+    #     type: "upload",
+    #     question: "Dein Lieblingsfoto:",
+    #     anonymous: false,
+    #     max_file_size: 5_000_000,   # 5 MB per file
+    #     max_uploads: 3              # max 3 files
     # }
 ]
 
@@ -82,7 +97,9 @@ YEARBOOK_PROFILE_FIELDS = [
     { id: "life_motto", label: "Lebensmotto", type: "text" },
     { id: "future_plans", label: "Zukunftspläne", type: "text" },
     { id: "best_memory", label: "Beste Erinnerung", type: "text" },
-    { id: "message_to_class", label: "Nachricht an die Stufe", type: "textarea" }
+    { id: "message_to_class", label: "Nachricht an die Stufe", type: "textarea" },
+    # Upload field example:
+    # { id: "photo", label: "Foto", type: "upload", max_file_size: 5_000_000, max_uploads: 1 }
 ]
 
 if defined? Mail
