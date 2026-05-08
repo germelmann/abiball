@@ -961,7 +961,7 @@ class Main < Sinatra::Base
         bank_result = neo4j_query(<<~END_OF_QUERY, {bank_account_id: bank_account_id})
             MATCH (b:BankAccount {id: $bank_account_id})
             RETURN b.id AS id, b.account_name AS account_name, b.bank_name AS bank_name,
-                   b.iban AS iban, b.bic AS bic
+                   b.iban AS iban, b.bic AS bic, b.escrow_document_url AS escrow_document_url
         END_OF_QUERY
         
         if bank_result.empty?
@@ -1045,7 +1045,8 @@ class Main < Sinatra::Base
         bank_accounts = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
             MATCH (e:Event {id: $event_id})-[:HAS_BANK_ACCOUNT]->(b:BankAccount)
             RETURN b.id AS id, b.account_name AS account_name, b.bank_name AS bank_name,
-                   b.iban AS iban, b.bic AS bic, b.percentage AS percentage
+                   b.iban AS iban, b.bic AS bic, b.percentage AS percentage,
+                   b.escrow_document_url AS escrow_document_url
             ORDER BY b.percentage DESC
         END_OF_QUERY
         
@@ -1285,6 +1286,10 @@ class Main < Sinatra::Base
                 io.puts "                <li><strong>BIC:</strong> #{bank_account['bic']}</li>"
                 io.puts "                <li><strong>Betrag:</strong> #{total_price.round(2)}€</li>"
                 io.puts "                <li><strong>Verwendungszweck:</strong> #{payment_ref}</li>"
+                if bank_account['escrow_document_url'] && !bank_account['escrow_document_url'].empty?
+                    escaped_url = CGI.escapeHTML(bank_account['escrow_document_url'])
+                    io.puts "                <li><strong>Treuhandvertrag:</strong> <a href='#{escaped_url}'>Vertrag ansehen</a></li>"
+                end
                 io.puts "            </ul>"
                 
                 if qr_code_data_uri
@@ -1583,7 +1588,8 @@ class Main < Sinatra::Base
                     bank_account_name: b.account_name,
                     bank_name: b.bank_name,
                     iban: b.iban,
-                    bic: b.bic
+                    bic: b.bic,
+                    escrow_document_url: b.escrow_document_url
                  } ELSE null END)[0] AS latest_payment_request
             RETURN o.id AS order_id,
                    o.ticket_count AS ticket_count,

@@ -487,6 +487,7 @@ function displayPreviousOrders(orders) {
                             <li><strong>BIC:</strong> ${order.latest_payment_request.bic || '-'}</li>
                             <li><strong>Betrag:</strong> ${order.total_price}€</li>
                             <li><strong>Verwendungszweck:</strong> <code>${order.payment_reference}</code></li>
+                            ${order.latest_payment_request.escrow_document_url && /^https?:\/\//i.test(order.latest_payment_request.escrow_document_url) ? `<li><strong>Treuhandvertrag:</strong> <a href="${order.latest_payment_request.escrow_document_url}" target="_blank">Vertrag ansehen</a></li>` : ''}
                         </ul>
                     </div>`;
             } else if (order.latest_payment_request && order.latest_payment_request.status === 'paid') {
