@@ -1299,9 +1299,7 @@ class Main < Sinatra::Base
                     io.puts "            <div style='margin: 20px 0; padding: 15px; background-color: #f8f9fa; border-radius: 5px;'>"
                     io.puts "                <h4 style='margin-top: 0;'>Schnelle Zahlung mit QR-Code</h4>"
                     io.puts "                <p>Scanne diesen QR-Code mit deiner Banking-App, um die Überweisung automatisch auszufüllen:</p>"
-                    io.puts "                <div style='text-align: center; margin: 15px 0;'>"
-                    io.puts "                    <img src='#{qr_code_data_uri}' alt='Payment QR Code' style='max-width: 300px; width: 100%; height: auto;' />"
-                    io.puts "                </div>"
+                    io.puts "                <img src='#{qr_code_data_uri}' alt='Payment QR Code' width='200' style='display: block; margin: 0 auto; max-width: 200px; width: 100%; height: auto; border: 0;' />"
                     io.puts "            </div>"
                 end
                 
@@ -2766,9 +2764,7 @@ class Main < Sinatra::Base
                         io.puts "                <div style='margin: 20px 0; padding: 15px; background-color: #f8f9fa; border-radius: 5px;'>"
                         io.puts "                    <h4 style='margin-top: 0;'>Schnelle Zahlung mit QR-Code</h4>"
                         io.puts "                    <p>Scanne diesen QR-Code mit deiner Banking-App, um die Überweisung automatisch auszufüllen:</p>"
-                        io.puts "                    <div style='text-align: center; margin: 15px 0;'>"
-                        io.puts "                        <img src='#{qr_code_data_uri}' alt='Payment QR Code' style='max-width: 300px; width: 100%; height: auto;' />"
-                        io.puts "                    </div>"
+                        io.puts "                    <img src='#{qr_code_data_uri}' alt='Payment QR Code' width='200' style='display: block; margin: 0 auto; max-width: 200px; width: 100%; height: auto; border: 0;' />"
                         io.puts "                    <p style='font-size: 0.9em; color: #666;'>"
                         io.puts "                        <strong>Hinweis:</strong> Dieser QR-Code enthält alle Zahlungsinformationen (Empfänger, IBAN, BIC, Betrag und Verwendungszweck). "
                         io.puts "                        Die meisten modernen Banking-Apps können diesen Code scannen und das Überweisungsformular automatisch ausfüllen."
