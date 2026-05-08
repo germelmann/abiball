@@ -4,8 +4,6 @@ class Main < Sinatra::Base
     require 'prawn/qrcode'
     require 'securerandom'
     require 'base64'
-
-    support_email = "<a href='mailto:#{SUPPORT_EMAIL}'>#{SUPPORT_EMAIL}</a>"
     
     # Order status translations
     def self.order_status_translations
@@ -1303,7 +1301,7 @@ class Main < Sinatra::Base
                 io.puts "            <p><strong>Wichtig:</strong> Bitte verwende unbedingt die Bestellnummer <code>#{payment_ref}</code> als Verwendungszweck!</p>"
                 io.puts "            <p>Nach Zahlungseingang werden deine Tickets freigeschaltet.</p>"
                 io.puts "            <p><a href=\"#{WEB_ROOT}/tickets\" class=\"btn\">Meine Bestellungen ansehen</a></p>"
-                io.puts "            <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>"
+                io.puts "            <p>Bei Fragen stehen wir dir gerne zur Verfügung: <a href='mailto:#{SUPPORT_EMAIL}'>#{SUPPORT_EMAIL}</a>.</p>"
                 io.string
             end
             
@@ -2647,7 +2645,7 @@ class Main < Sinatra::Base
                     io.puts "            </div>"
                 end
                 io.puts "            <p><a href=\"#{WEB_ROOT}/tickets\" class=\"btn\">Meine Bestellungen ansehen</a></p>"
-                io.puts "            <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>"
+                io.puts "            <p>Bei Fragen stehen wir dir gerne zur Verfügung: <a href='mailto:#{SUPPORT_EMAIL}'>#{SUPPORT_EMAIL}</a>.</p>"
                 io.string
             end
             
