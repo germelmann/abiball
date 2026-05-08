@@ -4,6 +4,8 @@ class Main < Sinatra::Base
     require 'prawn/qrcode'
     require 'securerandom'
     require 'base64'
+
+    support_email = "<a href='mailto:#{SUPPORT_EMAIL}'>#{SUPPORT_EMAIL}</a>"
     
     # Order status translations
     def self.order_status_translations
@@ -51,7 +53,7 @@ class Main < Sinatra::Base
     def generate_payment_reference(user_id, order_count)
         "#{user_id}#{order_count.to_s.rjust(3, '0')}".upcase
     end
-    
+
     # Generate EPC QR code data for SEPA payments
     # This format is compatible with most European banking apps
     def generate_epc_qr_data(account_name, iban, bic, amount, reference, recipient_info = '')
@@ -1277,14 +1279,9 @@ class Main < Sinatra::Base
                 io.puts "                <strong>Zahlungsaufforderung für deine Bestellung</strong>"
                 io.puts "            </div>"
                 io.puts "            <p>Hallo #{user_name},</p>"
-                io.puts "            <p>hier sind die Zahlungsinformationen für deine Ticket-Bestellung:</p>"
-                io.puts "            <div class=\"order-details\">"
-                io.puts "                <h3>Bestelldetails</h3>"
-                io.puts "                <p><strong>Bestellnummer:</strong> #{payment_ref}</p>"
-                io.puts "                <p><strong>Event:</strong> #{event[:name]}</p>"
-                io.puts "                <p><strong>Anzahl Tickets:</strong> #{participants.length}</p>"
-                io.puts "                <p><strong>Gesamtpreis:</strong> #{total_price.round(2)}€</p>"
-                io.puts "            </div>"
+                io.puts "            <p>hier sind die Zahlungsinformationen für deine Ticket-Bestellung ##{order_id} (#{payment_ref})</p>"
+                io.puts "            <p><strong>Anzahl Tickets:</strong> #{participants.length}</p>"
+                io.puts "            <p><strong>Gesamtpreis:</strong> #{total_price.round(2)}€</p>"
                 io.puts "            <h4>Bitte überweise auf folgendes Konto:</h4>"
                 io.puts "            <ul>"
                 io.puts "                <li><strong>Empfänger:</strong> #{bank_account['account_name']}</li>"
@@ -1297,7 +1294,7 @@ class Main < Sinatra::Base
                 
                 if qr_code_data_uri
                     io.puts "            <div style='margin: 20px 0; padding: 15px; background-color: #f8f9fa; border-radius: 5px;'>"
-                    io.puts "                <h4 style='margin-top: 0;'>Schnelle Zahlung mit QR-Code</h4>"
+                    io.puts "                <h4 style='margin-top: 0;'>Einfache Zahlung mit QR-Code</h4>"
                     io.puts "                <p>Scanne diesen QR-Code mit deiner Banking-App, um die Überweisung automatisch auszufüllen:</p>"
                     io.puts "                <img src='#{qr_code_data_uri}' alt='Payment QR Code' width='200' style='display: block; margin: 0 auto; max-width: 200px; width: 100%; height: auto; border: 0;' />"
                     io.puts "            </div>"
@@ -1306,7 +1303,7 @@ class Main < Sinatra::Base
                 io.puts "            <p><strong>Wichtig:</strong> Bitte verwende unbedingt die Bestellnummer <code>#{payment_ref}</code> als Verwendungszweck!</p>"
                 io.puts "            <p>Nach Zahlungseingang werden deine Tickets freigeschaltet.</p>"
                 io.puts "            <p><a href=\"#{WEB_ROOT}/tickets\" class=\"btn\">Meine Bestellungen ansehen</a></p>"
-                io.puts "            <p>Bei Fragen wende dich gerne an unseren Support.</p>"
+                io.puts "            <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>"
                 io.string
             end
             
@@ -2650,7 +2647,7 @@ class Main < Sinatra::Base
                     io.puts "            </div>"
                 end
                 io.puts "            <p><a href=\"#{WEB_ROOT}/tickets\" class=\"btn\">Meine Bestellungen ansehen</a></p>"
-                io.puts "            <p>Bei Fragen wende dich gerne an unseren Support.</p>"
+                io.puts "            <p>Bei Fragen stehen wir dir gerne zur Verfügung: #{support_email}.</p>"
                 io.string
             end
             
@@ -2660,135 +2657,6 @@ class Main < Sinatra::Base
     # rescue => e
     #     log("Bestelleingang für Bestellung #{order_id} fehlgeschlagen: #{e.message}")
     #     debug e
-    end
-
-    # Send payment request email with bank account details and QR code
-    # This is sent when a payment request is explicitly sent for an order
-    def send_order_confirmation_email(user_email, order_id, payment_ref, event, participants, total_price)
-        puts event
-        # Get user details
-        user_result = neo4j_query(<<~END_OF_QUERY, {email: user_email})
-            MATCH (u:User {email: $email})
-            RETURN u.name AS name
-        END_OF_QUERY
-        
-        user_name = user_result.first&.dig('name') || 'Liebe/r Nutzer/in'
-        
-        # Get bank account details from the order
-        bank_account_result = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
-            MATCH (o:TicketOrder {id: $order_id})-[:USES_ACCOUNT]->(b:BankAccount)
-            RETURN b.account_name AS account_name, b.bank_name AS bank_name,
-                   b.iban AS iban, b.bic AS bic
-        END_OF_QUERY
-        
-        # Use bank account from order, or show a message if no account is configured
-        if bank_account_result.empty?
-            bank_info = nil
-            qr_code_data_uri = nil
-        else
-            bank_account = bank_account_result.first
-            bank_info = {
-                account_name: bank_account['account_name'],
-                bank_name: bank_account['bank_name'],
-                iban: bank_account['iban'],
-                bic: bank_account['bic']
-            }
-            
-            # Generate QR code for payment
-            begin
-                require 'rqrcode'
-                epc_data = generate_epc_qr_data(
-                    bank_info[:account_name],
-                    bank_info[:iban],
-                    bank_info[:bic],
-                    total_price,
-                    payment_ref
-                )
-                qr = RQRCode::QRCode.new(epc_data)
-                png = qr.as_png(
-                    resize_gte_to: false,
-                    resize_exactly_to: false,
-                    fill: 'white',
-                    color: 'black',
-                    size: 300,
-                    border_modules: 4
-                )
-                qr_code_data_uri = "data:image/png;base64,#{Base64.strict_encode64(png.to_s)}"
-            rescue => e
-                debug_error("Failed to generate QR code for email: #{e.message}")
-                qr_code_data_uri = nil
-            end
-        end
-        
-        deliver_mail do
-            to user_email
-            from SMTP_FROM
-            subject "Bestellbestätigung - #{event[:name]}"
-            
-            content = StringIO.open do |io|
-                io.puts "            <div class=\"success-badge\">"
-                io.puts "                <strong>Bestellung erfolgreich aufgegeben!</strong>"
-                io.puts "            </div>"
-                io.puts "            <p>Hallo #{user_name},</p>"
-                io.puts "            <p>vielen Dank für deine Ticket-Bestellung für #{event[:name]}. Hier sind die Details deiner Bestellung:</p>"
-                io.puts "            <div class=\"order-details\">"
-                io.puts "                <h3>Bestelldetails</h3>"
-                io.puts "                <p><strong>Bestellnummer:</strong> #{payment_ref}</p>"
-                io.puts "                <p><strong>Event:</strong> #{event[:name]}</p>"
-                io.puts "                <p><strong>Anzahl Tickets:</strong> #{participants.length}</p>"
-                io.puts "                <p><strong>Gesamtpreis:</strong> #{total_price.round(2)}€</p>"
-                io.puts "                <p><strong>Status:</strong> Ausstehend</p>"
-                io.puts "                <p><strong>Datum:</strong> #{DateTime.now.strftime('%d.%m.%Y %H:%M')}</p>"
-                io.puts "            </div>"
-                io.puts "            <div class=\"participants\">"
-                io.puts "                <h4>Teilnehmer:</h4>"
-                participants.each_with_index do |participant, index|
-                    contact_info = [participant['phone'], participant['email']].compact.reject(&:empty?).join(', ')
-                    io.puts "                <div class=\"participant\">#{index + 1}. #{participant['name']}#{contact_info.empty? ? '' : ' (' + contact_info + ')'}</div>"
-                end
-                io.puts "            </div>"
-                io.puts "            <h4>Nächste Schritte:</h4>"
-                io.puts "            <ol>"
-                if bank_info
-                    io.puts "                <li>Überweise den Betrag von <strong>#{total_price.round(2)}€</strong> auf folgendes Konto:</li>"
-                    io.puts "                <ul>"
-                    io.puts "                    <li><strong>Empfänger:</strong> #{bank_info[:account_name]}</li>"
-                    io.puts "                    <li><strong>Bank:</strong> #{bank_info[:bank_name]}</li>"
-                    io.puts "                    <li><strong>IBAN:</strong> #{bank_info[:iban]}</li>"
-                    io.puts "                    <li><strong>BIC:</strong> #{bank_info[:bic]}</li>"
-                    io.puts "                    <li><strong>Verwendungszweck:</strong> #{payment_ref}</li>"
-                    io.puts "                </ul>"
-                    
-                    # Add QR code if available
-                    if qr_code_data_uri
-                        io.puts "                <div style='margin: 20px 0; padding: 15px; background-color: #f8f9fa; border-radius: 5px;'>"
-                        io.puts "                    <h4 style='margin-top: 0;'>Schnelle Zahlung mit QR-Code</h4>"
-                        io.puts "                    <p>Scanne diesen QR-Code mit deiner Banking-App, um die Überweisung automatisch auszufüllen:</p>"
-                        io.puts "                    <img src='#{qr_code_data_uri}' alt='Payment QR Code' width='200' style='display: block; margin: 0 auto; max-width: 200px; width: 100%; height: auto; border: 0;' />"
-                        io.puts "                    <p style='font-size: 0.9em; color: #666;'>"
-                        io.puts "                        <strong>Hinweis:</strong> Dieser QR-Code enthält alle Zahlungsinformationen (Empfänger, IBAN, BIC, Betrag und Verwendungszweck). "
-                        io.puts "                        Die meisten modernen Banking-Apps können diesen Code scannen und das Überweisungsformular automatisch ausfüllen."
-                        io.puts "                    </p>"
-                        io.puts "                </div>"
-                    end
-                    
-                    io.puts "                <li>Nach Zahlungseingang wird deine Bestellung vom Team als \"Bezahlt\" markiert</li>"
-                else
-                    io.puts "                <li>Die Zahlungsdetails werden dir separat mitgeteilt</li>"
-                    io.puts "                <li>Bitte verwende die Bestellnummer <strong>#{payment_ref}</strong> als Verwendungszweck</li>"
-                end
-                io.puts "                <li>Du kannst den Status jederzeit in deinem Account überprüfen</li>"
-                io.puts "            </ol>"
-                io.puts "            <p><a href=\"#{WEB_ROOT}/tickets\" class=\"btn\">Meine Bestellungen ansehen</a></p>"
-                io.puts "            <p>Bei Fragen wende dich gerne an unseren Support.</p>"
-                io.string
-            end
-            
-            format_email_with_template("Bestellbestätigung", content)
-        end
-        log("Bestellbestätigung für Bestellung #{order_id} versendet")
-    rescue => e
-        log("Bestellbestätigung für Bestellung #{order_id} fehlgeschlagen: #{e.message}")
     end
     
     get "/api/export_guest_list_csv/:event_id" do

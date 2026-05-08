@@ -582,7 +582,7 @@ function loadUserOrders() {
                     
                     // Make row clickable to open order in new tab
                     row.on('click', function() {
-                        window.open('/order_detail/' + order.order_id, '_blank');
+                        window.open('/order_management?order_id=' + order.order_id, '_blank');
                     });
                     
                     row.append($('<td>').text(order.order_id || '-'));
@@ -1254,7 +1254,7 @@ function loadUserMailLog() {
                 const orderCell = $('<td>');
                 if (log.order_id) {
                     const orderLink = $('<a>')
-                        .attr('href', '/order_detail/' + log.order_id)
+                        .attr('href', '/order_management?order_id=' + log.order_id)
                         .attr('target', '_blank')
                         .text(log.order_id);
                     orderCell.append(orderLink);

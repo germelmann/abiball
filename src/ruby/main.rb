@@ -1,3 +1,4 @@
+require './credentials.rb'
 require './include/helper.rb'
 require './include/users.rb'
 require './include/tags.rb'
@@ -10,7 +11,6 @@ require 'cgi'
 require 'digest'
 require 'mail'
 require 'neo4j_bolt'
-require './credentials.rb'
 require './include/mail.rb'
 require 'securerandom'
 require 'sinatra/base'
@@ -109,7 +109,7 @@ def format_email_with_template(title, content)
         io.puts "        .content { padding: 32px 40px; line-height: 1.6; }"
         io.puts "        .content p { margin: 0 0 16px; }"
         io.puts "        .content p:last-child { margin-bottom: 0; }"
-        io.puts "        .order-details { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 16px 20px; margin: 16px 0; }"
+        io.puts "        .order-details { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 16px; margin: 16px 0; }"
         io.puts "        .success-badge { background-color: #d1e7dd; color: #0a3622; border: 1px solid #a3cfbb; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; }"
         io.puts "        .info-badge { background-color: #cff4fc; color: #055160; border: 1px solid #9eeaf9; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; }"
         io.puts "        .participants { margin-top: 16px; }"
@@ -843,12 +843,6 @@ class Main < Sinatra::Base
             username = $1
             path = '/user.html'
             @username = username
-        end
-
-        if path =~ /^\/order_detail\/([A-Za-z0-9]+)$/
-            order_id = $1
-            path = '/order_detail.html'
-            @order_id = order_id
         end
 
         if path =~ /^\/live_dashboard\/(.+)$/

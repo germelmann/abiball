@@ -2221,6 +2221,22 @@
         refresh_ticket_orders();
         refreshStatistics();
         
+        // Auto-open order detail modal if ?order_id= is in the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const autoOrderId = urlParams.get('order_id');
+        if (autoOrderId) {
+            api_call('/api/get_ticket_order', {order_id: autoOrderId}, function(data) {
+                if (data.success) {
+                    currentOrder = data.order;
+                    currentOrderId = data.order.order_id;
+                    hasUnsavedChanges = false;
+                    populateOrderForm(data.order);
+                    cancelEditMode();
+                    new bootstrap.Modal(document.getElementById('orderDetailsModal')).show();
+                }
+            });
+        }
+        
         // Event filter change handler
         $('#event_filter_select').change(function() {
             refresh_ticket_orders();

@@ -237,7 +237,7 @@ function refreshPayments() {
                     row.append($('<td>').text('-'));
                 } else if (payment.order_id) {
                     const orderLink = $('<a>')
-                        .attr('href', `/order_detail/${payment.order_id}`)
+                        .attr('href', `/order_management?order_id=${payment.order_id}`)
                         .attr('target', '_blank')
                         .attr('rel', 'noopener noreferrer')
                         .text('#' + payment.order_id.substring(0, 8));

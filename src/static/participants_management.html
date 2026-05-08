@@ -228,7 +228,7 @@
                 let row = $('<tr>');
                 row.css('cursor', 'pointer').on('click', function() {
                     // Navigate to order detail page in a new tab
-                    window.open('/order_detail/' + encodeURIComponent(p.order_id), '_blank');
+                    window.open('/order_management?order_id=' + encodeURIComponent(p.order_id), '_blank');
                 });
 
                 // Name column

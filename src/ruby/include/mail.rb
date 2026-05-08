@@ -3,7 +3,7 @@ class Main < Sinatra::Base
     # Each template has a key, default subject, default body with placeholders
     support_email = "<a href='mailto:#{SUPPORT_EMAIL}'>#{SUPPORT_EMAIL}</a>"
     MANUAL_MAIL_TEMPLATES = {
-        # Order-related templates (for order_detail.html)
+        # Order-related templates (for order_management.html)
         'order_accepted_cash' => {
             key: 'order_accepted_cash',
             subject: 'Bestellung angenommen - Barzahlung vor Ort',
