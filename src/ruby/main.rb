@@ -1,8 +1,6 @@
-require './credentials.rb'
 require './include/helper.rb'
 require './include/users.rb'
 require './include/tags.rb'
-require './include/tickets.rb'
 require './include/events.rb'
 require './include/yearbook.rb'
 require './include/log.rb'
@@ -11,6 +9,8 @@ require 'cgi'
 require 'digest'
 require 'mail'
 require 'neo4j_bolt'
+require './credentials.rb'
+require './include/tickets.rb'
 require './include/mail.rb'
 require 'securerandom'
 require 'sinatra/base'
@@ -843,6 +843,12 @@ class Main < Sinatra::Base
             username = $1
             path = '/user.html'
             @username = username
+        end
+
+        if path =~ /^\/order_detail\/([A-Za-z0-9]+)$/
+            order_id = $1
+            path = '/order_detail.html'
+            @order_id = order_id
         end
 
         if path =~ /^\/live_dashboard\/(.+)$/
