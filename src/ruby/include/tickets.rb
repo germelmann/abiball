@@ -1273,9 +1273,6 @@ class Main < Sinatra::Base
             subject "Zahlungsaufforderung - #{event[:name]}"
             
             content = StringIO.open do |io|
-                io.puts "            <div class=\"info-badge\">"
-                io.puts "                <strong>Zahlungsaufforderung für deine Bestellung</strong>"
-                io.puts "            </div>"
                 io.puts "            <p>Hallo #{user_name},</p>"
                 io.puts "            <p>hier sind die Zahlungsinformationen für deine Ticket-Bestellung ##{order_id} (#{payment_ref})</p>"
                 io.puts "            <p><strong>Anzahl Tickets:</strong> #{participants.length}</p>"
