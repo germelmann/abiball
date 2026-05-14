@@ -10,12 +10,47 @@
     </div>
     
     <!-- Event Filter Dropdown -->
-    <div class='row mb-3'>
-        <div class='col-md-6'>
-            <label for="event_filter_select" class="form-label"><i class="bi bi-calendar-event"></i> Event-Filter:</label>
+    <div class='row mb-3 g-3 align-items-end'>
+        <div class='col-md-3'>
+            <label for="event_filter_select" class="form-label"><i class="bi bi-calendar-event"></i> Event:</label>
             <select class="form-select" id="event_filter_select">
                 <option value="">Alle Events</option>
             </select>
+        </div>
+        <div class='col-md-2'>
+            <label for="status_filter_select" class="form-label"><i class="bi bi-tag"></i> Status:</label>
+            <select class="form-select" id="status_filter_select">
+                <option value="">Alle Status</option>
+                <option value="pending">Ausstehend</option>
+                <option value="partially_paid">Teilweise bezahlt</option>
+                <option value="paid">Bezahlt</option>
+                <option value="overpaid">Überzahlung</option>
+                <option value="offline_payment">Barzahlung</option>
+                <option value="cancelled">Storniert</option>
+                <option value="cancelled_by_user">Storniert durch Käufer</option>
+                <option value="in_review">Manuelle Prüfung</option>
+                <option value="on_hold">Pausiert</option>
+            </select>
+        </div>
+        <div class='col-md-3'>
+            <label for="payment_status_filter_select" class="form-label"><i class="bi bi-credit-card"></i> Zahlungsstatus:</label>
+            <select class="form-select" id="payment_status_filter_select">
+                <option value="">Alle Zahlungsstatus</option>
+                <option value="no_request">Keine Zahlungsaufforderung</option>
+                <option value="sent">Zahlungsaufforderung gesendet</option>
+                <option value="paid">Bezahlt</option>
+            </select>
+        </div>
+        <div class='col-md-3'>
+            <label for="bank_account_filter_select" class="form-label"><i class="bi bi-bank"></i> Bankkonto:</label>
+            <select class="form-select" id="bank_account_filter_select">
+                <option value="">Alle Konten</option>
+            </select>
+        </div>
+        <div class='col-md-1'>
+            <button type="button" class="btn btn-outline-secondary w-100" id="clear_filters_btn" title="Filter zurücksetzen">
+                <i class="bi bi-x-circle"></i>
+            </button>
         </div>
     </div>
 
@@ -226,7 +261,7 @@
     <!-- Orders Table -->
     <div class='row'>
         <div class='col-md-12'>
-            <h3><i class="bi bi-list"></i> Bestellungen</h3>
+            <h3><i class="bi bi-list"></i> Bestellungen <small class="text-muted fs-6" id="orders_count_badge"></small></h3>
             <div class="table-responsive">
                 <table class='table table-striped table-hover table-sm' style="table-layout: fixed; min-width: 900px;">
                     <colgroup>
@@ -586,6 +621,9 @@
                                     <button type="button" class="btn btn-outline-primary" id="send_payment_request_btn" style="display:none;">
                                         <i class="bi bi-envelope-paper"></i> Zahlungsaufforderung senden
                                     </button>
+                                    <button type="button" class="btn btn-outline-warning btn-sm" id="change_bank_account_btn" style="display:none;" aria-label="Bankkonto für diese Bestellung ändern und neue Zahlungsaufforderung senden" #{user_has_permission?("manage_orders") ? "" : "disabled"}>
+                                        <i class="bi bi-bank"></i> Bankkonto ändern
+                                    </button>
                                     <button type="button" class="btn btn-outline-info btn-sm dunning-action-btn" id="send_reminder_1_btn" data-type="order_reminder_1">
                                         <i class="bi bi-envelope"></i> 1. Mahnung senden
                                     </button>
@@ -866,6 +904,46 @@
     </div>
 </div>
 
+<!-- Change Bank Account Modal (single order) -->
+<div class="modal fade" id="changeBankAccountModal" tabindex="-1" aria-labelledby="changeBankAccountModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="changeBankAccountModalLabel"><i class="bi bi-bank"></i> Bankkonto für Bestellung ändern</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+            </div>
+            <div class="modal-body">
+                <p>Bankkonto für Bestellung <strong id="change_bank_order_ref"></strong> ändern.</p>
+                <input type="hidden" id="change_bank_order_id">
+                <div class="mb-3">
+                    <label for="change_bank_account_select" class="form-label">Neues Bankkonto auswählen</label>
+                    <select class="form-select" id="change_bank_account_select" required>
+                        <option value="">Bankkonto auswählen...</option>
+                    </select>
+                </div>
+                <div id="change_bank_account_details" style="display: none;" class="alert alert-secondary mb-3">
+                    <strong>Neue Bankverbindung:</strong><br>
+                    <span id="change_bank_details_display"></span>
+                </div>
+                <div class="mb-3">
+                    <label for="change_bank_reason_input" class="form-label">Grund der Änderung (erscheint in der E-Mail)</label>
+                    <textarea class="form-control" id="change_bank_reason_input" rows="3" placeholder="z.B. Technischer Fehler bei der Kontozuweisung..."></textarea>
+                </div>
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    An den Nutzer wird eine neue Zahlungsaufforderung mit dem neuen Bankkonto gesendet. Bereits bezahlte Bestellungen werden nicht angepasst.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-warning" id="confirm_change_bank_btn">
+                    <i class="bi bi-bank"></i> Konto ändern &amp; E-Mail senden
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Record Payment Modal -->
 <div class="modal fade" id="recordPaymentModal" tabindex="-1" aria-labelledby="recordPaymentModalLabel" aria-hidden="true">
     <div class="modal-dialog">
@@ -904,6 +982,7 @@
     let currentOrderId = null;
     let currentBankAccounts = [];
     let hasUnsavedChanges = false;
+    let allLoadedOrders = [];  // Cache for client-side filtering
     
     // Format price for display
     function formatPrice(price) {
@@ -937,69 +1016,135 @@
         
         api_call('/api/all_ticket_orders', params, function(data) {
             if (data.success) {
-                $('#ticket_orders_list').empty();
-                for (let order of data.orders) {
-                    let row = $('<tr>');
-                    
-                    // Add row class for error status
-                    if (order.status === 'error') {
-                        row.addClass('table-danger');
-                    }
-                    
-                    row.css('cursor','pointer').off('click').on('click', function(e) {
-                        // Only trigger if not clicking a button or inside a button
-                        if (!$(e.target).closest('button').length) {
-                            editOrder(order);
-                        }
-                    });
-                    row.append($('<td class="text-truncate">').text(order.user_name || '-').attr('title', order.user_name || '-'));
-                    row.append($('<td class="text-truncate">').text(order.user_email || '-').attr('title', order.user_email || '-'));
-                    row.append($('<td>').text(order.ticket_count || 0));
-                    row.append($('<td>').text(formatPrice(order.individual_ticket_price)));
-                    row.append($('<td>').text(formatPrice(order.total_price)));
-                    row.append($('<td class="text-truncate">').text(order.payment_reference || '-').attr('title', order.payment_reference || '-'));
-                    let statusClass = getOrderStatusBadgeClass(order.status);
-                    let statusText = getOrderStatusText(order.status);
-                    row.append($('<td>').html(`<span class="badge ${statusClass}">${statusText}</span>`));
-                    
-                    // Payment request status column
-                    row.append($('<td>').html(getPaymentRequestStatusBadge(order.latest_payment_request)));
-                    
-                    let createdDate = order.created_at ? new Date(order.created_at).toLocaleDateString('de-DE') : '-';
-                    row.append($('<td>').text(createdDate));
-                    
-                    // Actions column
-                    let actions = $('<div class="d-flex flex-nowrap gap-1">');
-
-                    if (`#{user_has_permission?("manage_orders")}` ? "true" : "false") {
-                        // Send payment request button (only if no request sent yet and not paid/offline_payment)
-                        if (order.status !== 'paid' && order.status !== 'overpaid' && order.status !== 'offline_payment' && (!order.latest_payment_request || !order.latest_payment_request.id)) {
-                            let sendPrButton = $('<button>')
-                                .addClass('btn btn-sm btn-info me-1')
-                                .html('<i class="bi bi-envelope-paper"></i>')
-                                .attr('title', 'Zahlungsaufforderung senden')
-                                .click((e) => { e.stopPropagation(); showSendPaymentRequestModal(order); });
-                            actions.append(sendPrButton);
-                        }
-                        
-                        // Green tick: accept order for offline events (no payment required)
-                        if (order.event_payment_required === false && order.status !== 'offline_payment') {
-                            let acceptButton = $('<button>')
-                                .addClass('btn btn-sm btn-success me-1')
-                                .html('<i class="bi bi-check"></i>')
-                                .attr('title', 'Bestellung annehmen')
-                                .click((e) => { e.stopPropagation(); acceptOrderOffline(order.order_id); });
-                            actions.append(acceptButton);
-                        }
-                    }
-                    
-                    row.append($('<td>').append(actions));
-                    $('#ticket_orders_list').append(row);
-                }
+                allLoadedOrders = data.orders;
+                updateBankAccountFilter(data.orders);
+                renderFilteredOrders();
             } else {
                 showTemplateModal('Fehler', 'Fehler beim Laden der Bestellungen: ' + (data.error || 'Unbekannter Fehler'), 'OK', 'btn-primary', null, null, function() {});
             }
         });
+    }
+    
+    // Populate the bank account filter from loaded orders (only accounts that appear in them)
+    function updateBankAccountFilter(orders) {
+        const seenIds = new Set();
+        const accounts = [];
+        for (const o of orders) {
+            const pr = o.latest_payment_request;
+            if (pr && pr.bank_account_id && pr.bank_account_name && !seenIds.has(pr.bank_account_id)) {
+                seenIds.add(pr.bank_account_id);
+                accounts.push({id: pr.bank_account_id, name: pr.bank_account_name});
+            }
+        }
+        const currentVal = $('#bank_account_filter_select').val();
+        $('#bank_account_filter_select').empty().append('<option value="">Alle Konten</option>');
+        for (const acc of accounts) {
+            $('#bank_account_filter_select').append(`<option value="${escapeHtml(acc.id)}">${escapeHtml(acc.name)}</option>`);
+        }
+        // Re-select previous value if still present
+        if (currentVal) {
+            $('#bank_account_filter_select').val(currentVal);
+        }
+    }
+    
+    // Render the table using the current filter selections against allLoadedOrders
+    function renderFilteredOrders() {
+        const statusFilter = $('#status_filter_select').val();
+        const paymentStatusFilter = $('#payment_status_filter_select').val();
+        const bankAccountFilter = $('#bank_account_filter_select').val();
+        
+        const orders = allLoadedOrders.filter(function(order) {
+            // Status filter
+            if (statusFilter && order.status !== statusFilter) return false;
+            
+            // Payment status filter
+            if (paymentStatusFilter) {
+                const pr = order.latest_payment_request;
+                if (paymentStatusFilter === 'no_request') {
+                    if (pr && pr.id) return false;
+                } else if (paymentStatusFilter === 'sent') {
+                    if (!pr || !pr.id || pr.status !== 'sent') return false;
+                } else if (paymentStatusFilter === 'paid') {
+                    if (!pr || !pr.id || pr.status !== 'paid') return false;
+                }
+            }
+            
+            // Bank account filter
+            if (bankAccountFilter) {
+                const pr = order.latest_payment_request;
+                if (!pr || String(pr.bank_account_id) !== String(bankAccountFilter)) return false;
+            }
+            
+            return true;
+        });
+        
+        const total = allLoadedOrders.length;
+        const filtered = orders.length;
+        if (statusFilter || paymentStatusFilter || bankAccountFilter) {
+            $('#orders_count_badge').text(`(${filtered} von ${total} angezeigt)`);
+        } else {
+            $('#orders_count_badge').text(`(${total})`);
+        }
+        
+        $('#ticket_orders_list').empty();
+        for (let order of orders) {
+            let row = $('<tr>');
+            
+            // Add row class for error status
+            if (order.status === 'error') {
+                row.addClass('table-danger');
+            }
+            
+            row.css('cursor','pointer').off('click').on('click', function(e) {
+                // Only trigger if not clicking a button or inside a button
+                if (!$(e.target).closest('button').length) {
+                    editOrder(order);
+                }
+            });
+            row.append($('<td class="text-truncate">').text(order.user_name || '-').attr('title', order.user_name || '-'));
+            row.append($('<td class="text-truncate">').text(order.user_email || '-').attr('title', order.user_email || '-'));
+            row.append($('<td>').text(order.ticket_count || 0));
+            row.append($('<td>').text(formatPrice(order.individual_ticket_price)));
+            row.append($('<td>').text(formatPrice(order.total_price)));
+            row.append($('<td class="text-truncate">').text(order.payment_reference || '-').attr('title', order.payment_reference || '-'));
+            let statusClass = getOrderStatusBadgeClass(order.status);
+            let statusText = getOrderStatusText(order.status);
+            row.append($('<td>').html(`<span class="badge ${statusClass}">${statusText}</span>`));
+            
+            // Payment request status column
+            row.append($('<td>').html(getPaymentRequestStatusBadge(order.latest_payment_request)));
+            
+            let createdDate = order.created_at ? new Date(order.created_at).toLocaleDateString('de-DE') : '-';
+            row.append($('<td>').text(createdDate));
+            
+            // Actions column
+            let actions = $('<div class="d-flex flex-nowrap gap-1">');
+
+            if (`#{user_has_permission?("manage_orders")}` ? "true" : "false") {
+                // Send payment request button (only if no request sent yet and not paid/offline_payment)
+                if (order.status !== 'paid' && order.status !== 'overpaid' && order.status !== 'offline_payment' && (!order.latest_payment_request || !order.latest_payment_request.id)) {
+                    let sendPrButton = $('<button>')
+                        .addClass('btn btn-sm btn-info me-1')
+                        .html('<i class="bi bi-envelope-paper"></i>')
+                        .attr('title', 'Zahlungsaufforderung senden')
+                        .click((e) => { e.stopPropagation(); showSendPaymentRequestModal(order); });
+                    actions.append(sendPrButton);
+                }
+                
+                // Green tick: accept order for offline events (no payment required)
+                if (order.event_payment_required === false && order.status !== 'offline_payment') {
+                    let acceptButton = $('<button>')
+                        .addClass('btn btn-sm btn-success me-1')
+                        .html('<i class="bi bi-check"></i>')
+                        .attr('title', 'Bestellung annehmen')
+                        .click((e) => { e.stopPropagation(); acceptOrderOffline(order.order_id); });
+                    actions.append(acceptButton);
+                }
+            }
+            
+            row.append($('<td>').append(actions));
+            $('#ticket_orders_list').append(row);
+        }
     }
     
     
@@ -1340,13 +1485,15 @@
     // Render payment requests section
     function renderPaymentRequests(paymentRequests, order) {
         let html = '';
+        const isPaid = order.status === 'paid' || order.status === 'overpaid';
         
         if (paymentRequests.length === 0) {
             html = '<div class="alert alert-secondary"><i class="bi bi-info-circle"></i> Keine Zahlungsaufforderung gesendet</div>';
             // Show send button if order is not paid
-            if (order.status !== 'paid' && order.status !== 'overpaid') {
+            if (!isPaid) {
                 $('#send_payment_request_btn').show();
             }
+            $('#change_bank_account_btn').hide();
         } else {
             for (const pr of paymentRequests) {
                 let statusBadge = '';
@@ -1380,6 +1527,12 @@
             
             // Hide send button if payment request already exists
             $('#send_payment_request_btn').hide();
+            // Show change bank account button for unpaid orders that have at least one payment request
+            if (!isPaid) {
+                $('#change_bank_account_btn').show();
+            } else {
+                $('#change_bank_account_btn').hide();
+            }
         }
         
         $('#payment_requests_section').html(html);
@@ -1931,6 +2084,123 @@
         new bootstrap.Modal(document.getElementById('recordPaymentModal')).show();
     });
     
+    // ===========================================
+    // Change Bank Account (single order)
+    // ===========================================
+    
+    $('#change_bank_account_btn').click(function() {
+        if (!currentOrder) return;
+        
+        $('#change_bank_order_id').val(currentOrder.order_id);
+        $('#change_bank_order_ref').text(currentOrder.payment_reference);
+        $('#change_bank_reason_input').val('');
+        $('#change_bank_account_details').hide();
+        
+        api_call('/api/get_bank_accounts', {event_id: currentOrder.event_id}, function(data) {
+            if (data.success && data.accounts && data.accounts.length > 0) {
+                currentBankAccounts = data.accounts;
+                $('#change_bank_account_select').empty().append('<option value="">Bankkonto auswählen...</option>');
+                for (let account of data.accounts) {
+                    $('#change_bank_account_select').append(`<option value="${account.id}">${account.account_name} (${account.iban})</option>`);
+                }
+                new bootstrap.Modal(document.getElementById('changeBankAccountModal')).show();
+            } else {
+                showTemplateModal('Fehler', 'Keine Bankkonten für dieses Event konfiguriert.', 'OK', 'btn-primary', null, null, function() {});
+            }
+        });
+    });
+    
+    $('#change_bank_account_select').change(function() {
+        const selectedId = $(this).val();
+        if (selectedId) {
+            const account = currentBankAccounts.find(a => a.id === selectedId);
+            if (account) {
+                $('#change_bank_details_display').html(`
+                    <strong>${escapeHtml(account.account_name)}</strong><br>
+                    ${escapeHtml(account.bank_name)}<br>
+                    IBAN: ${escapeHtml(account.iban)}<br>
+                    BIC: ${escapeHtml(account.bic || '-')}
+                `);
+                $('#change_bank_account_details').show();
+            }
+        } else {
+            $('#change_bank_account_details').hide();
+        }
+    });
+    
+    $('#confirm_change_bank_btn').click(function() {
+        const orderId = $('#change_bank_order_id').val();
+        const newBankAccountId = $('#change_bank_account_select').val();
+        const reason = $('#change_bank_reason_input').val().trim();
+        
+        if (!newBankAccountId) {
+            showTemplateModal('Fehler', 'Bitte wähle ein Bankkonto aus.', 'OK', 'btn-primary', null, null, function() {});
+            return;
+        }
+        
+        const btn = $(this);
+        btn.prop('disabled', true);
+        
+        api_call('/api/change_order_bank_account', {
+            order_id: orderId,
+            new_bank_account_id: newBankAccountId,
+            reason: reason
+        }, function(data) {
+            btn.prop('disabled', false);
+            if (data.success) {
+                $('#changeBankAccountModal').modal('hide');
+                showTemplateModal('Erfolg', 'Bankkonto geändert und neue Zahlungsaufforderung gesendet.', 'OK', 'btn-success', null, null, function() {
+                    refresh_ticket_orders();
+                    if (currentOrderId) loadOrderDetails(currentOrderId);
+                });
+            } else {
+                showTemplateModal('Fehler', data.error || 'Fehler beim Ändern des Bankkontos.', 'OK', 'btn-primary', null, null, function() {});
+            }
+        }, function() {
+            btn.prop('disabled', false);
+            showTemplateModal('Fehler', 'Netzwerkfehler beim Ändern des Bankkontos.', 'OK', 'btn-primary', null, null, function() {});
+        });
+    });
+    
+    // ===========================================
+    // Bulk Change Bank Account
+    // ===========================================
+    
+    function showBulkChangeBankAccountModal() {
+        $('#bulk_change_reason_input').val('');
+        $('#bulk_change_old_account_select').html('<option value="">Bitte zuerst Event auswählen...</option>').prop('disabled', true);
+        $('#bulk_change_new_account_select').html('<option value="">Bitte zuerst Event auswählen...</option>').prop('disabled', true);
+        
+        api_call('/api/get_events', {}, function(data) {
+            if (data.success) {
+                $('#bulk_change_event_select').empty().append('<option value="">Event auswählen...</option>');
+                for (let event of data.events) {
+                    $('#bulk_change_event_select').append(`<option value="${event.id}">${escapeHtml(event.name)} ${event.year || ''}</option>`);
+                }
+                new bootstrap.Modal(document.getElementById('bulkChangeBankAccountModal')).show();
+            }
+        });
+    }
+    
+    $('#bulk_change_event_select').change(function() {
+        const eventId = $(this).val();
+        if (!eventId) {
+            $('#bulk_change_old_account_select').html('<option value="">Bitte zuerst Event auswählen...</option>').prop('disabled', true);
+            $('#bulk_change_new_account_select').html('<option value="">Bitte zuerst Event auswählen...</option>').prop('disabled', true);
+            return;
+        }
+        api_call('/api/get_bank_accounts', {event_id: eventId}, function(data) {
+            if (data.success && data.accounts && data.accounts.length > 0) {
+                const options = data.accounts.map(a => `<option value="${a.id}">${escapeHtml(a.account_name)} (${escapeHtml(a.iban)})</option>`).join('');
+                $('#bulk_change_old_account_select').html('<option value="">Altes Konto auswählen...</option>' + options).prop('disabled', false);
+                $('#bulk_change_new_account_select').html('<option value="">Neues Konto auswählen...</option>' + options).prop('disabled', false);
+            } else {
+                $('#bulk_change_old_account_select').html('<option value="">Keine Konten gefunden</option>').prop('disabled', true);
+                $('#bulk_change_new_account_select').html('<option value="">Keine Konten gefunden</option>').prop('disabled', true);
+            }
+        });
+    });
+    
     // Confirm record payment
     $('#confirm_record_payment_btn').on('click', function() {
         if (!currentOrder) return;
@@ -2242,6 +2512,19 @@
             refresh_ticket_orders();
             refreshStatistics();
             updateDunningSection();
+        });
+        
+        // Additional filter change handlers (client-side only, no API call)
+        $('#status_filter_select, #payment_status_filter_select, #bank_account_filter_select').change(function() {
+            renderFilteredOrders();
+        });
+        
+        // Clear all filters
+        $('#clear_filters_btn').click(function() {
+            $('#status_filter_select').val('');
+            $('#payment_status_filter_select').val('');
+            $('#bank_account_filter_select').val('');
+            renderFilteredOrders();
         });
         
         // Save button handler

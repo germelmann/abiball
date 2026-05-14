@@ -1183,15 +1183,16 @@
             addBankAccountForm('', '', '', '', 100, '');
         } else {
             currentBankAccounts.forEach(function(account) {
-                addBankAccountForm(account.account_name, account.bank_name, account.iban, account.bic, account.percentage, account.escrow_document_url || '');
+                addBankAccountForm(account.account_name, account.bank_name, account.iban, account.bic, account.percentage, account.escrow_document_url || '', account.id || '');
             });
         }
     }
 
-    function addBankAccountForm(accountName = '', bankName = '', iban = '', bic = '', percentage = 0, escrowDocUrl = '') {
+    function addBankAccountForm(accountName = '', bankName = '', iban = '', bic = '', percentage = 0, escrowDocUrl = '', accountId = '') {
         let accountIndex = $('#bank_accounts_container .bank-account-form').length;
         let accountHtml = `
             <div class="bank-account-form border rounded p-3 mb-3">
+                <input type="hidden" class="account-id" value="${escapeHtml(accountId)}">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <h6>Konto ${accountIndex + 1}</h6>
                     <button type="button" class="btn btn-sm btn-outline-danger remove-bank-account-btn">
@@ -1284,6 +1285,7 @@
         let valid = true;
 
         $('#bank_accounts_container .bank-account-form').each(function() {
+            let accountId = $(this).find('.account-id').val().trim();
             let accountName = $(this).find('.account-name').val().trim();
             let bankName = $(this).find('.bank-name').val().trim();
             let iban = $(this).find('.account-iban').val().trim();
@@ -1297,6 +1299,7 @@
             }
 
             accounts.push({
+                id: accountId,
                 account_name: accountName,
                 bank_name: bankName,
                 iban: iban,

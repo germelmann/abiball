@@ -1234,7 +1234,7 @@ class Main < Sinatra::Base
     end
 
     # Send payment request email
-    def send_payment_request_email(user_email, order_id, payment_ref, event, participants, total_price, bank_account)
+    def send_payment_request_email(user_email, order_id, payment_ref, event, participants, total_price, bank_account, bank_account_changed: false, change_reason: nil)
         # Get user name
         user_result = neo4j_query(<<~END_OF_QUERY, {email: user_email})
             MATCH (u:User {email: $email})
@@ -1268,13 +1268,28 @@ class Main < Sinatra::Base
             debug_error("Failed to generate QR code for email: #{e.message}")
         end
         
+        subject_line = bank_account_changed ? "Wichtige Information: Bankkontoänderung – #{event[:name]}" : "Zahlungsaufforderung - #{event[:name]}"
+        
         deliver_mail do
             to user_email
             from SMTP_FROM
-            subject "Zahlungsaufforderung - #{event[:name]}"
+            subject subject_line
             
             content = StringIO.open do |io|
                 io.puts "            <p>Hallo #{user_name},</p>"
+                
+                if bank_account_changed
+                    io.puts "            <div style='background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 15px; margin-bottom: 15px;'>"
+                    io.puts "                <strong>Wichtiger Hinweis: Bankkontoänderung</strong><br>"
+                    io.puts "                <p>Wir mussten das Bankkonto für Deine Bestellung aktualisieren.</p>"
+                    if change_reason && !change_reason.strip.empty?
+                        io.puts "                <p>#{CGI.escapeHTML(change_reason.strip)}</p>"
+                    end
+                    io.puts "                <p>Falls Du bereits eine Überweisung an das alte Konto getätigt hast, ist das kein Problem. Bitte überweise andernfalls auf das unten angegebene <strong>neue Konto</strong>.</p>"
+                    io.puts "                <p>Wende Dich bei Fragen an <a href='mailto:#{SUPPORT_EMAIL}'>#{SUPPORT_EMAIL}</a>. Vielen Dank für Dein Verständnis!</p>"
+                    io.puts "            </div>"
+                end
+                
                 io.puts "            <p>hier sind die Zahlungsinformationen für deine Ticket-Bestellung ##{order_id} (#{payment_ref})</p>"
                 io.puts "            <p><strong>Anzahl Tickets:</strong> #{participants.length}</p>"
                 io.puts "            <p><strong>Gesamtpreis:</strong> #{total_price.round(2)}€</p>"
@@ -1313,6 +1328,106 @@ class Main < Sinatra::Base
     rescue => e
         log("Zahlungsaufforderung für Bestellung #{order_id} fehlgeschlagen: #{e.message}")
         raise e
+    end
+
+    # Change bank account for a single order and send updated payment request email
+    post "/api/change_order_bank_account" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:order_id, :new_bank_account_id], optional_keys: [:reason])
+        
+        order_id = data[:order_id]
+        new_bank_account_id = data[:new_bank_account_id]
+        reason = data[:reason] || ''
+        
+        # Fetch order details
+        order_result = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder {id: $order_id})-[:FOR]->(e:Event)
+            OPTIONAL MATCH (o)-[:INCLUDES]->(p:Participant)
+            RETURN o.id AS order_id,
+                   o.status AS status,
+                   o.payment_reference AS payment_reference,
+                   o.total_price AS total_price,
+                   u.email AS user_email,
+                   u.name AS user_name,
+                   e.id AS event_id,
+                   e.name AS event_name,
+                   COLLECT({name: p.name, phone: p.phone, email: p.email}) AS participants
+        END_OF_QUERY
+        
+        if order_result.empty?
+            respond(success: false, error: "Bestellung nicht gefunden")
+            return
+        end
+        
+        order = order_result.first
+        
+        # Skip already-paid orders
+        if order['status'] == 'paid' || order['status'] == 'overpaid'
+            respond(success: false, error: "Bezahlte Bestellungen können nicht geändert werden")
+            return
+        end
+        
+        # Verify new bank account exists
+        bank_result = neo4j_query(<<~END_OF_QUERY, {bank_account_id: new_bank_account_id})
+            MATCH (b:BankAccount {id: $bank_account_id})
+            RETURN b.id AS id, b.account_name AS account_name, b.bank_name AS bank_name,
+                   b.iban AS iban, b.bic AS bic, b.escrow_document_url AS escrow_document_url
+        END_OF_QUERY
+        
+        if bank_result.empty?
+            respond(success: false, error: "Bankkonto nicht gefunden")
+            return
+        end
+        
+        bank_account = bank_result.first
+        
+        # Create new payment request pointing to the new bank account
+        payment_request_id = RandomTag::generate(12)
+        created_at = DateTime.now.to_s
+        
+        pr_params = {
+            order_id: order_id,
+            payment_request_id: payment_request_id,
+            bank_account_id: new_bank_account_id,
+            created_at: created_at,
+            created_by: @session_user[:email]
+        }
+        neo4j_query(<<~END_OF_QUERY, pr_params)
+            MATCH (o:TicketOrder {id: $order_id})
+            MATCH (b:BankAccount {id: $bank_account_id})
+            CREATE (pr:PaymentRequest {
+                id: $payment_request_id,
+                status: 'sent',
+                created_at: $created_at,
+                sent_at: $created_at,
+                created_by: $created_by
+            })
+            CREATE (o)-[:HAS_PAYMENT_REQUEST]->(pr)
+            CREATE (pr)-[:USES_ACCOUNT]->(b)
+        END_OF_QUERY
+        
+        # Get event details for email
+        event_result = neo4j_query(<<~END_OF_QUERY, {event_id: order['event_id']})
+            MATCH (e:Event {id: $event_id})
+            RETURN e
+        END_OF_QUERY
+        event = event_result.first['e']
+        
+        # Send updated payment request email with bank change notification
+        send_payment_request_email(
+            order['user_email'],
+            order_id,
+            order['payment_reference'],
+            event,
+            order['participants'],
+            order['total_price'].to_f,
+            bank_account,
+            bank_account_changed: true,
+            change_reason: reason
+        )
+        
+        log("Bankkonto für Bestellung #{order_id} geändert auf #{bank_account['account_name']}, neue Zahlungsaufforderung gesendet")
+        respond(success: true, payment_request_id: payment_request_id)
     end
 
     post "/api/all_ticket_orders" do

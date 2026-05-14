@@ -453,7 +453,9 @@ class Main < Sinatra::Base
         require_user_with_permission!("create_events")
         data = parse_request_data(
             required_keys: [:event_id, :accounts],
-            types: {accounts: Array}
+            types: {accounts: Array},
+            max_body_length: 10 * 1024 * 1024,
+            max_string_length: 5 * 1024 * 1024
         )
         
         # Verify event exists and user has permission
@@ -466,38 +468,76 @@ class Main < Sinatra::Base
             return
         end
         
-        # Delete existing bank accounts
-        neo4j_query(<<~END_OF_QUERY, {event_id: data[:event_id]})
+        # Separate accounts into existing (have an id) and new (no id)
+        submitted_ids = data[:accounts].map { |a| a['id'] }.compact.reject(&:empty?)
+        
+        # Delete accounts that are no longer in the list and have no payment requests
+        # (only delete accounts not referenced by any PaymentRequest to preserve history)
+        neo4j_query(<<~END_OF_QUERY, {event_id: data[:event_id], keep_ids: submitted_ids})
             MATCH (e:Event {id: $event_id})-[:HAS_BANK_ACCOUNT]->(b:BankAccount)
+            WHERE NOT b.id IN $keep_ids
+              AND NOT EXISTS((b)<-[:USES_ACCOUNT]-(:PaymentRequest))
             DETACH DELETE b
         END_OF_QUERY
         
-        # Create new bank accounts
+        # Disconnect event relationship for accounts that are removed but still referenced
+        # (keep the node for history, just remove HAS_BANK_ACCOUNT relationship)
+        neo4j_query(<<~END_OF_QUERY, {event_id: data[:event_id], keep_ids: submitted_ids})
+            MATCH (e:Event {id: $event_id})-[r:HAS_BANK_ACCOUNT]->(b:BankAccount)
+            WHERE NOT b.id IN $keep_ids
+              AND EXISTS((b)<-[:USES_ACCOUNT]-(:PaymentRequest))
+            DELETE r
+        END_OF_QUERY
+        
+        # Update or create each account
         data[:accounts].each do |account|
-            account_id = RandomTag::generate(12)
-            account_params = {
-                event_id: data[:event_id],
-                account_id: account_id,
-                account_name: account['account_name'] || '',
-                bank_name: account['bank_name'] || '',
-                iban: account['iban'] || '',
-                bic: account['bic'] || '',
-                percentage: account['percentage'].to_f,
-                escrow_document_url: account['escrow_document_url'] || ''
-            }
-            neo4j_query(<<~END_OF_QUERY, account_params)
-                MATCH (e:Event {id: $event_id})
-                CREATE (b:BankAccount {
-                    id: $account_id,
-                    account_name: $account_name,
-                    bank_name: $bank_name,
-                    iban: $iban,
-                    bic: $bic,
-                    percentage: $percentage,
-                    escrow_document_url: $escrow_document_url
-                })
-                CREATE (e)-[:HAS_BANK_ACCOUNT]->(b)
-            END_OF_QUERY
+            if account['id'] && !account['id'].empty?
+                # Update existing account
+                update_params = {
+                    account_id: account['id'],
+                    account_name: account['account_name'] || '',
+                    bank_name: account['bank_name'] || '',
+                    iban: account['iban'] || '',
+                    bic: account['bic'] || '',
+                    percentage: account['percentage'].to_f,
+                    escrow_document_url: account['escrow_document_url'] || ''
+                }
+                neo4j_query(<<~END_OF_QUERY, update_params)
+                    MATCH (b:BankAccount {id: $account_id})
+                    SET b.account_name = $account_name,
+                        b.bank_name = $bank_name,
+                        b.iban = $iban,
+                        b.bic = $bic,
+                        b.percentage = $percentage,
+                        b.escrow_document_url = $escrow_document_url
+                END_OF_QUERY
+            else
+                # Create new account
+                account_id = RandomTag::generate(12)
+                account_params = {
+                    event_id: data[:event_id],
+                    account_id: account_id,
+                    account_name: account['account_name'] || '',
+                    bank_name: account['bank_name'] || '',
+                    iban: account['iban'] || '',
+                    bic: account['bic'] || '',
+                    percentage: account['percentage'].to_f,
+                    escrow_document_url: account['escrow_document_url'] || ''
+                }
+                neo4j_query(<<~END_OF_QUERY, account_params)
+                    MATCH (e:Event {id: $event_id})
+                    CREATE (b:BankAccount {
+                        id: $account_id,
+                        account_name: $account_name,
+                        bank_name: $bank_name,
+                        iban: $iban,
+                        bic: $bic,
+                        percentage: $percentage,
+                        escrow_document_url: $escrow_document_url
+                    })
+                    CREATE (e)-[:HAS_BANK_ACCOUNT]->(b)
+                END_OF_QUERY
+            end
         end
         
         respond(success: true)
