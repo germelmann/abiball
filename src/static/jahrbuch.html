@@ -76,12 +76,11 @@
                     <h5 class="card-title mb-0"><i class="bi bi-pencil-square"></i> Kommentar schreiben</h5>
                 </div>
                 <div class="card-body">
-                    <div id="my_schueler_badge" style="display:none;" class="mb-3"></div>
                     <p class="text-body-secondary mb-3">
-                        Schreibe einem Mitschüler einen Kommentar ins Jahrbuch. Der Empfänger kann deinen Kommentar annehmen oder entfernen.
+                        Schreibe einem* Mitschüler*in einen Kommentar ins Jahrbuch. Der*die Empfänger*in kann deinen Kommentar annehmen oder entfernen.
                     </p>
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Empfänger</label>
+                        <label class="form-label fw-semibold">Empfänger*in</label>
                         <div class="search-select-container">
                             <input type="text" class="form-control search-select-input" id="comment_target_input"
                                 placeholder="Name suchen..." autocomplete="off">
@@ -219,20 +218,10 @@ function loadYearbookData() {
 function renderYearbook() {
     renderProfileFields();
     renderQuestions();
-    renderMySchuelerBadge();
     // Load comments in background to update badge
     loadReceivedCommentsBadge();
 }
 
-function renderMySchuelerBadge() {
-    const badge = $('#my_schueler_badge');
-    if (mySchueler) {
-        badge.html('<span class="badge bg-info text-dark me-2"><i class="bi bi-person-badge"></i> Dein Schülername: <strong>' + escapeHtml(mySchueler.name) + '</strong></span>');
-        badge.show();
-    } else {
-        badge.hide();
-    }
-}
 
 // ─────────────────── Steckbrief ───────────────────
 
