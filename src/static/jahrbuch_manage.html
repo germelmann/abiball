@@ -35,7 +35,7 @@
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="manage-profiles-tab" data-bs-toggle="tab" data-bs-target="#manage-profiles-section"
                 type="button" role="tab" aria-controls="manage-profiles-section" aria-selected="true">
-                <i class="bi bi-person-badge"></i> Steckbriefe
+                <i class="bi bi-person-badge"></i> Einträge
             </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -51,7 +51,7 @@
         <div class="tab-pane fade show active" id="manage-profiles-section" role="tabpanel" aria-labelledby="manage-profiles-tab">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0"><i class="bi bi-person-badge"></i> Steckbriefe</h5>
+                    <h5 class="card-title mb-0"><i class="bi bi-person-badge"></i> Einträge</h5>
                     <span class="badge bg-primary" id="profiles_count">0</span>
                 </div>
                 <div class="card-body">
@@ -64,7 +64,7 @@
                                 <tr>
                                     <th>Name</th>
                                     <th>Benutzername</th>
-                                    <th>Status</th>
+                                    <th>Fortschritt</th>
                                     <th>Aktionen</th>
                                 </tr>
                             </thead>
@@ -212,21 +212,46 @@ function renderManageProfiles() {
         tr.append($('<td>').text(profile.name || '-'));
         tr.append($('<td>').text(profile.username));
 
-        let hasData = false;
+        let filledCount = 0;
+        const totalProfileFields = manageProfileFields.filter(function(f) { return f.type !== 'upload'; }).length;
+        const totalSurveyQuestions = manageQuestions.filter(function(q) { return q.type !== 'upload'; }).length;
+        const totalFields = totalProfileFields + totalSurveyQuestions;
+
         manageProfileFields.forEach(function(field) {
             if (field.type === 'upload') return;
-            if (profile.profile[field.id] && profile.profile[field.id].trim()) hasData = true;
+            if (profile.profile[field.id] && profile.profile[field.id].trim()) filledCount++;
         });
-        tr.append($('<td>').html(hasData ?
-            '<span class="badge bg-success">Ausgefüllt</span>' :
-            '<span class="badge bg-secondary">Leer</span>'));
+
+        const userData = allUserAnswers[profile.username] || {};
+        const userAnswers = userData.answers || {};
+        manageQuestions.forEach(function(q) {
+            if (q.type === 'upload') return;
+            if (!q.anonymous) {
+                if (userAnswers[q.id]) filledCount++;
+            } else {
+                const attributedList = attributedAnonymous[q.id] || [];
+                if (attributedList.some(function(item) { return item.username === profile.username; })) filledCount++;
+            }
+        });
+
+        const pct = totalFields > 0 ? Math.round((filledCount / totalFields) * 100) : 0;
+        const barColor = pct >= 100 ? 'bg-success' : pct > 0 ? 'bg-primary' : 'bg-secondary';
+        const progressCell = $('<td>').html(
+            '<div class="d-flex align-items-center gap-2">' +
+            '<div class="progress flex-grow-1" style="height: 14px; min-width: 80px;">' +
+            '<div class="progress-bar ' + barColor + '" role="progressbar" style="width: ' + pct + '%;" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+            '</div>' +
+            '<small>' + pct + '%</small>' +
+            '</div>'
+        );
+        tr.append(progressCell);
 
         const actions = $('<td class="d-flex gap-1 flex-wrap">');
 
         const viewBtn = $('<button type="button" class="btn btn-sm btn-outline-primary">')
             .html('<i class="bi bi-eye"></i>')
             .attr('title', 'Eintrag ansehen')
-            .on('click', function() { window.location.href = '/jahrbuch_entry/' + encodeURIComponent(profile.username); });
+            .on('click', function() { window.location.href = '/jahrbuch/' + encodeURIComponent(profile.username); });
         actions.append(viewBtn);
 
         // Per-entry delete button (always visible for yearbook_manage)
@@ -299,7 +324,7 @@ function renderManageAnswers() {
                     if (Array.isArray(parsed)) answerDisplay = parsed.join(', ');
                 } catch(e) {}
                 tbody.append(
-                    '<tr><td><a href="/jahrbuch_entry/' + encodeURIComponent(username) + '">' + escapeHtml(userData.name || username) + '</a></td>' +
+                    '<tr><td><a href="/jahrbuch/' + encodeURIComponent(username) + '">' + escapeHtml(userData.name || username) + '</a></td>' +
                     '<td>' + escapeHtml(answerDisplay) + '</td></tr>'
                 );
             }
@@ -353,10 +378,14 @@ function renderManageSurveys() {
             const totalVotes = anonymousAnswers.length;
             const barContainer = $('<div>');
 
-            Object.keys(voteCounts).sort(function(a, b) { return voteCounts[b] - voteCounts[a]; }).forEach(function(opt) {
+            const sortedOpts = Object.keys(voteCounts)
+                .filter(function(opt) { return voteCounts[opt] > 0; })
+                .sort(function(a, b) { return voteCounts[b] - voteCounts[a]; });
+
+            function makeBar(opt) {
                 const count = voteCounts[opt];
                 const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
-                barContainer.append(
+                return $(
                     '<div class="d-flex align-items-center mb-2">' +
                     '  <div style="min-width: 120px;">' + escapeHtml(opt) + '</div>' +
                     '  <div class="flex-grow-1 mx-2">' +
@@ -367,7 +396,21 @@ function renderManageSurveys() {
                     '  <div style="min-width: 50px; text-align: right;">' + count + ' Stimmen</div>' +
                     '</div>'
                 );
-            });
+            }
+
+            const top4 = sortedOpts.slice(0, 4);
+            const rest = sortedOpts.slice(4);
+
+            top4.forEach(function(opt) { barContainer.append(makeBar(opt)); });
+
+            if (rest.length > 0) {
+                const details = $('<details class="mt-1 mb-2">');
+                details.append('<summary class="text-body-secondary" style="cursor:pointer;"><small>Weitere ' + rest.length + ' Optionen anzeigen</small></summary>');
+                const restContainer = $('<div class="mt-2">');
+                rest.forEach(function(opt) { restContainer.append(makeBar(opt)); });
+                details.append(restContainer);
+                barContainer.append(details);
+            }
 
             barContainer.append('<div class="text-body-secondary mt-1"><small>Gesamt: ' + totalVotes + ' Antworten</small></div>');
             section.append(barContainer);
@@ -398,7 +441,7 @@ function renderManageSurveys() {
                     if (Array.isArray(parsed)) answerDisplay = parsed.join(', ');
                 } catch(e) {}
                 tbody.append(
-                    '<tr><td><a href="/jahrbuch_entry/' + encodeURIComponent(item.username) + '">' +
+                    '<tr><td><a href="/jahrbuch/' + encodeURIComponent(item.username) + '">' +
                     escapeHtml(item.name || item.username) + '</a></td>' +
                     '<td>' + escapeHtml(answerDisplay) + '</td></tr>'
                 );

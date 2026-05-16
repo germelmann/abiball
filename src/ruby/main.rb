@@ -612,10 +612,6 @@ class Main < Sinatra::Base
                     <a class='#{user_has_permission?("view_users") ? '' : 'disabled'} btn btn-success' href='participants_management'><i class='bi bi-people'></i>&nbsp;&nbsp;Teilnehmer</a>
                     <a class='#{user_has_permission?("admin") ? '' : 'disabled'} btn btn-danger' href='admin'><i class='bi bi-gear'></i>&nbsp;&nbsp;Administration</a>
                 </div>" : ""}
-            </div>
-            <br>
-            <div class='alert alert-danger'>
-                Wir haben festgestellt, dass Apple unsere automatischen Mails an <b>@icloud.com</b>-Adressen blockiert. Wenn Du dich bereits mit einer solchen Adresse registriert hast, schreib uns bitte eine alternative E-Mail-Adresse an <a href='#{get_support_mailto('data_change')}'>#{SUPPORT_EMAIL}</a>. Nutze dazu bitte deine @icloud.com-Adresse als Absender.
             </div>"
         login = "<p>Du bist nicht angemeldet. Bitte melde dich an, um Tickets bestellen zu können.</p>
             <div class='row'>
@@ -623,10 +619,6 @@ class Main < Sinatra::Base
                     <h2>Login</h2>
                     <a class='btn btn-primary' href='login'><i class='bi bi-person-lock'></i>&nbsp;&nbsp;Anmelden</a>
                 </div>
-            </div>
-            <br>
-            <div class='alert alert-danger'>
-                Wir haben festgestellt, dass Apple unsere automatischen Mails an <b>@icloud.com</b>-Adressen blockiert. Wenn Du dich bereits mit einer solchen Adresse registriert hast, schreib uns bitte eine alternative E-Mail-Adresse an <a href='#{get_support_mailto('data_change')}'>#{SUPPORT_EMAIL}</a>. Nutze dazu bitte deine @icloud.com-Adresse als Absender.
             </div>"
         if user_logged_in?
             links
@@ -855,6 +847,12 @@ class Main < Sinatra::Base
             event_id = $1
             path = '/live_dashboard.html'
             @event_id = event_id
+        end
+
+        if path =~ /^\/jahrbuch\/(.+)$/
+            yb_username = $1
+            path = '/jahrbuch.html'
+            @yearbook_entry_username = yb_username
         end
 
         if path =~ /^\/jahrbuch_entry\/(.+)$/

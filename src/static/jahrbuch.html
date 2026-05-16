@@ -8,8 +8,27 @@
     </div>
 </div>
 
+<div class="container" id="entry_load_error" style="display: none;">
+    <div class="alert alert-danger">
+        <i class="bi bi-exclamation-triangle"></i>
+        <strong id="entry_load_error_msg">Eintrag konnte nicht geladen werden.</strong>
+    </div>
+    <a href="/jahrbuch_manage" class="btn btn-outline-primary"><i class="bi bi-arrow-left"></i> Zurück</a>
+</div>
+
 <div class="container" id="yearbook_content" style="display: none;">
     <h1 class="mb-4"><i class="bi bi-book"></i> Jahrbuch</h1>
+
+    <!-- View mode banner (shown when viewing another user's entry) -->
+    <div id="view_mode_banner" style="display:none;" class="mb-3">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <h2 class="mb-0" id="view_mode_name_label"></h2>
+                <div class="text-body-secondary small" id="view_mode_username_sub"></div>
+            </div>
+            <a href="/jahrbuch_manage" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Zurück</a>
+        </div>
+    </div>
 
     <ul class="nav nav-tabs mb-4" id="yearbookTabs" role="tablist">
         <li class="nav-item" role="presentation">
@@ -38,10 +57,10 @@
         <div class="tab-pane fade show active" id="profile-section" role="tabpanel" aria-labelledby="profile-tab">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="bi bi-person-badge"></i> Mein Steckbrief</h5>
+                    <h5 class="card-title mb-0"><i class="bi bi-person-badge"></i> <span id="profile_card_title">Mein Steckbrief</span></h5>
                 </div>
                 <div class="card-body">
-                    <p class="text-body-secondary mb-3">
+                    <p class="text-body-secondary mb-3" id="profile_desc">
                         Erstelle deinen persönlichen Steckbrief für das Jahrbuch. Änderungen werden automatisch gespeichert.
                     </p>
                     <div id="profile_fields_container"></div>
@@ -71,7 +90,7 @@
         <!-- Kommentare Tab -->
         <div class="tab-pane fade" id="comments-section" role="tabpanel" aria-labelledby="comments-tab">
             <!-- Write a comment to another Schueler -->
-            <div class="card mb-4">
+            <div class="card mb-4" id="write_comment_card">
                 <div class="card-header">
                     <h5 class="card-title mb-0"><i class="bi bi-pencil-square"></i> Kommentar schreiben</h5>
                 </div>
@@ -100,16 +119,28 @@
                 </div>
             </div>
 
+            <!-- Sent comments -->
+            <div class="card mb-4" id="sent_comments_card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="bi bi-send"></i> Gesendete Kommentare</h5>
+                </div>
+                <div class="card-body">
+                    <div id="sent_comments_container">
+                        <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Received comments with approval -->
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0"><i class="bi bi-inbox"></i> Erhaltene Kommentare</h5>
+                    <h5 class="card-title mb-0" id="received_comments_heading"><i class="bi bi-inbox"></i> Erhaltene Kommentare</h5>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="refresh_comments_btn">
                         <i class="bi bi-arrow-clockwise"></i>
                     </button>
                 </div>
                 <div class="card-body">
-                    <p class="text-body-secondary mb-3">
+                    <p class="text-body-secondary mb-3" id="received_comments_desc">
                         Neue Kommentare müssen von dir angenommen werden, bevor sie sichtbar sind.
                         Du kannst Kommentare, die du nicht möchtest, auch entfernen.
                     </p>
@@ -149,8 +180,11 @@
     .save-indicator { display: inline-block; }
     .upload-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; background: var(--bs-secondary-bg); border-radius: 0.375rem; margin-bottom: 0.4rem; }
     .upload-item .upload-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .upload-thumb { max-height: 60px; max-width: 100px; object-fit: cover; border-radius: 4px; cursor: pointer; }
+    .upload-img-view { max-height: 200px; max-width: 300px; object-fit: contain; border-radius: 0.375rem; display: block; margin-top: 0.25rem; }
     .comment-card { border: 1px solid var(--bs-border-color); border-radius: 0.5rem; padding: 0.75rem 1rem; margin-bottom: 0.75rem; }
     .comment-card.pending { border-color: var(--bs-warning); background: rgba(var(--bs-warning-rgb), 0.05); }
+    .comment-card.removed { opacity: 0.6; border-color: var(--bs-danger); }
     .comment-card .comment-meta { font-size: 0.8rem; color: var(--bs-secondary-color); }
 </style>
 
@@ -165,11 +199,27 @@ let mySchueler = null;
 let profileSaveTimer = null;
 let answerSaveTimers = {};
 
+// View-mode globals (set when URL is /jahrbuch/:username)
+let viewUsername = null;
+let canManage = false;
+let readOnlyMode = false;
+
+(function() {
+    const parts = window.location.pathname.replace(/^\/+/, '').split('/');
+    if (parts[0] === 'jahrbuch' && parts.length >= 2 && parts[1]) {
+        viewUsername = decodeURIComponent(parts[1]);
+    }
+})();
+
 $(document).ready(function() {
-    loadYearbookData();
-    $('#comments-tab').on('shown.bs.tab', function() { loadReceivedComments(); });
-    $('#refresh_comments_btn').on('click', function() { loadReceivedComments(); });
-    setupCommentWriter();
+    if (viewUsername) {
+        loadViewEntry();
+    } else {
+        loadYearbookData();
+        $('#comments-tab').on('shown.bs.tab', function() { loadReceivedComments(); loadSentComments(); });
+        $('#refresh_comments_btn').on('click', function() { loadReceivedComments(); });
+        setupCommentWriter();
+    }
 });
 
 function loadYearbookData() {
@@ -215,11 +265,64 @@ function loadYearbookData() {
     }, function() { uploadsLoaded = true; checkAllLoaded(); });
 }
 
+// ─────────────────── View Entry Mode ───────────────────
+
+function loadViewEntry() {
+    api_call('/api/yearbook/get_user_entry', { target_username: viewUsername }, function(data) {
+        if (!data.success) {
+            $('#entry_load_error_msg').text(data.error || 'Eintrag konnte nicht geladen werden.');
+            $('#entry_load_error').show();
+            return;
+        }
+
+        yearbookQuestions = data.questions || [];
+        yearbookProfileFields = data.profile_fields || [];
+        myAnswers = data.answers || {};
+        myProfile = data.profile || {};
+        myUploads = data.uploads || [];
+        canManage = data.can_manage || false;
+        readOnlyMode = !data.is_own && !canManage;
+
+        // Update UI for view mode
+        $('#view_mode_banner').show();
+        $('#view_mode_name_label').text(data.name || viewUsername);
+        $('#view_mode_username_sub').text(viewUsername);
+        $('#profile_card_title').text((data.name || viewUsername) + ' – Steckbrief');
+        if (readOnlyMode) {
+            $('#profile_desc').text('Steckbrief von ' + (data.name || viewUsername) + '.');
+        } else {
+            $('#profile_desc').text('Steckbrief von ' + (data.name || viewUsername) + '. Änderungen werden automatisch gespeichert.');
+        }
+
+        // Adjust comments section
+        $('#write_comment_card').hide();
+        $('#sent_comments_card').hide();
+        if (canManage) {
+            $('#received_comments_heading').html('<i class="bi bi-shield"></i> Alle Kommentare');
+            $('#received_comments_desc').text('Alle Kommentare inkl. gelöschter. Als Administrator können Sie Kommentare annehmen, entfernen oder endgültig löschen.');
+            $('#comments-tab').on('shown.bs.tab', function() { loadReceivedComments(); });
+            $('#refresh_comments_btn').on('click', function() { loadReceivedComments(); });
+        } else {
+            $('#received_comments_container').html('<p class="text-body-secondary"><i class="bi bi-info-circle"></i> Nur mit Verwaltungsberechtigung einsehbar.</p>');
+            $('#refresh_comments_btn').hide();
+        }
+
+        $('#yearbook_content').show();
+        renderProfileFields();
+        renderQuestions();
+    }, function() {
+        $('#entry_load_error_msg').text('Fehler beim Laden des Eintrags.');
+        $('#entry_load_error').show();
+    });
+}
+
 function renderYearbook() {
     renderProfileFields();
     renderQuestions();
-    // Load comments in background to update badge
-    loadReceivedCommentsBadge();
+    // Load comments in background to update badge (personal mode only)
+    if (!viewUsername) {
+        loadReceivedCommentsBadge();
+    }
 }
 
 
@@ -235,13 +338,14 @@ function renderProfileFields() {
             return;
         }
         const value = myProfile[field.id] || '';
+        const disabledAttr = readOnlyMode ? ' disabled' : '';
         let inputEl;
         if (field.type === 'textarea') {
             inputEl = '<textarea class="form-control yearbook-profile-field" id="yb_profile_' +
-                escapeHtml(field.id) + '" rows="3" maxlength="2000">' + escapeHtml(value) + '</textarea>';
+                escapeHtml(field.id) + '" rows="3" maxlength="2000"' + disabledAttr + '>' + escapeHtml(value) + '</textarea>';
         } else {
             inputEl = '<input type="text" class="form-control yearbook-profile-field" id="yb_profile_' +
-                escapeHtml(field.id) + '" value="' + escapeAttr(value) + '" maxlength="500">';
+                escapeHtml(field.id) + '" value="' + escapeAttr(value) + '" maxlength="500"' + disabledAttr + '>';
         }
         container.append(
             '<div class="mb-3">' +
@@ -251,10 +355,12 @@ function renderProfileFields() {
         );
     });
 
-    container.find('.yearbook-profile-field').on('input change', function() {
-        if (profileSaveTimer) clearTimeout(profileSaveTimer);
-        profileSaveTimer = setTimeout(function() { saveProfile(); }, 800);
-    });
+    if (!readOnlyMode) {
+        container.find('.yearbook-profile-field').on('input change', function() {
+            if (profileSaveTimer) clearTimeout(profileSaveTimer);
+            profileSaveTimer = setTimeout(function() { saveProfile(); }, 800);
+        });
+    }
 }
 
 // ─────────────────── Umfragen ───────────────────
@@ -302,90 +408,110 @@ function renderUploadField(fieldConfig, context) {
     const statusEl = $('<span class="save-indicator ms-2">');
     wrapper.append(statusEl);
 
+    // Upload button shown in personal mode OR when admin is viewing another user's entry
+    const canUpload = !viewUsername || canManage;
+    const canDelete = !readOnlyMode;
+
     const addBtnRow = $('<div class="mt-1">');
     const fileInput = $('<input type="file" class="d-none">').attr('id', 'upload_input_' + fieldId);
     const addBtn = $('<button type="button" class="btn btn-sm btn-outline-secondary">')
         .html('<i class="bi bi-upload"></i> Datei hochladen')
         .attr('title', 'Max. ' + maxFileSizeMB + ' MB');
-    addBtnRow.append(fileInput).append(addBtn)
-        .append(' <small class="text-body-secondary">Max. ' + maxFileSizeMB + ' MB, max. ' + maxUploads + ' Datei(en)</small>');
-    wrapper.append(addBtnRow);
+    if (canUpload) {
+        addBtnRow.append(fileInput).append(addBtn)
+            .append(' <small class="text-body-secondary">Max. ' + maxFileSizeMB + ' MB, max. ' + maxUploads + ' Datei(en)</small>');
+        wrapper.append(addBtnRow);
+    }
 
     function refreshUploads() {
         uploadListEl.empty();
         const fieldUploads = myUploads.filter(function(u) { return u.field_id === fieldId && u.context === context; });
         fieldUploads.forEach(function(up) {
             const item = $('<div class="upload-item">');
-            item.append('<i class="bi bi-paperclip"></i>');
-            item.append('<span class="upload-name">' + escapeHtml(up.filename) + '</span>');
-            const delBtn = $('<button type="button" class="btn btn-sm btn-outline-danger py-0 px-1">')
-                .html('<i class="bi bi-trash"></i>').attr('title', 'Löschen');
-            delBtn.on('click', function() {
-                showTemplateModal(
-                    'Datei löschen',
-                    'Möchtest du die Datei <strong>' + escapeHtml(up.filename) + '</strong> wirklich löschen?',
-                    'Ja, löschen', 'btn-danger',
-                    'Abbrechen', 'btn-secondary',
-                    function() {
-                        api_call('/api/yearbook/delete_upload', { upload_id: up.id }, function(resp) {
-                            if (resp.success) {
-                                myUploads = myUploads.filter(function(u) { return u.id !== up.id; });
-                                refreshUploads();
-                            } else {
-                                showTemplateModal('Fehler', escapeHtml(resp.error || 'Unbekannter Fehler'), 'OK', 'btn-primary', null, null, function() {});
-                            }
-                        });
-                    }
-                );
-            });
-            item.append(delBtn);
+            const isImage = up.mimetype && up.mimetype.startsWith('image/');
+            if (isImage) {
+                const thumb = $('<img class="upload-thumb">').attr('src', '/api/yearbook/file/' + encodeURIComponent(up.id)).attr('alt', up.filename);
+                thumb.on('click', function() { window.open('/api/yearbook/file/' + encodeURIComponent(up.id), '_blank'); });
+                item.append(thumb);
+            } else {
+                item.append('<i class="bi bi-paperclip"></i>');
+            }
+            item.append('<a href="/api/yearbook/file/' + encodeURIComponent(up.id) + '" target="_blank" class="upload-name">' + escapeHtml(up.filename) + '</a>');
+            if (canDelete) {
+                const delBtn = $('<button type="button" class="btn btn-sm btn-outline-danger py-0 px-1">')
+                    .html('<i class="bi bi-trash"></i>').attr('title', 'Löschen');
+                delBtn.on('click', function() {
+                    showTemplateModal(
+                        'Datei löschen',
+                        'Möchtest du die Datei <strong>' + escapeHtml(up.filename) + '</strong> wirklich löschen?',
+                        'Ja, löschen', 'btn-danger',
+                        'Abbrechen', 'btn-secondary',
+                        function() {
+                            api_call('/api/yearbook/delete_upload', { upload_id: up.id }, function(resp) {
+                                if (resp.success) {
+                                    myUploads = myUploads.filter(function(u) { return u.id !== up.id; });
+                                    refreshUploads();
+                                } else {
+                                    showTemplateModal('Fehler', escapeHtml(resp.error || 'Unbekannter Fehler'), 'OK', 'btn-primary', null, null, function() {});
+                                }
+                            });
+                        }
+                    );
+                });
+                item.append(delBtn);
+            }
             uploadListEl.append(item);
         });
-        if (fieldUploads.length >= maxUploads) addBtnRow.hide();
-        else addBtnRow.show();
+        if (canUpload) {
+            if (fieldUploads.length >= maxUploads) addBtnRow.hide();
+            else addBtnRow.show();
+        }
     }
 
     refreshUploads();
-    addBtn.on('click', function() { fileInput.click(); });
-    fileInput.on('change', function() {
-        const file = this.files[0];
-        if (!file) return;
-        if (file.size > (fieldConfig.max_file_size || 10000000)) {
-            showTemplateModal('Datei zu groß',
-                'Die Datei überschreitet die maximale Größe von ' + maxFileSizeMB + ' MB.',
-                'OK', 'btn-primary', null, null, function() {});
-            this.value = '';
-            return;
-        }
-        statusEl.html('<span class="text-body-secondary"><i class="bi bi-arrow-repeat"></i> Hochladen...</span>');
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('field_id', fieldId);
-        formData.append('context', context);
-        $.ajax({
-            url: '/api/yearbook/upload_file',
-            method: 'POST',
-            data: formData,
-            processData: false,
-            contentType: false,
-            dataType: 'json',
-            success: function(resp) {
-                if (resp.success) {
-                    myUploads.push({ id: resp.upload_id, filename: resp.filename, field_id: fieldId, context: context });
-                    refreshUploads();
-                    statusEl.html('<span class="text-success"><i class="bi bi-check-circle"></i></span>');
-                    setTimeout(function() { statusEl.html(''); }, 2000);
-                } else {
-                    showTemplateModal('Upload-Fehler', escapeHtml(resp.error || 'Fehler beim Hochladen'), 'OK', 'btn-primary', null, null, function() {});
-                }
-                fileInput.val('');
-            },
-            error: function() {
-                showTemplateModal('Fehler', 'Netzwerkfehler beim Hochladen.', 'OK', 'btn-primary', null, null, function() {});
-                fileInput.val('');
+    if (canUpload) {
+        addBtn.on('click', function() { fileInput.click(); });
+        fileInput.on('change', function() {
+            const file = this.files[0];
+            if (!file) return;
+            if (file.size > (fieldConfig.max_file_size || 10000000)) {
+                showTemplateModal('Datei zu groß',
+                    'Die Datei überschreitet die maximale Größe von ' + maxFileSizeMB + ' MB.',
+                    'OK', 'btn-primary', null, null, function() {});
+                this.value = '';
+                return;
             }
+            statusEl.html('<span class="text-body-secondary"><i class="bi bi-arrow-repeat"></i> Hochladen...</span>');
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('field_id', fieldId);
+            formData.append('context', context);
+            if (viewUsername) formData.append('target_username', viewUsername);
+            $.ajax({
+                url: '/api/yearbook/upload_file',
+                method: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                dataType: 'json',
+                success: function(resp) {
+                    if (resp.success) {
+                        myUploads.push({ id: resp.upload_id, filename: resp.filename, mimetype: file.type || '', field_id: fieldId, context: context });
+                        refreshUploads();
+                        statusEl.html('<span class="text-success"><i class="bi bi-check-circle"></i></span>');
+                        setTimeout(function() { statusEl.html(''); }, 2000);
+                    } else {
+                        showTemplateModal('Upload-Fehler', escapeHtml(resp.error || 'Fehler beim Hochladen'), 'OK', 'btn-primary', null, null, function() {});
+                    }
+                    fileInput.val('');
+                },
+                error: function() {
+                    showTemplateModal('Fehler', 'Netzwerkfehler beim Hochladen.', 'OK', 'btn-primary', null, null, function() {});
+                    fileInput.val('');
+                }
+            });
         });
-    });
+    }
 
     return wrapper;
 }
@@ -396,26 +522,34 @@ function renderQuestionInput(question, existingAnswer) {
     const wrapper = $('<div>');
     const qId = 'yb_q_' + question.id;
     const saveStatus = $('<span class="save-indicator ms-2">');
+    const disabled = readOnlyMode;
 
     if (question.type === 'text') {
         const input = $('<input type="text" class="form-control">').attr('id', qId).attr('maxlength', '2000').val(existingAnswer);
+        if (disabled) input.attr('disabled', true);
         wrapper.append(input);
-        input.on('input', function() {
-            debounceAnswerSave(question.id, function() { saveAnswer(question.id, input.val(), saveStatus); });
-        });
+        if (!disabled) {
+            input.on('input', function() {
+                debounceAnswerSave(question.id, function() { saveAnswer(question.id, input.val(), saveStatus); });
+            });
+        }
     } else if (question.type === 'textarea') {
         const input = $('<textarea class="form-control">').attr('id', qId).attr('maxlength', '2000').attr('rows', '3').val(existingAnswer);
+        if (disabled) input.attr('disabled', true);
         wrapper.append(input);
-        input.on('input', function() {
-            debounceAnswerSave(question.id, function() { saveAnswer(question.id, input.val(), saveStatus); });
-        });
+        if (!disabled) {
+            input.on('input', function() {
+                debounceAnswerSave(question.id, function() { saveAnswer(question.id, input.val(), saveStatus); });
+            });
+        }
     } else if (question.type === 'single_choice') {
-        if (question.options && question.options.length > 15) {
+        if (!disabled && question.options && question.options.length > 15) {
             wrapper.append(createSearchableSelect(qId, question.options, existingAnswer, function(val) {
                 saveAnswer(question.id, val, saveStatus);
             }));
         } else {
             const select = $('<select class="form-select">').attr('id', qId);
+            if (disabled) select.attr('disabled', true);
             select.append('<option value="">-- Bitte wählen --</option>');
             (question.options || []).forEach(function(opt) {
                 const option = $('<option>').val(opt).text(opt);
@@ -423,7 +557,7 @@ function renderQuestionInput(question, existingAnswer) {
                 select.append(option);
             });
             wrapper.append(select);
-            select.on('change', function() { saveAnswer(question.id, select.val(), saveStatus); });
+            if (!disabled) select.on('change', function() { saveAnswer(question.id, select.val(), saveStatus); });
         }
     } else if (question.type === 'multiple_choice') {
         let selectedValues = [];
@@ -441,21 +575,23 @@ function renderQuestionInput(question, existingAnswer) {
                 '<div class="form-check mb-2">' +
                 '  <input class="form-check-input yb-mc-checkbox" type="checkbox" id="' + escapeAttr(cbId) + '"' +
                 '    data-question="' + escapeAttr(question.id) + '" value="' + escapeAttr(opt) + '"' +
-                (isChecked ? ' checked' : '') + '>' +
+                (isChecked ? ' checked' : '') + (disabled ? ' disabled' : '') + '>' +
                 '  <label class="form-check-label" for="' + escapeAttr(cbId) + '">' + escapeHtml(opt) + '</label>' +
                 '</div>'
             );
             cbContainer.append(col);
         });
         wrapper.append(cbContainer);
-        wrapper.find('.yb-mc-checkbox').on('change', function() {
-            const selected = [];
-            wrapper.find('.yb-mc-checkbox:checked').each(function() { selected.push($(this).val()); });
-            saveAnswer(question.id, selected, saveStatus);
-        });
+        if (!disabled) {
+            wrapper.find('.yb-mc-checkbox').on('change', function() {
+                const selected = [];
+                wrapper.find('.yb-mc-checkbox:checked').each(function() { selected.push($(this).val()); });
+                saveAnswer(question.id, selected, saveStatus);
+            });
+        }
     }
 
-    wrapper.append(saveStatus);
+    if (!disabled) wrapper.append(saveStatus);
     return wrapper;
 }
 
@@ -520,6 +656,7 @@ function setupCommentWriter() {
                         $('#comment_write_text').val('');
                         input.val('');
                         hiddenField.val('');
+                        loadSentComments();
                         showTemplateModal('Gesendet', 'Dein Kommentar wurde gesendet. Der Empfänger muss ihn zuerst annehmen.', 'OK', 'btn-success', null, null, function() {});
                     } else {
                         showTemplateModal('Fehler', escapeHtml(resp.error || 'Unbekannter Fehler'), 'OK', 'btn-danger', null, null, function() {});
@@ -544,11 +681,40 @@ function loadReceivedCommentsBadge() {
     }, function() {});
 }
 
+function loadSentComments() {
+    const container = $('#sent_comments_container');
+    container.html('<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>');
+
+    api_call('/api/yearbook/get_my_sent_comments', {}, function(data) {
+        container.empty();
+        if (!data.success) {
+            container.html('<p class="text-danger">' + escapeHtml(data.error || 'Fehler beim Laden') + '</p>');
+            return;
+        }
+        const comments = data.comments || [];
+        if (comments.length === 0) {
+            container.html('<p class="text-body-secondary"><i class="bi bi-info-circle"></i> Du hast noch keine Kommentare gesendet.</p>');
+            return;
+        }
+        comments.forEach(function(c) {
+            const card = $('<div class="comment-card mb-2 p-3 bg-body-secondary rounded">');
+            card.append('<div class="fw-semibold mb-1"><i class="bi bi-person"></i> ' + escapeHtml(c.schueler_name || 'Unbekannt') + '</div>');
+            card.append($('<div>').text(c.text));
+            container.append(card);
+        });
+    }, function() {
+        container.html('<p class="text-danger">Netzwerkfehler beim Laden.</p>');
+    });
+}
+
 function loadReceivedComments() {
     const container = $('#received_comments_container');
     container.html('<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>');
 
-    api_call('/api/yearbook/get_received_comments', {}, function(data) {
+    const params = viewUsername ? { target_username: viewUsername } : {};
+    const isAdminView = !!(viewUsername && canManage);
+
+    api_call('/api/yearbook/get_received_comments', params, function(data) {
         container.empty();
         if (!data.success) {
             container.html('<p class="text-danger">' + escapeHtml(data.error || 'Fehler beim Laden') + '</p>');
@@ -557,79 +723,123 @@ function loadReceivedComments() {
         const comments = data.comments || [];
         if (comments.length === 0) {
             container.html('<p class="text-body-secondary"><i class="bi bi-info-circle"></i> Noch keine Kommentare erhalten.</p>');
-            $('#pending_comments_badge').hide();
+            if (!viewUsername) $('#pending_comments_badge').hide();
             return;
         }
 
         let pendingCount = 0;
         comments.forEach(function(c) {
             const isPending = c.status === 'pending';
+            const isRemoved = c.status === 'removed';
             if (isPending) pendingCount++;
 
-            const card = $('<div class="comment-card' + (isPending ? ' pending' : '') + '">');
+            const card = $('<div>').addClass('comment-card' + (isRemoved ? ' removed' : (isPending ? ' pending' : '')));
 
-            // Status badge
+            // Status badge + meta
             const headerRow = $('<div class="d-flex justify-content-between align-items-start mb-1">');
-            const badgeHtml = isPending
-                ? '<span class="badge bg-warning text-dark"><i class="bi bi-clock"></i> Ausstehend</span>'
-                : '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Angenommen</span>';
+            let badgeHtml;
+            if (isRemoved) {
+                badgeHtml = '<span class="badge bg-danger me-1"><i class="bi bi-x-circle"></i> Entfernt</span>';
+            } else if (isPending) {
+                badgeHtml = '<span class="badge bg-warning text-dark"><i class="bi bi-clock"></i> Ausstehend</span>';
+            } else {
+                badgeHtml = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Angenommen</span>';
+            }
             headerRow.append('<span>' + badgeHtml + '</span>');
-            headerRow.append('<span class="comment-meta"><i class="bi bi-person"></i> ' + escapeHtml(c.commenter_name || 'Unbekannt') + '</span>');
+            let metaText = '<i class="bi bi-person"></i> ' + escapeHtml(c.commenter_name || 'Unbekannt');
+            if (isAdminView && c.commenter_username) metaText += ' (' + escapeHtml(c.commenter_username) + ')';
+            headerRow.append('<span class="comment-meta">' + metaText + '</span>');
             card.append(headerRow);
 
-            card.append('<div class="mb-2 mt-1">' + escapeHtml(c.text) + '</div>');
+            const textDiv = $('<div class="mb-2 mt-1">');
+            if (isRemoved) textDiv.addClass('text-decoration-line-through text-body-secondary');
+            textDiv.text(c.text);
+            card.append(textDiv);
 
             // Action buttons
-            const btnRow = $('<div class="d-flex gap-2">');
+            const btnRow = $('<div class="d-flex gap-2 flex-wrap">');
+
             if (isPending) {
                 const approveBtn = $('<button type="button" class="btn btn-sm btn-success">')
                     .html('<i class="bi bi-check-lg"></i> Annehmen');
                 approveBtn.on('click', function() {
-                    showTemplateModal(
-                        'Kommentar annehmen',
+                    showTemplateModal('Kommentar annehmen',
                         'Möchtest du diesen Kommentar von <strong>' + escapeHtml(c.commenter_name || 'Unbekannt') + '</strong> annehmen?',
-                        'Annehmen', 'btn-success',
-                        'Abbrechen', 'btn-secondary',
+                        'Annehmen', 'btn-success', 'Abbrechen', 'btn-secondary',
                         function() {
                             api_call('/api/yearbook/approve_comment', { comment_id: c.id }, function(resp) {
                                 if (resp.success) { loadReceivedComments(); }
                                 else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
-                            }, function() {
-                                showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {});
-                            });
+                            }, function() { showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {}); });
                         }
                     );
                 });
                 btnRow.append(approveBtn);
             }
 
-            const removeBtn = $('<button type="button" class="btn btn-sm btn-outline-danger">')
-                .html('<i class="bi bi-x-lg"></i> Entfernen');
-            removeBtn.on('click', function() {
-                showTemplateModal(
-                    'Kommentar entfernen',
-                    'Möchtest du diesen Kommentar entfernen?',
-                    'Entfernen', 'btn-danger',
-                    'Abbrechen', 'btn-secondary',
-                    function() {
-                        api_call('/api/yearbook/remove_comment', { comment_id: c.id }, function(resp) {
-                            if (resp.success) { loadReceivedComments(); }
-                            else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
-                        }, function() {
-                            showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {});
-                        });
-                    }
-                );
-            });
-            btnRow.append(removeBtn);
+            if (!isRemoved) {
+                const removeBtn = $('<button type="button" class="btn btn-sm btn-outline-danger">')
+                    .html('<i class="bi bi-x-lg"></i> Entfernen');
+                removeBtn.on('click', function() {
+                    showTemplateModal('Kommentar entfernen', 'Möchtest du diesen Kommentar entfernen?',
+                        'Entfernen', 'btn-danger', 'Abbrechen', 'btn-secondary',
+                        function() {
+                            api_call('/api/yearbook/remove_comment', { comment_id: c.id }, function(resp) {
+                                if (resp.success) { loadReceivedComments(); }
+                                else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
+                            }, function() { showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {}); });
+                        }
+                    );
+                });
+                btnRow.append(removeBtn);
+            }
+
+            if (isAdminView) {
+                if (isRemoved) {
+                    const restoreBtn = $('<button type="button" class="btn btn-sm btn-outline-success">')
+                        .html('<i class="bi bi-arrow-counterclockwise"></i> Wiederherstellen');
+                    restoreBtn.on('click', function() {
+                        showTemplateModal('Kommentar wiederherstellen',
+                            'Kommentar von <strong>' + escapeHtml(c.commenter_name || 'Unbekannt') + '</strong> wiederherstellen?<br><small class="text-body-secondary">Status wird auf "Ausstehend" gesetzt.</small>',
+                            'Wiederherstellen', 'btn-success', 'Abbrechen', 'btn-secondary',
+                            function() {
+                                api_call('/api/yearbook/admin_restore_comment', { comment_id: c.id }, function(resp) {
+                                    if (resp.success) { loadReceivedComments(); }
+                                    else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
+                                }, function() { showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {}); });
+                            }
+                        );
+                    });
+                    btnRow.append(restoreBtn);
+                }
+
+                const delBtn = $('<button type="button" class="btn btn-sm btn-outline-danger">')
+                    .html('<i class="bi bi-trash"></i> Endgültig löschen');
+                delBtn.on('click', function() {
+                    showTemplateModal('Kommentar endgültig löschen',
+                        'Kommentar von <strong>' + escapeHtml(c.commenter_name || 'Unbekannt') + '</strong> endgültig löschen? Dies kann nicht rückgängig gemacht werden.',
+                        'Endgültig löschen', 'btn-danger', 'Abbrechen', 'btn-secondary',
+                        function() {
+                            api_call('/api/yearbook/admin_delete_comment', { comment_id: c.id }, function(resp) {
+                                if (resp.success) { loadReceivedComments(); }
+                                else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
+                            }, function() { showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-danger', null, null, function() {}); });
+                        }
+                    );
+                });
+                btnRow.append(delBtn);
+            }
+
             card.append(btnRow);
             container.append(card);
         });
 
-        if (pendingCount > 0) {
-            $('#pending_comments_badge').text(pendingCount).show();
-        } else {
-            $('#pending_comments_badge').hide();
+        if (!viewUsername) {
+            if (pendingCount > 0) {
+                $('#pending_comments_badge').text(pendingCount).show();
+            } else {
+                $('#pending_comments_badge').hide();
+            }
         }
     }, function() {
         container.html('<p class="text-danger"><i class="bi bi-x-circle"></i> Kommentare konnten nicht geladen werden.</p>');
@@ -678,9 +888,9 @@ function createSearchableSelect(id, options, selectedValue, onSelect) {
 
 function saveAnswer(questionId, answer, statusEl) {
     if (statusEl) statusEl.html('<span class="text-body-secondary"><i class="bi bi-arrow-repeat"></i></span>');
-    api_call('/api/yearbook/save_answer', {
-        question_id: questionId, answer: answer
-    }, function(data) {
+    const params = { question_id: questionId, answer: answer };
+    if (viewUsername) params.target_username = viewUsername;
+    api_call('/api/yearbook/save_answer', params, function(data) {
         if (data.success) {
             myAnswers[questionId] = answer;
             showSaveStatus(statusEl, true);
@@ -696,7 +906,9 @@ function saveProfile() {
     });
     const statusEl = $('#profile_save_status');
     statusEl.html('<span class="text-body-secondary"><i class="bi bi-arrow-repeat"></i> Speichert...</span>');
-    api_call('/api/yearbook/save_profile', { fields: fields }, function(data) {
+    const params = { fields: fields };
+    if (viewUsername) params.target_username = viewUsername;
+    api_call('/api/yearbook/save_profile', params, function(data) {
         if (data.success) {
             statusEl.html('<span class="text-success"><i class="bi bi-check-circle"></i> Gespeichert</span>');
         } else {
@@ -717,6 +929,8 @@ function showSaveStatus(el, success, errorMsg) {
     }
     setTimeout(function() { el.html(''); }, 3000);
 }
+
+// ─────────────────── Admin Comments (view mode) ───────────────────
 
 function escapeHtml(text) {
     if (!text) return '';
