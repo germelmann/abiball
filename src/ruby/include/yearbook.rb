@@ -44,6 +44,35 @@ class Main < Sinatra::Base
         defined?(YEARBOOK_ALLOW_DELETE_ALL) && YEARBOOK_ALLOW_DELETE_ALL
     end
 
+    def yearbook_schueler
+        return [] unless defined?(SCHUELER)
+        SCHUELER
+    end
+
+    # Sync SCHUELER list from credentials into the database (idempotent MERGE).
+    def sync_schueler_to_db!
+        schueler = yearbook_schueler
+        return if schueler.empty?
+        schueler.each do |s|
+            neo4j_query(<<~END_OF_QUERY, { id: s[:id].to_s, name: s[:name].to_s })
+                MERGE (s:Schueler {id: $id})
+                SET s.name = $name
+            END_OF_QUERY
+        end
+    end
+
+    @@schueler_sync_mutex = Mutex.new
+    @@schueler_synced = false
+
+    def ensure_schueler_synced!
+        return if @@schueler_synced
+        @@schueler_sync_mutex.synchronize do
+            return if @@schueler_synced
+            sync_schueler_to_db!
+            @@schueler_synced = true
+        end
+    end
+
     # Helper: build profile RETURN clause for non-upload fields
     def yearbook_profile_return_fields
         yearbook_profile_fields.select { |f| f[:type] != 'upload' }.map { |f|
@@ -261,19 +290,18 @@ class Main < Sinatra::Base
             MATCH (u:User {username: $username})-[:HAS_YEARBOOK_PROFILE]->(yp:YearbookProfile)
             DETACH DELETE yp
         END_OF_QUERY
+        # Delete comments written by this user (they are the author)
         neo4j_query(<<~END_OF_QUERY, {username: username})
             MATCH (u:User {username: $username})-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)
             DETACH DELETE c
         END_OF_QUERY
-        neo4j_query(<<~END_OF_QUERY, {username: username})
-            MATCH (c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(u:User {username: $username})
-            DETACH DELETE c
-        END_OF_QUERY
+        # Note: comments received on the user's Schueler node are not deleted here;
+        # the IS_SCHUELER assignment remains intact.
     end
 
     # Get yearbook configuration (questions + profile fields)
     post '/api/yearbook/config' do
-        require_user!
+        require_user_with_permission!("yearbook_create")
         require_yearbook_accessible!
 
         questions_config = yearbook_questions.map do |q|
@@ -308,9 +336,8 @@ class Main < Sinatra::Base
 
     # Get current user's yearbook answers
     post '/api/yearbook/get_my_answers' do
-        require_user!
-        require_yearbook_accessible!
         require_user_with_permission!("yearbook_create")
+        require_yearbook_accessible!
 
         username = @session_user[:username]
 
@@ -329,9 +356,8 @@ class Main < Sinatra::Base
 
     # Save current user's yearbook answer for a specific question
     post '/api/yearbook/save_answer' do
-        require_user!
-        require_yearbook_accessible!
         require_user_with_permission!("yearbook_create")
+        require_yearbook_accessible!
 
         data = parse_request_data(
             required_keys: [:question_id, :answer],
@@ -350,9 +376,8 @@ class Main < Sinatra::Base
 
     # Get current user's yearbook profile (Steckbrief)
     post '/api/yearbook/get_my_profile' do
-        require_user!
-        require_yearbook_accessible!
         require_user_with_permission!("yearbook_create")
+        require_yearbook_accessible!
 
         username = @session_user[:username]
         profile_data = get_yearbook_profile_data(username)
@@ -362,9 +387,8 @@ class Main < Sinatra::Base
 
     # Save current user's yearbook profile (Steckbrief)
     post '/api/yearbook/save_profile' do
-        require_user!
-        require_yearbook_accessible!
         require_user_with_permission!("yearbook_create")
+        require_yearbook_accessible!
 
         data = parse_request_data(
             required_keys: [:fields],
@@ -383,9 +407,8 @@ class Main < Sinatra::Base
 
     # Upload a file for a yearbook field (profile or question)
     post '/api/yearbook/upload_file' do
-        require_user!
-        require_yearbook_accessible!
         require_user_with_permission!("yearbook_create")
+        require_yearbook_accessible!
 
         file = params[:file]
         field_id = params[:field_id].to_s.strip
@@ -601,6 +624,13 @@ class Main < Sinatra::Base
             max_file_size: q[:max_file_size], max_uploads: q[:max_uploads]
         } }
 
+        # Fetch Schueler assignment for the target user
+        schueler_result = neo4j_query(<<~END_OF_QUERY, {username: target_username})
+            MATCH (u:User {username: $username})-[:IS_SCHUELER]->(s:Schueler)
+            RETURN s.id AS id, s.name AS name
+        END_OF_QUERY
+        schueler = schueler_result.empty? ? nil : { id: schueler_result.first['id'], name: schueler_result.first['name'] }
+
         respond(
             success: true,
             username: user_info.first['username'],
@@ -614,7 +644,8 @@ class Main < Sinatra::Base
             } },
             uploads: uploads,
             can_manage: has_manage,
-            is_own: is_own
+            is_own: is_own,
+            schueler: schueler
         )
     end
 
@@ -709,69 +740,216 @@ class Main < Sinatra::Base
         respond(success: true, message: "Alle Einträge gelöscht")
     end
 
-    # Get list of users who have yearbook_create permission (for comment targeting)
-    # Returns all users with yearbook_create permission, excluding the current user.
-    # Admins (who implicitly have all permissions) are also included.
-    post '/api/yearbook/get_users_list' do
+    # Get list of Schueler for comment targeting.
+    # Returns all Schueler from the credentials list, excluding the current user's own Schueler.
+    post '/api/yearbook/get_schueler_list' do
         require_user!
         require_yearbook_accessible!
 
-        current_username = @session_user[:username]
+        ensure_schueler_synced!
 
-        users = neo4j_query(<<~END_OF_QUERY, {current_username: current_username})
+        my_schueler_result = neo4j_query(<<~END_OF_QUERY, {username: @session_user[:username]})
+            MATCH (u:User {username: $username})-[:IS_SCHUELER]->(s:Schueler)
+            RETURN s.id AS id
+        END_OF_QUERY
+        my_schueler_id = my_schueler_result.empty? ? nil : my_schueler_result.first['id']
+
+        all_schueler = neo4j_query(<<~END_OF_QUERY)
+            MATCH (s:Schueler)
+            RETURN s.id AS id, s.name AS name
+            ORDER BY s.name
+        END_OF_QUERY
+
+        list = all_schueler
+            .select { |s| s['id'] != my_schueler_id }
+            .map { |s| { id: s['id'], name: s['name'] } }
+
+        respond(success: true, schueler: list)
+    end
+
+    # Get the Schueler assigned to the current user (for profile page and jahrbuch page).
+    post '/api/yearbook/get_my_schueler' do
+        require_user!
+
+        result = neo4j_query(<<~END_OF_QUERY, {username: @session_user[:username]})
+            MATCH (u:User {username: $username})-[:IS_SCHUELER]->(s:Schueler)
+            RETURN s.id AS id, s.name AS name
+        END_OF_QUERY
+
+        schueler = result.empty? ? nil : { id: result.first['id'], name: result.first['name'] }
+        respond(success: true, schueler: schueler)
+    end
+
+    # Get the Schueler assigned to any user (yearbook_manage).
+    # Used by user.html to display and manage the assignment for a specific user.
+    post '/api/yearbook/get_user_schueler' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        ensure_schueler_synced!
+
+        data = parse_request_data(required_keys: [:username])
+        target_username = data[:username].to_s.strip
+
+        result = neo4j_query(<<~END_OF_QUERY, {username: target_username})
+            MATCH (u:User {username: $username})-[:IS_SCHUELER]->(s:Schueler)
+            RETURN s.id AS id, s.name AS name
+        END_OF_QUERY
+        schueler = result.empty? ? nil : { id: result.first['id'], name: result.first['name'] }
+
+        all_schueler = neo4j_query(<<~END_OF_QUERY)
+            MATCH (s:Schueler)
+            OPTIONAL MATCH (u:User)-[:IS_SCHUELER]->(s)
+            RETURN s.id AS id, s.name AS name, u.username AS assigned_username
+            ORDER BY s.name
+        END_OF_QUERY
+        schueler_list = all_schueler.map { |s|
+            { id: s['id'], name: s['name'], assigned_username: s['assigned_username'] }
+        }
+
+        respond(success: true, schueler: schueler, schueler_list: schueler_list)
+    end
+
+    # Get all Schueler with their assigned users (yearbook_manage).
+    # Used by users.html for the full overview tab.
+    post '/api/yearbook/get_schueler_assignments' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        ensure_schueler_synced!
+
+        results = neo4j_query(<<~END_OF_QUERY)
+            MATCH (s:Schueler)
+            OPTIONAL MATCH (u:User)-[:IS_SCHUELER]->(s)
+            RETURN s.id AS schueler_id, s.name AS schueler_name,
+                   u.username AS username, u.name AS user_name
+            ORDER BY s.name
+        END_OF_QUERY
+
+        assignments = results.map { |r|
+            {
+                schueler_id: r['schueler_id'],
+                schueler_name: r['schueler_name'],
+                username: r['username'],
+                user_name: r['user_name']
+            }
+        }
+
+        respond(success: true, assignments: assignments)
+    end
+
+    # Assign a Schueler to a user (yearbook_manage only).
+    # Each Schueler can only be linked to one user, and each user to one Schueler.
+    post '/api/yearbook/assign_schueler' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        data = parse_request_data(required_keys: [:schueler_id, :username])
+        schueler_id = data[:schueler_id].to_s.strip
+        target_username = data[:username].to_s.strip
+
+        schueler_exists = neo4j_query(<<~END_OF_QUERY, {id: schueler_id})
+            MATCH (s:Schueler {id: $id}) RETURN s.id AS id
+        END_OF_QUERY
+        assert(!schueler_exists.empty?, "Schüler nicht gefunden")
+
+        user_exists = neo4j_query(<<~END_OF_QUERY, {username: target_username})
+            MATCH (u:User {username: $username}) RETURN u.username AS username
+        END_OF_QUERY
+        assert(!user_exists.empty?, "Benutzer nicht gefunden")
+
+        # Remove any existing IS_SCHUELER link for this Schueler and for this user
+        neo4j_query(<<~END_OF_QUERY, {schueler_id: schueler_id})
+            MATCH (:User)-[r:IS_SCHUELER]->(s:Schueler {id: $schueler_id})
+            DELETE r
+        END_OF_QUERY
+        neo4j_query(<<~END_OF_QUERY, {username: target_username})
+            MATCH (u:User {username: $username})-[r:IS_SCHUELER]->(:Schueler)
+            DELETE r
+        END_OF_QUERY
+        neo4j_query(<<~END_OF_QUERY, {schueler_id: schueler_id, username: target_username})
+            MATCH (s:Schueler {id: $schueler_id})
+            MATCH (u:User {username: $username})
+            CREATE (u)-[:IS_SCHUELER]->(s)
+        END_OF_QUERY
+
+        log("Schüler '#{schueler_id}' für #{target_username} zugewiesen durch #{@session_user[:username]}")
+        respond(success: true, message: "Schüler zugewiesen")
+    end
+
+    # Remove the Schueler assignment for a given Schueler (yearbook_manage only).
+    post '/api/yearbook/unassign_schueler' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        data = parse_request_data(required_keys: [:schueler_id])
+        schueler_id = data[:schueler_id].to_s.strip
+
+        neo4j_query(<<~END_OF_QUERY, {schueler_id: schueler_id})
+            MATCH (:User)-[r:IS_SCHUELER]->(s:Schueler {id: $schueler_id})
+            DELETE r
+        END_OF_QUERY
+
+        log("Schüler-Zuweisung für '#{schueler_id}' entfernt durch #{@session_user[:username]}")
+        respond(success: true, message: "Zuweisung entfernt")
+    end
+
+    # Get a minimal list of all active users for the Schueler assignment modal.
+    post '/api/yearbook/get_users_for_assignment' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        users = neo4j_query(<<~END_OF_QUERY)
             MATCH (u:User)
             WHERE COALESCE(u.scanner_only, false) = false
-              AND u.username <> $current_username
-              AND (COALESCE(u.admin, false) = true
-                   OR (u)-[:HAS_PERMISSION]->(:Permission {name: 'yearbook_create'}))
+              AND COALESCE(u.disabled, false) = false
             RETURN u.username AS username, u.name AS name
             ORDER BY u.name
         END_OF_QUERY
 
-        respond(success: true, users: users)
+        respond(success: true, users: users.map { |u| { username: u['username'], name: u['name'] } })
     end
 
-    # Post a comment on another user's yearbook entry.
-    # Both commenter and target must have yearbook_create permission.
-    # New comments start with status 'pending'; the entry owner must approve them.
+    # Post a comment on a Schueler's yearbook entry.
+    # The commenter must have yearbook_create permission.
+    # New comments start with status 'pending'; the assigned user must approve them.
     post '/api/yearbook/post_comment' do
         require_user!
         require_yearbook_accessible!
         require_user_with_permission!("yearbook_create")
 
         data = parse_request_data(
-            required_keys: [:target_username, :text],
+            required_keys: [:target_schueler_id, :text],
             max_body_length: 4096,
             max_string_length: 2048
         )
 
-        target_username = data[:target_username].to_s.strip
+        target_schueler_id = data[:target_schueler_id].to_s.strip
         text = data[:text].to_s.strip[0, MAX_YEARBOOK_COMMENT_LENGTH]
         assert(!text.empty?, "Kommentar darf nicht leer sein")
 
         commenter_username = @session_user[:username]
-        assert(commenter_username != target_username, "Du kannst nicht auf deinem eigenen Eintrag kommentieren")
 
-        # Verify target exists
-        target_exists = neo4j_query(<<~END_OF_QUERY, {username: target_username})
-            MATCH (u:User {username: $username})
-            RETURN u.username AS username
+        # Prevent commenting on own Schueler entry
+        own_schueler = neo4j_query(<<~END_OF_QUERY, {username: commenter_username})
+            MATCH (u:User {username: $username})-[:IS_SCHUELER]->(s:Schueler)
+            RETURN s.id AS id
         END_OF_QUERY
-        assert(!target_exists.empty?, "Benutzer nicht gefunden")
+        if own_schueler.any?
+            assert(own_schueler.first['id'] != target_schueler_id, "Du kannst nicht auf deinem eigenen Eintrag kommentieren")
+        end
 
-        # Verify target has yearbook_create permission (or is admin)
-        target = neo4j_query(<<~END_OF_QUERY, {username: target_username})
-            MATCH (u:User {username: $username})
-            WHERE COALESCE(u.admin, false) = true
-               OR (u)-[:HAS_PERMISSION]->(:Permission {name: 'yearbook_create'})
-            RETURN u.username AS username
+        # Verify target Schueler exists
+        target = neo4j_query(<<~END_OF_QUERY, {id: target_schueler_id})
+            MATCH (s:Schueler {id: $id})
+            RETURN s.id AS id
         END_OF_QUERY
-        assert(!target.empty?, "Dieser Benutzer kann keine Jahrbuch-Kommentare erhalten")
+        assert(!target.empty?, "Schüler nicht gefunden")
 
         comment_id = RandomTag.generate(16)
-        neo4j_query(<<~END_OF_QUERY, { commenter: commenter_username, target: target_username, comment_id: comment_id, text: text, now: yearbook_timestamp })
+        neo4j_query(<<~END_OF_QUERY, { commenter: commenter_username, schueler_id: target_schueler_id, comment_id: comment_id, text: text, now: yearbook_timestamp })
             MATCH (commenter:User {username: $commenter})
-            MATCH (target:User {username: $target})
+            MATCH (target:Schueler {id: $schueler_id})
             CREATE (commenter)-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment {
                 id: $comment_id,
                 text: $text,
@@ -783,7 +961,7 @@ class Main < Sinatra::Base
         respond(success: true, message: "Kommentar gespeichert")
     end
 
-    # Get comments received on current user's own entry.
+    # Get comments received on the current user's own Schueler entry.
     # Returns pending and approved comments (not removed), with their status.
     post '/api/yearbook/get_received_comments' do
         require_user!
@@ -791,8 +969,20 @@ class Main < Sinatra::Base
 
         username = @session_user[:username]
 
-        results = neo4j_query(<<~END_OF_QUERY, {username: username})
-            MATCH (commenter:User)-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(target:User {username: $username})
+        schueler_result = neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username})-[:IS_SCHUELER]->(s:Schueler)
+            RETURN s.id AS id
+        END_OF_QUERY
+
+        if schueler_result.empty?
+            respond(success: true, comments: [])
+            return
+        end
+
+        schueler_id = schueler_result.first['id']
+
+        results = neo4j_query(<<~END_OF_QUERY, {schueler_id: schueler_id})
+            MATCH (commenter:User)-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(s:Schueler {id: $schueler_id})
             WHERE COALESCE(c.status, 'pending') <> 'removed'
             RETURN c.id AS id, c.text AS text, c.created_at AS created_at,
                    COALESCE(c.status, 'pending') AS status,
@@ -808,7 +998,7 @@ class Main < Sinatra::Base
         respond(success: true, comments: comments)
     end
 
-    # Approve a pending comment on own entry (or any entry for yearbook_manage)
+    # Approve a pending comment on own Schueler entry (or any entry for yearbook_manage)
     post '/api/yearbook/approve_comment' do
         require_user!
         require_yearbook_accessible!
@@ -825,7 +1015,7 @@ class Main < Sinatra::Base
             END_OF_QUERY
         else
             neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id, username: username})
-                MATCH (c:YearbookComment {id: $comment_id})-[:ON_YEARBOOK_ENTRY_OF]->(u:User {username: $username})
+                MATCH (c:YearbookComment {id: $comment_id})-[:ON_YEARBOOK_ENTRY_OF]->(s:Schueler)<-[:IS_SCHUELER]-(u:User {username: $username})
                 RETURN c.id AS id
             END_OF_QUERY
         end
@@ -839,8 +1029,7 @@ class Main < Sinatra::Base
         respond(success: true, message: "Kommentar angenommen")
     end
 
-    # Remove a comment from own entry (marks as removed; soft delete, not permanent)
-    # yearbook_manage users can remove comments on any entry
+    # Remove a comment from own Schueler entry (soft delete; yearbook_manage can remove any)
     post '/api/yearbook/remove_comment' do
         require_user!
         require_yearbook_accessible!
@@ -857,7 +1046,7 @@ class Main < Sinatra::Base
             END_OF_QUERY
         else
             neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id, username: username})
-                MATCH (c:YearbookComment {id: $comment_id})-[:ON_YEARBOOK_ENTRY_OF]->(u:User {username: $username})
+                MATCH (c:YearbookComment {id: $comment_id})-[:ON_YEARBOOK_ENTRY_OF]->(s:Schueler)<-[:IS_SCHUELER]-(u:User {username: $username})
                 RETURN c.id AS id
             END_OF_QUERY
         end
@@ -871,17 +1060,17 @@ class Main < Sinatra::Base
         respond(success: true, message: "Kommentar entfernt")
     end
 
-    # Get all comments for a user's entry including removed (yearbook_manage only)
+    # Get all comments for a Schueler entry including removed (yearbook_manage only)
     post '/api/yearbook/admin_get_comments' do
         require_user!
         require_yearbook_accessible!
         require_user_with_permission!("yearbook_manage")
 
-        data = parse_request_data(required_keys: [:target_username])
-        target_username = data[:target_username].to_s.strip
+        data = parse_request_data(required_keys: [:target_schueler_id])
+        target_schueler_id = data[:target_schueler_id].to_s.strip
 
-        results = neo4j_query(<<~END_OF_QUERY, {username: target_username})
-            MATCH (commenter:User)-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(target:User {username: $username})
+        results = neo4j_query(<<~END_OF_QUERY, {schueler_id: target_schueler_id})
+            MATCH (commenter:User)-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(s:Schueler {id: $schueler_id})
             RETURN c.id AS id, c.text AS text, c.created_at AS created_at,
                    COALESCE(c.status, 'pending') AS status,
                    c.removed_at AS removed_at,

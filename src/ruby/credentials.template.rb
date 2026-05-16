@@ -92,6 +92,14 @@ YEARBOOK_QUESTIONS = [
     # }
 ]
 
+# List of all students for the yearbook comment system.
+# Comments are written to these student entries, not directly to user accounts.
+# Admins/yearbook_manage can link a student entry to a user account.
+SCHUELER = [
+    # { id: "s_001", name: "Max Mustermann" },
+    # { id: "s_002", name: "Erika Musterfrau" },
+]
+
 YEARBOOK_PROFILE_FIELDS = [
     { id: "nickname", label: "Spitzname", type: "text" },
     { id: "life_motto", label: "Lebensmotto", type: "text" },

@@ -70,14 +70,15 @@
 
         <!-- Kommentare Tab -->
         <div class="tab-pane fade" id="comments-section" role="tabpanel" aria-labelledby="comments-tab">
-            <!-- Write a comment to another user -->
+            <!-- Write a comment to another Schueler -->
             <div class="card mb-4">
                 <div class="card-header">
                     <h5 class="card-title mb-0"><i class="bi bi-pencil-square"></i> Kommentar schreiben</h5>
                 </div>
                 <div class="card-body">
+                    <div id="my_schueler_badge" style="display:none;" class="mb-3"></div>
                     <p class="text-body-secondary mb-3">
-                        Schreibe einem anderen Schüler einen Kommentar in sein Jahrbuch. Der Empfänger kann deinen Kommentar annehmen oder entfernen.
+                        Schreibe einem Mitschüler einen Kommentar ins Jahrbuch. Der Empfänger kann deinen Kommentar annehmen oder entfernen.
                     </p>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Empfänger</label>
@@ -86,7 +87,7 @@
                                 placeholder="Name suchen..." autocomplete="off">
                             <div class="search-select-dropdown" id="comment_target_dropdown"></div>
                         </div>
-                        <input type="hidden" id="comment_target_username">
+                        <input type="hidden" id="comment_target_schueler_id">
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Kommentar</label>
@@ -160,7 +161,8 @@ let yearbookProfileFields = [];
 let myAnswers = {};
 let myProfile = {};
 let myUploads = [];
-let commentableUsers = [];
+let commentableSchueler = [];
+let mySchueler = null;
 let profileSaveTimer = null;
 let answerSaveTimers = {};
 
@@ -172,10 +174,10 @@ $(document).ready(function() {
 });
 
 function loadYearbookData() {
-    let configLoaded = false, answersLoaded = false, profileLoaded = false, usersLoaded = false, uploadsLoaded = false;
+    let configLoaded = false, answersLoaded = false, profileLoaded = false, schuelerLoaded = false, mySchuelerLoaded = false, uploadsLoaded = false;
 
     function checkAllLoaded() {
-        if (configLoaded && answersLoaded && profileLoaded && usersLoaded && uploadsLoaded) renderYearbook();
+        if (configLoaded && answersLoaded && profileLoaded && schuelerLoaded && mySchuelerLoaded && uploadsLoaded) renderYearbook();
     }
 
     api_call('/api/yearbook/config', {}, function(data) {
@@ -198,10 +200,15 @@ function loadYearbookData() {
         profileLoaded = true; checkAllLoaded();
     }, function() { profileLoaded = true; checkAllLoaded(); });
 
-    api_call('/api/yearbook/get_users_list', {}, function(data) {
-        if (data.success) commentableUsers = data.users || [];
-        usersLoaded = true; checkAllLoaded();
-    }, function() { usersLoaded = true; checkAllLoaded(); });
+    api_call('/api/yearbook/get_schueler_list', {}, function(data) {
+        if (data.success) commentableSchueler = data.schueler || [];
+        schuelerLoaded = true; checkAllLoaded();
+    }, function() { schuelerLoaded = true; checkAllLoaded(); });
+
+    api_call('/api/yearbook/get_my_schueler', {}, function(data) {
+        if (data.success) mySchueler = data.schueler || null;
+        mySchuelerLoaded = true; checkAllLoaded();
+    }, function() { mySchuelerLoaded = true; checkAllLoaded(); });
 
     api_call('/api/yearbook/get_uploads', {}, function(data) {
         if (data.success) myUploads = data.uploads || [];
@@ -212,8 +219,19 @@ function loadYearbookData() {
 function renderYearbook() {
     renderProfileFields();
     renderQuestions();
+    renderMySchuelerBadge();
     // Load comments in background to update badge
     loadReceivedCommentsBadge();
+}
+
+function renderMySchuelerBadge() {
+    const badge = $('#my_schueler_badge');
+    if (mySchueler) {
+        badge.html('<span class="badge bg-info text-dark me-2"><i class="bi bi-person-badge"></i> Dein Schülername: <strong>' + escapeHtml(mySchueler.name) + '</strong></span>');
+        badge.show();
+    } else {
+        badge.hide();
+    }
 }
 
 // ─────────────────── Steckbrief ───────────────────
@@ -455,25 +473,24 @@ function renderQuestionInput(question, existingAnswer) {
 // ─────────────────── Kommentare ───────────────────
 
 function setupCommentWriter() {
-    // Searchable user picker
+    // Searchable Schueler picker
     const input = $('#comment_target_input');
     const dropdown = $('#comment_target_dropdown');
-    const hiddenField = $('#comment_target_username');
+    const hiddenField = $('#comment_target_schueler_id');
 
-    function renderUserOptions(filter) {
+    function renderSchuelerOptions(filter) {
         dropdown.empty();
         const fl = (filter || '').toLowerCase();
         let count = 0;
-        commentableUsers.forEach(function(u) {
-            const label = u.name + ' (' + u.username + ')';
-            if (fl && label.toLowerCase().indexOf(fl) === -1) return;
+        commentableSchueler.forEach(function(s) {
+            if (fl && s.name.toLowerCase().indexOf(fl) === -1) return;
             if (count >= 50) return;
             count++;
-            const opt = $('<div class="search-select-option">').text(label);
+            const opt = $('<div class="search-select-option">').text(s.name);
             opt.on('mousedown', function(e) {
                 e.preventDefault();
-                input.val(label);
-                hiddenField.val(u.username);
+                input.val(s.name);
+                hiddenField.val(s.id);
                 dropdown.hide();
             });
             dropdown.append(opt);
@@ -481,15 +498,15 @@ function setupCommentWriter() {
         if (count === 0) dropdown.append('<div class="search-select-option text-body-secondary">Keine Ergebnisse</div>');
     }
 
-    input.on('focus', function() { renderUserOptions(input.val()); dropdown.show(); });
-    input.on('input', function() { hiddenField.val(''); renderUserOptions(input.val()); dropdown.show(); });
+    input.on('focus', function() { renderSchuelerOptions(input.val()); dropdown.show(); });
+    input.on('input', function() { hiddenField.val(''); renderSchuelerOptions(input.val()); dropdown.show(); });
     input.on('blur', function() { setTimeout(function() { dropdown.hide(); }, 200); });
 
     $('#send_comment_btn').on('click', function() {
-        const targetUsername = hiddenField.val().trim();
+        const targetId = hiddenField.val().trim();
         const text = $('#comment_write_text').val().trim();
 
-        if (!targetUsername) {
+        if (!targetId) {
             showTemplateModal('Empfänger fehlt', 'Bitte wähle einen Empfänger aus der Liste aus.', 'OK', 'btn-primary', null, null, function() {});
             return;
         }
@@ -498,8 +515,8 @@ function setupCommentWriter() {
             return;
         }
 
-        const targetUser = commentableUsers.find(function(u) { return u.username === targetUsername; });
-        const targetName = targetUser ? targetUser.name : targetUsername;
+        const targetSchueler = commentableSchueler.find(function(s) { return s.id === targetId; });
+        const targetName = targetSchueler ? targetSchueler.name : targetId;
 
         showTemplateModal(
             'Kommentar senden',
@@ -508,7 +525,7 @@ function setupCommentWriter() {
             'Abbrechen', 'btn-secondary',
             function() {
                 api_call('/api/yearbook/post_comment', {
-                    target_username: targetUsername, text: text
+                    target_schueler_id: targetId, text: text
                 }, function(resp) {
                     if (resp.success) {
                         $('#comment_write_text').val('');

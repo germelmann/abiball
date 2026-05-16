@@ -1,9 +1,23 @@
 #{site_for_user_with_permission!("view_users")}
 <div class='container'>
     <h1>Benutzer</h1>
+
+    <!-- Tab navigation -->
+    <ul class='nav nav-tabs mb-3' id='users_tabs' role='tablist'>
+        <li class='nav-item' role='presentation'>
+            <button class='nav-link active' id='users-tab' data-bs-toggle='tab' data-bs-target='#users-pane' type='button' role='tab'>
+                <i class='bi bi-people'></i> Benutzer
+            </button>
+        </li>
+        #{user_has_permission?("yearbook_manage") ? "<li class='nav-item' role='presentation'><button class='nav-link' id='schueler-tab' data-bs-toggle='tab' data-bs-target='#schueler-pane' type='button' role='tab'><i class='bi bi-person-badge'></i> Schüler-Zuweisung</button></li>" : ""}
+    </ul>
+
+    <div class='tab-content'>
+        <!-- Users tab -->
+        <div class='tab-pane fade show active' id='users-pane' role='tabpanel'>
     <div class='row'>
         <div class='col-md-12'>
-            <button class='btn btn-primary' id="open_new_user_modal" data-bs-toggle="modal" data-bs-target="#userModal" #{user_has_permission?("manage_users") ? "" : "style='display:none'"}>
+            <button class='btn btn-primary mb-2' id="open_new_user_modal" data-bs-toggle="modal" data-bs-target="#userModal" #{user_has_permission?("manage_users") ? "" : "style='display:none'"}>
                 <i class="bi bi-plus-lg"></i>&nbsp;&nbsp;Neuer Benutzer
             </button>
         </div>
@@ -23,6 +37,60 @@
                 <tbody id='user_list'>
                 </tbody>
             </table>
+        </div>
+    </div>
+        </div>
+
+        <!-- Schüler-Zuweisung tab (yearbook_manage only) -->
+        #{user_has_permission?("yearbook_manage") ? "
+        <div class='tab-pane fade' id='schueler-pane' role='tabpanel'>
+            <div class='d-flex justify-content-between align-items-center mb-3'>
+                <p class='text-muted mb-0'><i class='bi bi-info-circle'></i> Hier kannst du Schüler*innen-Namen aus der Jahrbuch-Liste mit Benutzerkonten verknüpfen.</p>
+                <button class='btn btn-sm btn-outline-secondary' id='reload_schueler_btn'><i class='bi bi-arrow-clockwise'></i> Aktualisieren</button>
+            </div>
+            <div class='table-responsive'>
+                <table class='table table-sm table-hover' id='schueler_table'>
+                    <thead>
+                        <tr>
+                            <th>Schüler*in</th>
+                            <th>Zugewiesener Nutzer</th>
+                            <th>Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody id='schueler_list'>
+                        <tr><td colspan='3' class='text-center text-muted'><em>Lade...</em></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        " : ""}
+    </div>
+</div>
+
+<!-- Assign Schueler Modal (for users.html tab) -->
+<div class='modal fade' id='assignSchuelerModal' tabindex='-1' aria-labelledby='assignSchuelerModalLabel' aria-hidden='true'>
+    <div class='modal-dialog'>
+        <div class='modal-content'>
+            <div class='modal-header'>
+                <h5 class='modal-title' id='assignSchuelerModalLabel'><i class='bi bi-person-check'></i> Schüler*in zuweisen</h5>
+                <button type='button' class='btn-close' data-bs-dismiss='modal' aria-label='Schließen'></button>
+            </div>
+            <div class='modal-body'>
+                <p>Weise <strong id='assign_schueler_name'></strong> einem Benutzerkonto zu.</p>
+                <div class='mb-3'>
+                    <label class='form-label'>Benutzer suchen</label>
+                    <input type='text' class='form-control' id='assign_user_search' placeholder='Name oder Nutzer-ID...' autocomplete='off'>
+                    <div id='assign_user_results' class='list-group mt-1' style='max-height:250px;overflow-y:auto;'></div>
+                    <input type='hidden' id='assign_selected_username'>
+                    <div id='assign_selected_display' class='mt-2'></div>
+                </div>
+            </div>
+            <div class='modal-footer'>
+                <button type='button' class='btn btn-secondary' data-bs-dismiss='modal'>Abbrechen</button>
+                <button type='button' class='btn btn-primary' id='save_assign_btn'>
+                    <i class='bi bi-check'></i> Zuweisen
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -75,6 +143,8 @@
     let assignablePermissions = [];
 
     let editingUser = null;
+    let allUsersForSchueler = [];
+    let editingSchuelerId = null;
 
     // Validate username format (URL-safe characters only)
     function validateUsername(username) {
@@ -250,6 +320,129 @@
                         }
                     });
                 });
+        });
+
+        // Load Schueler tab on first show
+        $('#schueler-tab').on('shown.bs.tab', function() {
+            loadSchuelerAssignments();
+        });
+        $('#reload_schueler_btn').on('click', function() {
+            loadSchuelerAssignments();
+        });
+    });
+
+    // ─────────────────── Schüler-Zuweisung ───────────────────
+
+    function loadSchuelerAssignments() {
+        const tbody = $('#schueler_list');
+        tbody.html('<tr><td colspan="3" class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div></td></tr>');
+        api_call('/api/yearbook/get_schueler_assignments', {}, function(data) {
+            tbody.empty();
+            if (!data.success) {
+                tbody.html('<tr><td colspan="3" class="text-danger">' + escapeHtml(data.error || 'Fehler') + '</td></tr>');
+                return;
+            }
+            const assignments = data.assignments || [];
+            if (assignments.length === 0) {
+                tbody.html('<tr><td colspan="3" class="text-muted text-center"><em>Keine Schüler definiert. Bitte SCHUELER in credentials.rb eintragen.</em></td></tr>');
+                return;
+            }
+            assignments.forEach(function(a) {
+                const row = $('<tr>');
+                row.append($('<td>').text(a.schueler_name));
+                if (a.username) {
+                    const userCell = $('<td>');
+                    const link = $('<a>').attr('href', '/user/' + encodeURIComponent(a.username))
+                        .text(a.user_name + ' (' + a.username + ')');
+                    userCell.append(link);
+                    row.append(userCell);
+                } else {
+                    row.append($('<td class="text-muted">').html('<em>Nicht zugewiesen</em>'));
+                }
+                const actionCell = $('<td>');
+                const assignBtn = $('<button type="button" class="btn btn-sm btn-outline-primary me-1">').html('<i class="bi bi-person-check"></i> Zuweisen');
+                assignBtn.on('click', function() { openSchuelerAssignModal(a.schueler_id, a.schueler_name); });
+                actionCell.append(assignBtn);
+                if (a.username) {
+                    const removeBtn = $('<button type="button" class="btn btn-sm btn-outline-danger">').html('<i class="bi bi-x-lg"></i> Entfernen');
+                    removeBtn.on('click', function() {
+                        showTemplateModal(
+                            'Zuweisung entfernen',
+                            'Zuweisung von <strong>' + escapeHtml(a.schueler_name) + '</strong> → ' + escapeHtml(a.user_name) + ' entfernen?',
+                            'Entfernen', 'btn-danger', 'Abbrechen', 'btn-secondary',
+                            function() {
+                                api_call('/api/yearbook/unassign_schueler', { schueler_id: a.schueler_id }, function(resp) {
+                                    if (resp.success) { loadSchuelerAssignments(); }
+                                    else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-danger', null, null, function() {}); }
+                                });
+                            }
+                        );
+                    });
+                    actionCell.append(removeBtn);
+                }
+                row.append(actionCell);
+                tbody.append(row);
+            });
+        });
+    }
+
+    function openSchuelerAssignModal(schuelerId, schuelerName) {
+        editingSchuelerId = schuelerId;
+        $('#assign_schueler_name').text(schuelerName);
+        $('#assign_user_search').val('');
+        $('#assign_user_results').empty();
+        $('#assign_selected_username').val('');
+        $('#assign_selected_display').html('');
+
+        // Load all users for assignment
+        api_call('/api/yearbook/get_users_for_assignment', {}, function(data) {
+            allUsersForSchueler = data.success ? (data.users || []) : [];
+            renderAssignUserResults('');
+        }, function() { allUsersForSchueler = []; });
+
+        new bootstrap.Modal($('#assignSchuelerModal')[0]).show();
+        $('#assign_user_search').off('input').on('input', function() {
+            renderAssignUserResults($(this).val());
+        });
+    }
+
+    function renderAssignUserResults(filter) {
+        const container = $('#assign_user_results');
+        container.empty();
+        const fl = (filter || '').toLowerCase();
+        let shown = 0;
+        allUsersForSchueler.forEach(function(u) {
+            const label = u.name + ' (' + u.username + ')';
+            if (fl && label.toLowerCase().indexOf(fl) === -1) return;
+            if (shown >= 50) return;
+            shown++;
+            const item = $('<button type="button" class="list-group-item list-group-item-action">').text(label);
+            item.on('click', function() {
+                $('#assign_selected_username').val(u.username);
+                $('#assign_user_search').val(label);
+                $('#assign_selected_display').html('<span class="badge bg-success"><i class="bi bi-check-circle"></i> ' + escapeHtml(label) + '</span>');
+                container.empty();
+            });
+            container.append(item);
+        });
+        if (shown === 0 && fl) {
+            container.append('<div class="list-group-item text-muted">Keine Ergebnisse</div>');
+        }
+    }
+
+    $('#save_assign_btn').on('click', function() {
+        const username = $('#assign_selected_username').val();
+        if (!username) {
+            showTemplateModal('Kein Nutzer ausgewählt', 'Bitte wähle einen Benutzer aus der Liste.', 'OK', 'btn-primary', null, null, function() {});
+            return;
+        }
+        api_call('/api/yearbook/assign_schueler', { schueler_id: editingSchuelerId, username: username }, function(resp) {
+            if (resp.success) {
+                bootstrap.Modal.getInstance($('#assignSchuelerModal')[0]).hide();
+                loadSchuelerAssignments();
+            } else {
+                showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-danger', null, null, function() {});
+            }
         });
     });
     

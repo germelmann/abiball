@@ -279,17 +279,17 @@ function renderAnswers(data) {
 function renderComments(data) {
     const isOwn = data.is_own || false;
     const canManage = data.can_manage || false;
-    const targetUsername = data.username;
+    const schueler = data.schueler || null;
 
-    // Show write-comment form if viewing someone else's entry
-    if (!isOwn) {
+    // Show write-comment form if viewing someone else's entry and they have a Schueler assigned
+    if (!isOwn && schueler) {
         $('#write_comment_section').show();
         $('#submit_comment_btn').off('click').on('click', function() {
             const text = $('#comment_text_input').val().trim();
             if (!text) { $('#comment_status').html('<span class="text-danger">Bitte Text eingeben</span>'); return; }
             $('#submit_comment_btn').prop('disabled', true);
             $('#comment_status').html('<span class="text-body-secondary"><i class="bi bi-arrow-repeat"></i></span>');
-            api_call('/api/yearbook/post_comment', { target_username: targetUsername, text: text }, function(resp) {
+            api_call('/api/yearbook/post_comment', { target_schueler_id: schueler.id, text: text }, function(resp) {
                 if (resp.success) {
                     $('#comment_text_input').val('');
                     $('#comment_status').html('<span class="text-success"><i class="bi bi-check-circle"></i> Kommentar gesendet</span>');
@@ -305,22 +305,28 @@ function renderComments(data) {
         });
     }
 
-    // Show received/all comments to entry owner or admin
-    if (isOwn || canManage) {
+    // Show received/all comments to entry owner (if schueler assigned) or admin
+    if ((isOwn && schueler) || canManage) {
         $('#own_comments_section').show();
         if (canManage) {
             $('#own_comments_heading').html('<i class="bi bi-shield"></i> Alle Kommentare');
         }
-        loadComments(targetUsername, canManage);
+        loadComments(schueler ? schueler.id : null, canManage);
     }
 }
 
-function loadComments(targetUsername, isAdmin) {
+function loadComments(targetSchuelerId, isAdmin) {
     const container = $('#own_comments_list');
+
+    if (isAdmin && !targetSchuelerId) {
+        container.html('<p class="text-body-secondary"><i class="bi bi-info-circle"></i> Diesem Benutzer ist kein Schülername zugewiesen.</p>');
+        return;
+    }
+
     container.html('<div class="text-center py-2"><div class="spinner-border spinner-border-sm text-primary"></div></div>');
 
     const endpoint = isAdmin ? '/api/yearbook/admin_get_comments' : '/api/yearbook/get_received_comments';
-    const params = isAdmin ? { target_username: targetUsername } : {};
+    const params = isAdmin ? { target_schueler_id: targetSchuelerId } : {};
 
     api_call(endpoint, params, function(data) {
         container.empty();

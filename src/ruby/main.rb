@@ -450,7 +450,7 @@ class Main < Sinatra::Base
         END_OF_QUERY
 
         unless user
-            # Don't reveal that user doesn't exist - use generic delay
+            log("Login-Versuch mit unbekannter E-Mail-Adresse: #{email}")
             sleep(3.0)
             respond(:success => false, :error => 'login_failed')
             return
@@ -468,7 +468,7 @@ class Main < Sinatra::Base
         tag = RandomTag::generate(12)
         srand(Digest::SHA2.hexdigest(LOGIN_CODE_SALT).to_i + (Time.now.to_f * 1000000).to_i)
         random_code = (0..5).map { |x| rand(10).to_s }.join('')
-        random_code = '123456' if DEVELOPMENT && !SEND_MAILS_IN_DEVELOPMENT
+        random_code = '123456' if DEVELOPMENT
 
         log("Code #{random_code} für #{email}")
 
