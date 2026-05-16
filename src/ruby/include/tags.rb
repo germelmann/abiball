@@ -116,7 +116,7 @@ class Main < Sinatra::Base
         permission = data[:permission].strip
         action     = data[:action].strip.downcase
 
-        unless PERMISSIONS.include?(permission) || !user_has_permission?(permission)
+        unless !PERMISSIONS.include?(permission) || !user_has_permission?(permission)
             respond(success: false, error: "Ungültige Berechtigung: #{permission}")
             return
         end
