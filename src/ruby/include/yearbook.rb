@@ -650,7 +650,6 @@ class Main < Sinatra::Base
 
         has_view = user_has_permission?("yearbook_view")
         has_manage = user_has_permission?("yearbook_manage")
-        is_real_admin = admin_logged_in?
 
         data = parse_request_data(required_keys: [:target_username])
         target_username = data[:target_username].to_s.strip
@@ -729,7 +728,7 @@ class Main < Sinatra::Base
             } },
             uploads: uploads,
             can_manage: has_manage,
-            can_admin_comments: is_real_admin && !is_own,
+            can_admin_comments: admin_logged_in?,
             is_own: is_own,
             schueler: schueler,
             my_sent_comment: my_sent_comment
