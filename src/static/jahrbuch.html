@@ -305,7 +305,7 @@ function loadViewEntry() {
             $('#comments-tab').on('shown.bs.tab', function() { loadReceivedComments(); });
             $('#refresh_comments_btn').on('click', function() { loadReceivedComments(); });
         } else {
-            $('#received_comments_container').html('<p class="text-body-secondary"><i class="bi bi-info-circle"></i> Nur für Admins einsehbar.</p>');
+            $('#received_comments_container').html('<p class="text-body-secondary"><i class="bi bi-info-circle"></i> Du kannst die Kommentare eines anderen Nutzers nicht einsehen. Wende dich im Ausnahmefall an einen Administrator.</p>');
             $('#refresh_comments_btn').hide();
         }
 
@@ -383,7 +383,7 @@ function renderQuestions() {
         questionDiv.append('<div class="question-label">' + escapeHtml(q.question) + badge + '</div>');
 
         if (q.restricted_for_manager) {
-            questionDiv.append('<div class="text-body-secondary"><i class="bi bi-shield-lock"></i> Anonyme Antworten anderer Nutzer sind nur für Admins sichtbar.</div>');
+            questionDiv.append('<div class="text-body-secondary"><i class="bi bi-shield-lock"></i> Anonyme Antworten anderer Nutzer kannst du nicht sehen. Wende dich im Ausnahmefall an einen Administrator.</div>');
         } else if (q.type === 'upload') {
             questionDiv.append(renderUploadField(q, 'answer'));
         } else {
