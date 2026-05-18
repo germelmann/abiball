@@ -202,6 +202,7 @@ let answerSaveTimers = {};
 // View-mode globals (set when URL is /jahrbuch/:username)
 let viewUsername = null;
 let canManage = false;
+let canAdminComments = false;
 let readOnlyMode = false;
 
 (function() {
@@ -281,6 +282,7 @@ function loadViewEntry() {
         myProfile = data.profile || {};
         myUploads = data.uploads || [];
         canManage = data.can_manage || false;
+        canAdminComments = data.can_admin_comments || false;
         readOnlyMode = !data.is_own && !canManage;
 
         // Update UI for view mode
@@ -297,13 +299,13 @@ function loadViewEntry() {
         // Adjust comments section
         $('#write_comment_card').hide();
         $('#sent_comments_card').hide();
-        if (canManage) {
+        if (canAdminComments) {
             $('#received_comments_heading').html('<i class="bi bi-shield"></i> Alle Kommentare');
-            $('#received_comments_desc').text('Alle Kommentare inkl. gelöschter. Als Administrator können Sie Kommentare annehmen, entfernen oder endgültig löschen.');
+            $('#received_comments_desc').text('Alle Kommentare inkl. gelöschter. Als Admin kannst du Kommentare annehmen, entfernen oder endgültig löschen.');
             $('#comments-tab').on('shown.bs.tab', function() { loadReceivedComments(); });
             $('#refresh_comments_btn').on('click', function() { loadReceivedComments(); });
         } else {
-            $('#received_comments_container').html('<p class="text-body-secondary"><i class="bi bi-info-circle"></i> Nur mit Verwaltungsberechtigung einsehbar.</p>');
+            $('#received_comments_container').html('<p class="text-body-secondary"><i class="bi bi-info-circle"></i> Nur für Admins einsehbar.</p>');
             $('#refresh_comments_btn').hide();
         }
 
@@ -380,7 +382,9 @@ function renderQuestions() {
             : ' <span class="badge bg-primary badge-anonymous"><i class="bi bi-person"></i> Namentlich</span>';
         questionDiv.append('<div class="question-label">' + escapeHtml(q.question) + badge + '</div>');
 
-        if (q.type === 'upload') {
+        if (q.restricted_for_manager) {
+            questionDiv.append('<div class="text-body-secondary"><i class="bi bi-shield-lock"></i> Anonyme Antworten anderer Nutzer sind nur für Admins sichtbar.</div>');
+        } else if (q.type === 'upload') {
             questionDiv.append(renderUploadField(q, 'answer'));
         } else {
             questionDiv.append(renderQuestionInput(q, existingAnswer));
@@ -712,7 +716,7 @@ function loadReceivedComments() {
     container.html('<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>');
 
     const params = viewUsername ? { target_username: viewUsername } : {};
-    const isAdminView = !!(viewUsername && canManage);
+    const isAdminView = !!(viewUsername && canAdminComments);
 
     api_call('/api/yearbook/get_received_comments', params, function(data) {
         container.empty();

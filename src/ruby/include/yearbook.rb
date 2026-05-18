@@ -76,6 +76,28 @@ class Main < Sinatra::Base
         t
     end
 
+    def anonymous_yearbook_question_ids
+        yearbook_questions.select { |q| q[:anonymous] }.map { |q| q[:id] }
+    end
+
+    def can_access_user_anonymous_yearbook_data?(username)
+        username == @session_user[:username] || admin_logged_in?
+    end
+
+    def filter_restricted_yearbook_uploads(uploads, username)
+        return uploads if can_access_user_anonymous_yearbook_data?(username)
+
+        anonymous_question_ids = anonymous_yearbook_question_ids
+        uploads.reject { |up| up[:context] == 'answer' && anonymous_question_ids.include?(up[:field_id]) }
+    end
+
+    def can_access_user_anonymous_upload?(owner_username, context, field_id)
+        owner_username == @session_user[:username] ||
+            context != 'answer' ||
+            !anonymous_yearbook_question_ids.include?(field_id) ||
+            admin_logged_in?
+    end
+
     @@schueler_synced = false
 
     def ensure_schueler_synced!
@@ -239,7 +261,7 @@ class Main < Sinatra::Base
 
         user_answers = {}
         # Attributed anonymous answers: keyed by question_id -> [{username, name, answer}]
-        # Only included in the response for yearbook_manage users.
+        # Only included in the response for real admins.
         attributed_anonymous = {}
 
         entries.each do |entry|
@@ -354,7 +376,9 @@ class Main < Sinatra::Base
         require_yearbook_accessible!
 
         data = parse_request_data(optional_keys: [:target_username])
-        target_username = resolve_target_username(data[:target_username])
+        requested_target_username = data[:target_username].to_s.strip
+        target_username = resolve_target_username(requested_target_username)
+        can_access_anonymous_answers = requested_target_username.empty? || can_access_user_anonymous_yearbook_data?(target_username)
 
         entries = neo4j_query(<<~END_OF_QUERY, {username: target_username})
             MATCH (u:User {username: $username})-[:HAS_YEARBOOK_ENTRY]->(y:YearbookEntry)
@@ -363,6 +387,7 @@ class Main < Sinatra::Base
 
         answers = {}
         entries.each do |entry|
+            next if !can_access_anonymous_answers && anonymous_yearbook_question_ids.include?(entry['question_id'])
             answers[entry['question_id']] = entry['answer']
         end
 
@@ -384,6 +409,12 @@ class Main < Sinatra::Base
         question_id = data[:question_id].to_s.strip
         answer = data[:answer]
         username = resolve_target_username(data[:target_username])
+        question = yearbook_questions.find { |q| q[:id] == question_id }
+
+        assert(!question.nil?, "Frage nicht gefunden")
+        if question[:anonymous] && username != @session_user[:username] && !admin_logged_in?
+            assert(false, "Keine Berechtigung für anonyme Antworten anderer Benutzer")
+        end
 
         save_yearbook_answer(username, question_id, answer)
 
@@ -446,6 +477,9 @@ class Main < Sinatra::Base
         end
         assert(field_config, "Ungültiges Feld")
         assert(field_config[:type] == 'upload', "Feld ist kein Upload-Feld")
+        if !can_access_user_anonymous_upload?(username, context, field_id)
+            assert(false, "Keine Berechtigung für anonyme Uploads anderer Benutzer")
+        end
 
         max_file_size = (field_config[:max_file_size] || 10_000_000).to_i
         max_uploads = (field_config[:max_uploads] || 5).to_i
@@ -495,16 +529,22 @@ class Main < Sinatra::Base
 
         result = neo4j_query(<<~END_OF_QUERY, {upload_id: upload_id})
             MATCH (u:User)-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload {id: $upload_id})
-            RETURN u.username AS owner_username, up.original_filename AS filename, up.mimetype AS mimetype
+            RETURN u.username AS owner_username, up.original_filename AS filename, up.mimetype AS mimetype,
+                   up.field_id AS field_id, up.context AS context
         END_OF_QUERY
         assert(!result.empty?, "Datei nicht gefunden")
 
         upload = result.first
         owner_username = upload['owner_username']
+        field_id = upload['field_id']
+        context = upload['context']
         can_access = (@session_user[:username] == owner_username) ||
                      user_has_permission?("yearbook_view") ||
                      user_has_permission?("yearbook_manage")
         assert(can_access, "Keine Berechtigung")
+        unless can_access_user_anonymous_upload?(owner_username, context, field_id)
+            assert(false, "Keine Berechtigung für anonymen Upload anderer Benutzer")
+        end
 
         original_filename = upload['filename']
         file_path = File.join(YEARBOOK_UPLOAD_PATH, "#{upload_id}_#{original_filename}")
@@ -524,7 +564,8 @@ class Main < Sinatra::Base
 
         result = neo4j_query(<<~END_OF_QUERY, {upload_id: upload_id})
             MATCH (u:User)-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload {id: $upload_id})
-            RETURN u.username AS owner_username, up.original_filename AS filename
+            RETURN u.username AS owner_username, up.original_filename AS filename,
+                   up.field_id AS field_id, up.context AS context
         END_OF_QUERY
         assert(!result.empty?, "Upload nicht gefunden")
 
@@ -532,6 +573,9 @@ class Main < Sinatra::Base
         original_filename = result.first['filename']
         can_delete = (@session_user[:username] == owner_username) || user_has_permission?("yearbook_manage")
         assert(can_delete, "Keine Berechtigung")
+        unless can_access_user_anonymous_upload?(owner_username, result.first['context'], result.first['field_id'])
+            assert(false, "Keine Berechtigung für anonymen Upload anderer Benutzer")
+        end
 
         file_path = File.join(YEARBOOK_UPLOAD_PATH, "#{upload_id}_#{original_filename}")
         File.delete(file_path) if File.exist?(file_path)
@@ -571,6 +615,8 @@ class Main < Sinatra::Base
             uploads = uploads_raw.map { |r| { id: r['id'], filename: r['filename'], mimetype: r['mimetype'], field_id: r['field_id'], context: r['context'] } }
         end
 
+        uploads = filter_restricted_yearbook_uploads(uploads, target_username)
+
         respond(success: true, uploads: uploads)
     end
 
@@ -582,14 +628,15 @@ class Main < Sinatra::Base
         has_view = user_has_permission?("yearbook_view")
         has_manage = user_has_permission?("yearbook_manage")
         assert(has_view || has_manage, "Keine Berechtigung")
+        can_view_attributed_anonymous = admin_logged_in?
 
         data = collect_all_yearbook_data
 
         respond(
             success: true,
             user_answers: data[:user_answers],
-            # Only expose attributed anonymous answers to yearbook_manage users
-            attributed_anonymous: has_manage ? data[:attributed_anonymous] : {},
+            # Only expose attributed anonymous answers to real admins
+            attributed_anonymous: can_view_attributed_anonymous ? data[:attributed_anonymous] : {},
             profiles: data[:profiles],
             questions: data[:questions].map { |q| { id: q[:id], question: q[:question], type: q[:type], anonymous: q[:anonymous], options: q[:options] || [] } },
             allow_delete_all: yearbook_allow_delete_all?
@@ -603,6 +650,7 @@ class Main < Sinatra::Base
 
         has_view = user_has_permission?("yearbook_view")
         has_manage = user_has_permission?("yearbook_manage")
+        is_real_admin = admin_logged_in?
 
         data = parse_request_data(required_keys: [:target_username])
         target_username = data[:target_username].to_s.strip
@@ -623,8 +671,10 @@ class Main < Sinatra::Base
             RETURN y.question_id AS question_id, y.answer AS answer
         END_OF_QUERY
 
+        can_access_target_anonymous_answers = can_access_user_anonymous_yearbook_data?(target_username)
         answers = {}
         entries.each do |entry|
+            next if !can_access_target_anonymous_answers && anonymous_yearbook_question_ids.include?(entry['question_id'])
             answers[entry['question_id']] = entry['answer']
         end
 
@@ -637,10 +687,12 @@ class Main < Sinatra::Base
             ORDER BY up.created_at
         END_OF_QUERY
         uploads = uploads_raw.map { |r| { id: r['id'], filename: r['filename'], mimetype: r['mimetype'], field_id: r['field_id'], context: r['context'] } }
+        uploads = filter_restricted_yearbook_uploads(uploads, target_username)
 
         questions = yearbook_questions.map { |q| {
             id: q[:id], question: q[:question], type: q[:type],
             anonymous: q[:anonymous], options: q[:options] || [],
+            restricted_for_manager: q[:anonymous] && !can_access_target_anonymous_answers,
             max_file_size: q[:max_file_size], max_uploads: q[:max_uploads]
         } }
 
@@ -677,6 +729,7 @@ class Main < Sinatra::Base
             } },
             uploads: uploads,
             can_manage: has_manage,
+            can_admin_comments: is_real_admin && !is_own,
             is_own: is_own,
             schueler: schueler,
             my_sent_comment: my_sent_comment
@@ -973,14 +1026,21 @@ class Main < Sinatra::Base
 
     # Get comments received on a Schueler entry.
     # Personal use: returns pending and approved comments (not removed).
-    # yearbook_manage with target_username: returns ALL comments including removed, with commenter_username.
+    # Real admins with target_username: returns ALL comments including removed, with commenter_username.
     post '/api/yearbook/get_received_comments' do
         require_user!
         require_yearbook_accessible!
 
         data = parse_request_data(optional_keys: [:target_username])
-        is_admin_view = !data[:target_username].to_s.strip.empty? && user_has_permission?("yearbook_manage")
-        target_username = resolve_target_username(data[:target_username])
+        requested_target_username = data[:target_username].to_s.strip
+        if requested_target_username.empty?
+            is_admin_view = false
+            target_username = @session_user[:username]
+        else
+            require_admin!
+            is_admin_view = true
+            target_username = resolve_target_username(requested_target_username)
+        end
 
         schueler_result = neo4j_query(<<~END_OF_QUERY, {username: target_username})
             MATCH (u:User {username: $username})-[:IS_SCHUELER]->(s:Schueler)
@@ -1026,7 +1086,7 @@ class Main < Sinatra::Base
         respond(success: true, comments: comments)
     end
 
-    # Approve a pending comment on own Schueler entry (or any entry for yearbook_manage)
+    # Approve a pending comment on own Schueler entry (or any entry for real admins)
     post '/api/yearbook/approve_comment' do
         require_user!
         require_yearbook_accessible!
@@ -1036,7 +1096,7 @@ class Main < Sinatra::Base
 
         username = @session_user[:username]
 
-        result = if user_has_permission?("yearbook_manage")
+        result = if admin_logged_in?
             neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id})
                 MATCH (c:YearbookComment {id: $comment_id})
                 RETURN c.id AS id
@@ -1057,7 +1117,7 @@ class Main < Sinatra::Base
         respond(success: true, message: "Kommentar angenommen")
     end
 
-    # Remove a comment from own Schueler entry (soft delete; yearbook_manage can remove any)
+    # Remove a comment from own Schueler entry (soft delete; real admins can remove any)
     post '/api/yearbook/remove_comment' do
         require_user!
         require_yearbook_accessible!
@@ -1067,7 +1127,7 @@ class Main < Sinatra::Base
 
         username = @session_user[:username]
 
-        result = if user_has_permission?("yearbook_manage")
+        result = if admin_logged_in?
             neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id})
                 MATCH (c:YearbookComment {id: $comment_id})
                 RETURN c.id AS id
@@ -1091,7 +1151,7 @@ class Main < Sinatra::Base
     # Admin: restore a removed comment back to pending state
     post '/api/yearbook/admin_restore_comment' do
         require_user!
-        require_user_with_permission!("yearbook_manage")
+        require_admin!
 
         data = parse_request_data(required_keys: [:comment_id])
         comment_id = data[:comment_id].to_s.strip
@@ -1114,7 +1174,7 @@ class Main < Sinatra::Base
     # Admin: permanently delete a comment
     post '/api/yearbook/admin_delete_comment' do
         require_user!
-        require_user_with_permission!("yearbook_manage")
+        require_admin!
 
         data = parse_request_data(required_keys: [:comment_id])
         comment_id = data[:comment_id].to_s.strip
