@@ -460,6 +460,7 @@ class Main < Sinatra::Base
         require_yearbook_accessible!
 
         file = params[:file]
+        puts "Received upload: #{file.inspect}"
         field_id = params[:field_id].to_s.strip
         context = params[:context].to_s.strip
         raw_target = params[:target_username].to_s.strip
