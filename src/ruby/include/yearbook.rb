@@ -247,13 +247,17 @@ class Main < Sinatra::Base
         return_fields = yearbook_profile_return_fields
         profiles = if return_fields.empty?
             neo4j_query(<<~END_OF_QUERY)
-                MATCH (u:User)-[:HAS_YEARBOOK_PROFILE]->(yp:YearbookProfile)
-                RETURN u.username AS username, u.name AS name
+                MATCH (u:User)-[:HAS_PERMISSION]->(p:Permission {name: "yearbook_create"})
+                OPTIONAL MATCH (u)-[:IS_SCHUELER]->(s)
+                OPTIONAL MATCH (u)-[:HAS_YEARBOOK_PROFILE]->(yp:YearbookProfile)
+                RETURN u.username AS username, u.name AS name, s.name AS schueler_name
             END_OF_QUERY
         else
             neo4j_query(<<~END_OF_QUERY)
-                MATCH (u:User)-[:HAS_YEARBOOK_PROFILE]->(yp:YearbookProfile)
-                RETURN u.username AS username, u.name AS name, #{return_fields}
+                MATCH (u:User)-[:HAS_PERMISSION]->(p:Permission {name: "yearbook_create"})
+                OPTIONAL MATCH (u)-[:IS_SCHUELER]->(s)
+                OPTIONAL MATCH (u)-[:HAS_YEARBOOK_PROFILE]->(yp:YearbookProfile)
+                RETURN u.username AS username, u.name AS name, s.name AS schueler_name, #{return_fields}
             END_OF_QUERY
         end
 
@@ -290,7 +294,7 @@ class Main < Sinatra::Base
         profile_list = profiles.map do |p|
             {
                 username: p['username'],
-                name: p['name'],
+                name: p['schueler_name'] || p['name'],
                 profile: return_fields.empty? ? {} : extract_profile_from_row(p)
             }
         end

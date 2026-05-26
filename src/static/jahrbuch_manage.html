@@ -235,7 +235,7 @@ function renderManageProfiles() {
         });
 
         const pct = totalFields > 0 ? Math.round((filledCount / totalFields) * 100) : 0;
-        const barColor = pct >= 100 ? 'bg-success' : pct > 0 ? 'bg-primary' : 'bg-secondary';
+        const barColor = pct >= 75 ? 'bg-success' : pct >= 50 ? 'bg-primary' : pct >= 25 ? 'bg-warning' : 'bg-danger';
         const progressCell = $('<td>').html(
             '<div class="d-flex align-items-center gap-2">' +
             '<div class="progress flex-grow-1" style="height: 14px; min-width: 80px;">' +
