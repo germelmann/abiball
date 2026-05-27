@@ -701,9 +701,27 @@ function loadSentComments() {
             return;
         }
         comments.forEach(function(c) {
-            const card = $('<div class="comment-card mb-2 p-3 bg-body-secondary rounded">');
-            card.append('<div class="fw-semibold mb-1"><i class="bi bi-person"></i> ' + escapeHtml(c.schueler_name || 'Unbekannt') + '</div>');
-            card.append($('<div>').text(c.text));
+            const isPending = c.status === 'pending';
+            const isApproved = c.status === 'approved';
+            const card = $('<div>').addClass('comment-card' + (isPending ? ' pending' : ''));
+
+            const headerRow = $('<div class="d-flex justify-content-between align-items-start mb-1">');
+            let badgeHtml;
+            if (isPending) {
+                badgeHtml = '<span class="badge bg-warning text-dark"><i class="bi bi-clock"></i> Ausstehend</span>';
+            } else if (isApproved) {
+                badgeHtml = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Angenommen</span>';
+            } else {
+                badgeHtml = '<span class="badge bg-secondary"><i class="bi bi-question-circle"></i> Unbekannt</span>';
+            }
+            headerRow.append('<span>' + badgeHtml + '</span>');
+            headerRow.append('<span class="comment-meta"><i class="bi bi-person"></i> ' + escapeHtml(c.schueler_name || 'Unbekannt') + '</span>');
+            card.append(headerRow);
+
+            const textDiv = $('<div class="mb-1 mt-1">');
+            textDiv.text(c.text);
+            card.append(textDiv);
+
             container.append(card);
         });
     }, function() {

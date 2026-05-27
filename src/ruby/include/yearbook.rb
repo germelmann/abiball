@@ -984,14 +984,6 @@ class Main < Sinatra::Base
         END_OF_QUERY
         assert(!target.empty?, "Schüler nicht gefunden")
 
-        # Prevent duplicate comments: block if user already has a non-removed comment for this target
-        existing_comment = neo4j_query(<<~END_OF_QUERY, {commenter: commenter_username, schueler_id: target_schueler_id})
-            MATCH (commenter:User {username: $commenter})-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(s:Schueler {id: $schueler_id})
-            WHERE COALESCE(c.status, 'pending') <> 'removed'
-            RETURN c.id AS id
-        END_OF_QUERY
-        assert(existing_comment.empty?, "Du hast bereits einen Kommentar an diese Person gesendet")
-
         comment_id = RandomTag.generate(16)
         neo4j_query(<<~END_OF_QUERY, { commenter: commenter_username, schueler_id: target_schueler_id, comment_id: comment_id, text: text, now: yearbook_timestamp })
             MATCH (commenter:User {username: $commenter})
@@ -1007,7 +999,7 @@ class Main < Sinatra::Base
         respond(success: true, message: "Kommentar gespeichert")
     end
 
-    # Get all non-removed comments written by the current user (text + recipient name, no status)
+    # Get all non-removed comments written by the current user (text + recipient name + status)
     post '/api/yearbook/get_my_sent_comments' do
         require_user!
         require_yearbook_accessible!
@@ -1017,12 +1009,13 @@ class Main < Sinatra::Base
         results = neo4j_query(<<~END_OF_QUERY, {username: username})
             MATCH (u:User {username: $username})-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(s:Schueler)
             WHERE COALESCE(c.status, 'pending') <> 'removed'
-            RETURN c.text AS text, c.created_at AS created_at, s.name AS schueler_name
+            RETURN c.text AS text, c.created_at AS created_at, s.name AS schueler_name,
+                   COALESCE(c.status, 'pending') AS status
             ORDER BY c.created_at DESC
         END_OF_QUERY
 
         comments = results.map { |r|
-            { text: r['text'], created_at: r['created_at'], schueler_name: r['schueler_name'] }
+            { text: r['text'], created_at: r['created_at'], schueler_name: r['schueler_name'], status: r['status'] }
         }
 
         respond(success: true, comments: comments)
