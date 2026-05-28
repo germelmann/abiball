@@ -240,7 +240,8 @@ class Main < Sinatra::Base
     def collect_all_yearbook_data
         entries = neo4j_query(<<~END_OF_QUERY)
             MATCH (u:User)-[:HAS_YEARBOOK_ENTRY]->(y:YearbookEntry)
-            RETURN u.username AS username, u.name AS name,
+            OPTIONAL MATCH (u)-[:IS_SCHUELER]->(s:Schueler)
+            RETURN u.username AS username, COALESCE(s.name, u.name) AS display_name,
                    y.question_id AS question_id, y.answer AS answer
         END_OF_QUERY
 
@@ -281,12 +282,12 @@ class Main < Sinatra::Base
                 attributed_anonymous[entry['question_id']] ||= []
                 attributed_anonymous[entry['question_id']] << {
                     username: entry['username'],
-                    name: entry['name'],
+                    name: entry['display_name'],
                     answer: entry['answer']
                 }
             else
                 uname = entry['username']
-                user_answers[uname] ||= { name: entry['name'], answers: {} }
+                user_answers[uname] ||= { name: entry['display_name'], answers: {} }
                 user_answers[uname][:answers][entry['question_id']] = entry['answer']
             end
         end
@@ -666,7 +667,8 @@ class Main < Sinatra::Base
 
         user_info = neo4j_query(<<~END_OF_QUERY, {username: target_username})
             MATCH (u:User {username: $username})
-            RETURN u.username AS username, u.name AS name
+            OPTIONAL MATCH (u)-[:IS_SCHUELER]->(s:Schueler)
+            RETURN u.username AS username, COALESCE(s.name, u.name) AS display_name
         END_OF_QUERY
         assert(!user_info.empty?, "Benutzer nicht gefunden")
 
@@ -723,7 +725,7 @@ class Main < Sinatra::Base
         respond(
             success: true,
             username: user_info.first['username'],
-            name: user_info.first['name'],
+            name: user_info.first['display_name'],
             answers: answers,
             profile: profile_data || {},
             questions: questions,
@@ -1003,22 +1005,28 @@ class Main < Sinatra::Base
     post '/api/yearbook/get_my_sent_comments' do
         require_user!
         require_yearbook_accessible!
-        require_user_with_permission!("yearbook_create")
 
-        username = @session_user[:username]
+        data = parse_request_data(optional_keys: [:target_username])
+        requested_target_username = data[:target_username].to_s.strip
+        username = if requested_target_username.empty?
+            require_user_with_permission!("yearbook_create")
+            @session_user[:username]
+        else
+            resolve_target_username(requested_target_username)
+        end
+
         results = neo4j_query(<<~END_OF_QUERY, {username: username})
             MATCH (u:User {username: $username})-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(s:Schueler)
-            WHERE COALESCE(c.status, 'pending') <> 'removed'
-            RETURN c.text AS text, c.created_at AS created_at, s.name AS schueler_name,
+            RETURN c.id AS id, c.text AS text, c.created_at AS created_at, s.name AS schueler_name,
                    COALESCE(c.status, 'pending') AS status
             ORDER BY c.created_at DESC
         END_OF_QUERY
 
         comments = results.map { |r|
-            { text: r['text'], created_at: r['created_at'], schueler_name: r['schueler_name'], status: r['status'] }
+            { id: r['id'], text: r['text'], created_at: r['created_at'], schueler_name: r['schueler_name'], status: r['status'] }
         }
 
-        respond(success: true, comments: comments)
+        respond(success: true, comments: comments, can_withdraw: (username == @session_user[:username]))
     end
 
     # Get comments received on a Schueler entry.
@@ -1034,9 +1042,8 @@ class Main < Sinatra::Base
             is_admin_view = false
             target_username = @session_user[:username]
         else
-            require_admin!
-            is_admin_view = true
             target_username = resolve_target_username(requested_target_username)
+            is_admin_view = admin_logged_in?
         end
 
         schueler_result = neo4j_query(<<~END_OF_QUERY, {username: target_username})
@@ -1054,10 +1061,11 @@ class Main < Sinatra::Base
         if is_admin_view
             results = neo4j_query(<<~END_OF_QUERY, {schueler_id: schueler_id})
                 MATCH (commenter:User)-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(s:Schueler {id: $schueler_id})
+                OPTIONAL MATCH (commenter)-[:IS_SCHUELER]->(commenter_s:Schueler)
                 RETURN c.id AS id, c.text AS text, c.created_at AS created_at,
                        COALESCE(c.status, 'pending') AS status,
                        c.removed_at AS removed_at,
-                       commenter.name AS commenter_name, commenter.username AS commenter_username
+                       COALESCE(commenter_s.name, commenter.name) AS commenter_name, commenter.username AS commenter_username
                 ORDER BY c.created_at
             END_OF_QUERY
             comments = results.map { |r|
@@ -1069,9 +1077,10 @@ class Main < Sinatra::Base
             results = neo4j_query(<<~END_OF_QUERY, {schueler_id: schueler_id})
                 MATCH (commenter:User)-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(s:Schueler {id: $schueler_id})
                 WHERE COALESCE(c.status, 'pending') <> 'removed'
+                OPTIONAL MATCH (commenter)-[:IS_SCHUELER]->(commenter_s:Schueler)
                 RETURN c.id AS id, c.text AS text, c.created_at AS created_at,
                        COALESCE(c.status, 'pending') AS status,
-                       commenter.name AS commenter_name
+                       COALESCE(commenter_s.name, commenter.name) AS commenter_name
                 ORDER BY c.created_at
             END_OF_QUERY
             comments = results.map { |r|
@@ -1081,6 +1090,30 @@ class Main < Sinatra::Base
         end
 
         respond(success: true, comments: comments)
+    end
+
+    # Withdraw own pending sent comment (treated as removed/rejected, not deleted)
+    post '/api/yearbook/withdraw_comment' do
+        require_user!
+        require_yearbook_accessible!
+        require_user_with_permission!("yearbook_create")
+
+        data = parse_request_data(required_keys: [:comment_id])
+        comment_id = data[:comment_id].to_s.strip
+
+        result = neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id, username: @session_user[:username]})
+            MATCH (u:User {username: $username})-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment {id: $comment_id})
+            RETURN COALESCE(c.status, 'pending') AS status
+        END_OF_QUERY
+        assert(!result.empty?, "Kommentar nicht gefunden oder keine Berechtigung")
+        assert(result.first['status'] == 'pending', "Nur ausstehende Kommentare können zurückgezogen werden")
+
+        neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id, now: yearbook_timestamp})
+            MATCH (c:YearbookComment {id: $comment_id})
+            SET c.status = 'removed', c.removed_at = $now
+        END_OF_QUERY
+
+        respond(success: true, message: "Kommentar zurückgezogen")
     end
 
     # Approve a pending comment on own Schueler entry (or any entry for real admins)
