@@ -1,0 +1,530 @@
+#{site_for_user_with_permission!("manage_orders")}
+<div class='container'>
+    <h1><i class="bi bi-shield-check"></i> Kassenprüfung</h1>
+    <p class="text-muted">
+        Gleiche die in der Datenbank gebuchten Zahlungen mit den Kontoauszügen ab. Jede Zahlung wird einzeln abgefragt – stimmt der Betrag mit dem Auszug überein, wird sie als geprüft markiert.
+    </p>
+
+    <div class="mb-3">
+        <a href="/payments" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-cash-stack"></i> Zahlungen
+        </a>
+        <a href="/order_management" class="btn btn-outline-secondary btn-sm ms-1">
+            <i class="bi bi-list-check"></i> Bestellungsmanagement
+        </a>
+    </div>
+
+    <!-- Step 1: Setup -->
+    <div class="card mb-4" id="setup_card">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-1-circle"></i> Konto wählen</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label for="audit_event_select" class="form-label">Event (optional)</label>
+                    <select class="form-select" id="audit_event_select">
+                        <option value="">Alle Events</option>
+                    </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="audit_bank_account_select" class="form-label">Bankkonto</label>
+                    <select class="form-select" id="audit_bank_account_select">
+                        <option value="">-- Bitte zuerst Event wählen oder alle laden --</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn btn-primary" id="start_audit_btn" onclick="startAudit()" disabled>
+                <i class="bi bi-play-circle"></i> Prüfung starten
+            </button>
+        </div>
+    </div>
+
+    <!-- Step 2: Audit walkthrough -->
+    <div class="card mb-4" id="audit_card" style="display:none;">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-2-circle"></i> Zahlung prüfen</h5>
+            <div>
+                <span class="badge bg-secondary" id="audit_progress_badge">0 / 0</span>
+                <span class="badge bg-info ms-1" id="audit_account_badge">-</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="progress mb-3" style="height: 6px;">
+                <div class="progress-bar" id="audit_progress_bar" role="progressbar" style="width: 0%;"></div>
+            </div>
+
+            <div id="audit_current_payment">
+                <div class="row">
+                    <div class="col-md-7">
+                        <h6 class="text-muted mb-1">Verwendungszweck</h6>
+                        <h3 id="audit_payment_reference" class="mb-3 font-monospace"></h3>
+                        <dl class="row mb-0">
+                            <dt class="col-sm-4">Kunde</dt>
+                            <dd class="col-sm-8" id="audit_payment_customer">-</dd>
+                            <dt class="col-sm-4">Event</dt>
+                            <dd class="col-sm-8" id="audit_payment_event">-</dd>
+                            <dt class="col-sm-4">Verbucht am</dt>
+                            <dd class="col-sm-8" id="audit_payment_timestamp">-</dd>
+                            <dt class="col-sm-4">Verbucht von</dt>
+                            <dd class="col-sm-8" id="audit_payment_recorded_by">-</dd>
+                            <dt class="col-sm-4">Notiz</dt>
+                            <dd class="col-sm-8" id="audit_payment_note">-</dd>
+                        </dl>
+                        <div id="audit_account_unknown_warning" class="alert alert-warning mt-2 mb-0" style="display:none;">
+                            <i class="bi bi-info-circle"></i> Diese Bestellung hat keine Zahlungsaufforderung mit Kontozuordnung. Bitte mit Sorgfalt prüfen.
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <label for="audit_amount_input" class="form-label">
+                            <strong>Betrag laut Kontoauszug (€)</strong>
+                        </label>
+                        <input type="number" step="0.01" class="form-control form-control-lg"
+                               id="audit_amount_input" placeholder="0,00"
+                               onkeypress="if(event.key==='Enter') confirmAuditPayment()" autofocus>
+                        <small class="form-text text-muted">
+                            Trag den Betrag ein, der tatsächlich auf dem Kontoauszug steht.
+                        </small>
+
+                        <label for="audit_note_input" class="form-label mt-3">Notiz (optional)</label>
+                        <input type="text" class="form-control" id="audit_note_input" placeholder="z. B. Buchungstag, Auffälligkeit ...">
+
+                        <div id="audit_compare_box" class="alert mt-3 mb-0" style="display:none;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <hr>
+            <div class="d-flex justify-content-between">
+                <div>
+                    <button class="btn btn-success" id="confirm_audit_btn" onclick="confirmAuditPayment()">
+                        <i class="bi bi-check-circle"></i> Als geprüft markieren
+                    </button>
+                    <button class="btn btn-outline-secondary ms-1" onclick="skipAuditPayment()">
+                        <i class="bi bi-skip-forward"></i> Überspringen
+                    </button>
+                </div>
+                <button class="btn btn-outline-danger" onclick="abortAudit()">
+                    <i class="bi bi-x-circle"></i> Abbrechen
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 3: Add extra payments not in system -->
+    <div class="card mb-4" id="extra_card" style="display:none;">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-3-circle"></i> Weitere Verwendungszwecke vom Kontoauszug</h5>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">
+                Stehen auf dem Kontoauszug Verwendungszwecke, die in der Prüfung nicht abgefragt wurden? Hier kannst du sie nachtragen und (falls möglich) der passenden Bestellung zuordnen.
+            </p>
+
+            <div class="row">
+                <div class="col-md-4">
+                    <label for="extra_reference_input" class="form-label">Verwendungszweck</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="extra_reference_input" placeholder="z. B. AB1234"
+                               onkeypress="if(event.key==='Enter'){ event.preventDefault(); searchExtraReference(); }">
+                        <button class="btn btn-outline-primary" type="button" onclick="searchExtraReference()">
+                            <i class="bi bi-search"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label for="extra_amount_input" class="form-label">Betrag (€)</label>
+                    <input type="number" step="0.01" class="form-control" id="extra_amount_input" placeholder="0,00" disabled>
+                </div>
+                <div class="col-md-3">
+                    <label for="extra_note_input" class="form-label">Notiz</label>
+                    <input type="text" class="form-control" id="extra_note_input" placeholder="Optional" disabled>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-success w-100" id="extra_book_btn" onclick="bookExtraPayment()" disabled>
+                        <i class="bi bi-plus-circle"></i> Verbuchen
+                    </button>
+                </div>
+            </div>
+
+            <div id="extra_search_info" class="mt-2"></div>
+
+            <hr>
+            <h6>In dieser Sitzung nachgetragen</h6>
+            <ul id="extra_added_list" class="list-group list-group-flush">
+                <li class="list-group-item text-muted"><em>Noch nichts nachgetragen.</em></li>
+            </ul>
+
+            <hr>
+            <button class="btn btn-primary" onclick="finishAudit()">
+                <i class="bi bi-check2-all"></i> Kassenprüfung abschließen
+            </button>
+        </div>
+    </div>
+
+    <!-- Step 4: Summary -->
+    <div class="card mb-4" id="summary_card" style="display:none;">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-clipboard-check"></i> Zusammenfassung</h5>
+        </div>
+        <div class="card-body">
+            <div id="summary_body"></div>
+            <hr>
+            <button class="btn btn-primary" onclick="window.location.reload()">
+                <i class="bi bi-arrow-repeat"></i> Neue Prüfung starten
+            </button>
+            <a href="/payments" class="btn btn-outline-secondary ms-1">
+                <i class="bi bi-cash-stack"></i> Zur Zahlungsübersicht
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+let auditState = {
+    bankAccountId: null,
+    bankAccountName: '',
+    eventId: '',
+    payments: [],
+    currentIndex: 0,
+    verifiedCount: 0,
+    mismatchCount: 0,
+    skippedCount: 0,
+    extraAdded: []
+};
+
+let extraFoundOrder = null;
+
+$(document).ready(function() {
+    loadEventsForAudit();
+
+    $('#audit_event_select').change(function() {
+        loadBankAccountsForAudit();
+    });
+
+    $('#audit_bank_account_select').change(function() {
+        $('#start_audit_btn').prop('disabled', !$(this).val());
+    });
+
+    // Load all bank accounts by default
+    loadBankAccountsForAudit();
+});
+
+function loadEventsForAudit() {
+    api_call('/api/get_events', {}, function(data) {
+        if (data.success) {
+            const $sel = $('#audit_event_select');
+            $sel.empty().append('<option value="">Alle Events</option>');
+            for (const ev of data.events) {
+                $sel.append(`<option value="${ev.id}">${ev.name} ${ev.year}</option>`);
+            }
+        }
+    });
+}
+
+function loadBankAccountsForAudit() {
+    const eventId = $('#audit_event_select').val();
+    const params = eventId ? { event_id: eventId } : {};
+
+    api_call('/api/audit_list_bank_accounts', params, function(data) {
+        const $sel = $('#audit_bank_account_select');
+        $sel.empty();
+        if (!data.success || !data.accounts || data.accounts.length === 0) {
+            $sel.append('<option value="">Keine Konten gefunden</option>');
+            $('#start_audit_btn').prop('disabled', true);
+            return;
+        }
+        $sel.append('<option value="">-- Konto wählen --</option>');
+        for (const acc of data.accounts) {
+            const label = `${acc.account_name || '(unbenannt)'}${acc.bank_name ? ' – ' + acc.bank_name : ''}${acc.iban ? ' – ' + acc.iban : ''}`;
+            $sel.append(`<option value="${acc.id}" data-name="${(acc.account_name || '').replace(/"/g,'&quot;')}">${label}</option>`);
+        }
+        $('#start_audit_btn').prop('disabled', true);
+    });
+}
+
+function startAudit() {
+    const bankAccountId = $('#audit_bank_account_select').val();
+    if (!bankAccountId) return;
+    const bankAccountName = $('#audit_bank_account_select option:selected').data('name') || '';
+    const eventId = $('#audit_event_select').val();
+
+    auditState.bankAccountId = bankAccountId;
+    auditState.bankAccountName = bankAccountName;
+    auditState.eventId = eventId;
+
+    const params = { bank_account_id: bankAccountId };
+    if (eventId) params.event_id = eventId;
+
+    api_call('/api/audit_get_pending_payments', params, function(data) {
+        if (!data.success) {
+            showTemplateModal('Fehler', data.error || 'Konnte Zahlungen nicht laden.', 'OK', 'btn-secondary', '', '', function() {});
+            return;
+        }
+        auditState.payments = data.payments || [];
+        auditState.currentIndex = 0;
+        auditState.verifiedCount = 0;
+        auditState.mismatchCount = 0;
+        auditState.skippedCount = 0;
+
+        $('#setup_card').hide();
+        $('#audit_account_badge').text('Konto: ' + bankAccountName);
+
+        if (auditState.payments.length === 0) {
+            // No pending payments – jump straight to extras
+            $('#audit_card').hide();
+            showTemplateModal(
+                'Keine offenen Zahlungen',
+                'Für dieses Konto sind keine ungeprüften Zahlungen vorhanden. Du kannst direkt weitere Verwendungszwecke nachtragen.',
+                'Weiter', 'btn-primary', '', '',
+                function() {
+                    $('#extra_card').show();
+                    $('#extra_reference_input').focus();
+                }
+            );
+            return;
+        }
+
+        $('#audit_card').show();
+        renderCurrentAuditPayment();
+    });
+}
+
+function renderCurrentAuditPayment() {
+    const idx = auditState.currentIndex;
+    const total = auditState.payments.length;
+    $('#audit_progress_badge').text(`${idx + 1} / ${total}`);
+    const pct = total === 0 ? 0 : Math.round((idx / total) * 100);
+    $('#audit_progress_bar').css('width', pct + '%');
+
+    const p = auditState.payments[idx];
+    $('#audit_payment_reference').text(p.payment_reference || '(kein Verwendungszweck)');
+    $('#audit_payment_customer').text(p.user_name || '-');
+    $('#audit_payment_event').text(`${p.event_name || ''} ${p.event_year || ''}`.trim() || '-');
+    $('#audit_payment_timestamp').text(p.timestamp ? new Date(p.timestamp).toLocaleString('de-DE') : '-');
+    $('#audit_payment_recorded_by').text(p.recorded_by || '-');
+    $('#audit_payment_note').text(p.note || '-');
+
+    if (p.account_unknown) {
+        $('#audit_account_unknown_warning').show();
+    } else {
+        $('#audit_account_unknown_warning').hide();
+    }
+
+    $('#audit_amount_input').val('').focus();
+    $('#audit_note_input').val('');
+    $('#audit_compare_box').hide().removeClass('alert-success alert-danger alert-warning').empty();
+}
+
+function confirmAuditPayment() {
+    const idx = auditState.currentIndex;
+    const p = auditState.payments[idx];
+    const raw = $('#audit_amount_input').val();
+    if (raw === '' || raw === null || isNaN(parseFloat(raw))) {
+        showTemplateModal('Fehler', 'Bitte gib den Betrag laut Kontoauszug ein.', 'OK', 'btn-secondary', '', '', function() {});
+        return;
+    }
+    const enteredAmount = parseFloat(raw);
+    const note = $('#audit_note_input').val();
+
+    api_call('/api/audit_verify_payment', {
+        payment_id: p.id,
+        verified_amount: enteredAmount,
+        bank_account_id: auditState.bankAccountId,
+        note: note
+    }, function(data) {
+        if (!data.success) {
+            showTemplateModal('Fehler', data.error || 'Konnte Zahlung nicht verifizieren.', 'OK', 'btn-secondary', '', '', function() {});
+            return;
+        }
+
+        const $box = $('#audit_compare_box');
+        $box.removeClass('alert-success alert-danger alert-warning').empty();
+        if (data.matches) {
+            auditState.verifiedCount++;
+            $box.addClass('alert-success').html(
+                `<i class="bi bi-check-circle"></i> Beträge stimmen überein (${Number(data.original_amount).toFixed(2)}€).`
+            ).show();
+        } else {
+            auditState.mismatchCount++;
+            $box.addClass('alert-warning').html(
+                `<i class="bi bi-exclamation-triangle"></i> Abweichung: ` +
+                `Gebucht ${Number(data.original_amount).toFixed(2)}€, Auszug ${Number(data.verified_amount).toFixed(2)}€. ` +
+                `Die Zahlung wurde trotzdem als geprüft markiert.`
+            ).show();
+        }
+
+        // Move on after a short delay so the user sees the result
+        setTimeout(advanceAudit, data.matches ? 600 : 1500);
+    });
+}
+
+function skipAuditPayment() {
+    auditState.skippedCount++;
+    advanceAudit();
+}
+
+function advanceAudit() {
+    auditState.currentIndex++;
+    if (auditState.currentIndex >= auditState.payments.length) {
+        // Done with sequential checks
+        $('#audit_card').hide();
+        $('#extra_card').show();
+        $('#extra_reference_input').focus();
+        return;
+    }
+    renderCurrentAuditPayment();
+}
+
+function abortAudit() {
+    showTemplateModal(
+        'Prüfung abbrechen',
+        'Möchtest du die Prüfung wirklich abbrechen? Bereits markierte Zahlungen bleiben geprüft.',
+        'Ja, abbrechen', 'btn-danger',
+        'Weiter prüfen', 'btn-secondary',
+        function() {
+            $('#audit_card').hide();
+            $('#extra_card').show();
+        }
+    );
+}
+
+function searchExtraReference() {
+    const ref = $('#extra_reference_input').val().trim().toUpperCase();
+    if (!ref) return;
+
+    extraFoundOrder = null;
+    $('#extra_amount_input').prop('disabled', true).val('');
+    $('#extra_note_input').prop('disabled', true).val('');
+    $('#extra_book_btn').prop('disabled', true);
+    $('#extra_search_info').empty();
+
+    api_call('/api/search_payment_reference', { payment_reference: ref }, function(data) {
+        if (data.success && data.order) {
+            extraFoundOrder = data.order;
+            const remaining = data.order.remaining_balance != null ? Number(data.order.remaining_balance) : Number(data.order.total_price || 0);
+            const totalPaid = Number(data.order.total_paid || 0);
+            const totalPrice = Number(data.order.total_price || 0);
+
+            $('#extra_search_info').html(
+                `<div class="alert alert-info mb-0">` +
+                `<strong>Bestellung gefunden:</strong> ${data.order.user_name} – ${totalPrice.toFixed(2)}€ ` +
+                `(Bezahlt: ${totalPaid.toFixed(2)}€, Offen: ${remaining.toFixed(2)}€)` +
+                `</div>`
+            );
+
+            if (remaining > 0) {
+                $('#extra_amount_input').prop('disabled', false).val(remaining.toFixed(2));
+                $('#extra_note_input').prop('disabled', false);
+                $('#extra_book_btn').prop('disabled', false);
+            } else {
+                $('#extra_search_info').append(
+                    `<div class="alert alert-warning mt-2 mb-0"><i class="bi bi-info-circle"></i> ` +
+                    `Diese Bestellung ist bereits vollständig bezahlt. Du kannst trotzdem eine Korrektur (auch negativ) verbuchen.</div>`
+                );
+                $('#extra_amount_input').prop('disabled', false).val('');
+                $('#extra_note_input').prop('disabled', false);
+                $('#extra_book_btn').prop('disabled', false);
+            }
+        } else {
+            $('#extra_search_info').html(
+                `<div class="alert alert-warning mb-0">` +
+                `<i class="bi bi-exclamation-triangle"></i> Keine Bestellung für "${ref}" gefunden. ` +
+                `Lege bei Bedarf einen Fehlereintrag über die <a href="/quick_payment" target="_blank" rel="noopener">Quick Payment</a>-Seite an.` +
+                `</div>`
+            );
+        }
+    });
+}
+
+function bookExtraPayment() {
+    if (!extraFoundOrder) return;
+    const amount = parseFloat($('#extra_amount_input').val());
+    const note = $('#extra_note_input').val();
+
+    if (!amount || amount === 0) {
+        showTemplateModal('Fehler', 'Bitte gib einen Betrag ein.', 'OK', 'btn-secondary', '', '', function() {});
+        return;
+    }
+
+    api_call('/api/record_payment', {
+        order_id: extraFoundOrder.order_id,
+        amount: amount,
+        note: note,
+        send_email: true
+    }, function(data) {
+        if (!data.success) {
+            showTemplateModal('Fehler', data.error || 'Konnte Zahlung nicht verbuchen.', 'OK', 'btn-secondary', '', '', function() {});
+            return;
+        }
+
+        // Immediately mark the newly recorded payment as verified for this account
+        api_call('/api/audit_verify_payment', {
+            payment_id: data.payment_id,
+            verified_amount: amount,
+            bank_account_id: auditState.bankAccountId,
+            note: note || 'Kassenprüfung: nachträglich erfasst'
+        }, function(verifyResp) {
+            const orderRef = extraFoundOrder.payment_reference || extraFoundOrder.order_id;
+            auditState.extraAdded.push({
+                reference: orderRef,
+                amount: amount,
+                user_name: extraFoundOrder.user_name || '-'
+            });
+            renderExtraAddedList();
+
+            // Reset form
+            extraFoundOrder = null;
+            $('#extra_reference_input').val('');
+            $('#extra_amount_input').prop('disabled', true).val('');
+            $('#extra_note_input').prop('disabled', true).val('');
+            $('#extra_book_btn').prop('disabled', true);
+            $('#extra_search_info').empty();
+            $('#extra_reference_input').focus();
+        });
+    });
+}
+
+function renderExtraAddedList() {
+    const $list = $('#extra_added_list');
+    $list.empty();
+    if (auditState.extraAdded.length === 0) {
+        $list.append('<li class="list-group-item text-muted"><em>Noch nichts nachgetragen.</em></li>');
+        return;
+    }
+    for (const e of auditState.extraAdded) {
+        $list.append(
+            `<li class="list-group-item d-flex justify-content-between">` +
+            `<span><strong>${e.reference}</strong> – ${e.user_name}</span>` +
+            `<span><strong>${Number(e.amount).toFixed(2)}€</strong></span>` +
+            `</li>`
+        );
+    }
+}
+
+function finishAudit() {
+    $('#extra_card').hide();
+    const total = auditState.payments.length;
+    const html =
+        `<dl class="row mb-0">` +
+        `<dt class="col-sm-5">Geprüftes Konto</dt><dd class="col-sm-7">${auditState.bankAccountName || '-'}</dd>` +
+        `<dt class="col-sm-5">Vorgelegte Zahlungen</dt><dd class="col-sm-7">${total}</dd>` +
+        `<dt class="col-sm-5">Übereinstimmend geprüft</dt><dd class="col-sm-7 text-success">${auditState.verifiedCount}</dd>` +
+        `<dt class="col-sm-5">Mit Abweichung geprüft</dt><dd class="col-sm-7 text-warning">${auditState.mismatchCount}</dd>` +
+        `<dt class="col-sm-5">Übersprungen</dt><dd class="col-sm-7 text-muted">${auditState.skippedCount}</dd>` +
+        `<dt class="col-sm-5">Nachträglich erfasst</dt><dd class="col-sm-7">${auditState.extraAdded.length}</dd>` +
+        `</dl>`;
+    $('#summary_body').html(html);
+    $('#summary_card').show();
+}
+</script>
+
+<style>
+    .font-monospace {
+        font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        letter-spacing: 0.05em;
+    }
+    .card-body h3 {
+        font-weight: 600;
+    }
+</style>
