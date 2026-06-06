@@ -10,6 +10,9 @@
         <a href="/quick_payment" class="btn btn-outline-primary btn-sm ms-1">
             <i class="bi bi-credit-card"></i> Quick Payment
         </a>
+        <a href="/kassenpruefung" class="btn btn-outline-success btn-sm ms-1">
+            <i class="bi bi-shield-check"></i> Kassenprüfung
+        </a>
     </div>
     
     <!-- Event Filter -->
@@ -139,6 +142,7 @@
                             <th>Betrag</th>
                             <th>Verbucht von</th>
                             <th>Notiz</th>
+                            <th>Geprüft</th>
                             <th>Aktionen</th>
                         </tr>
                     </thead>
@@ -205,7 +209,7 @@ function refreshPayments() {
             tbody.empty();
             
             if (data.payments.length === 0) {
-                tbody.html('<tr><td colspan="9" class="text-center text-muted"><em>Keine Zahlungen vorhanden</em></td></tr>');
+                tbody.html('<tr><td colspan="10" class="text-center text-muted"><em>Keine Zahlungen vorhanden</em></td></tr>');
                 return;
             }
             
@@ -266,7 +270,24 @@ function refreshPayments() {
                 
                 // Note
                 row.append($('<td>').text(payment.note || '-'));
-                
+
+                // Verified status
+                let verifiedCell = $('<td>');
+                if (isError) {
+                    verifiedCell.text('-');
+                } else if (payment.verified) {
+                    const verifiedAt = payment.verified_at ? new Date(payment.verified_at).toLocaleString('de-DE') : '';
+                    const verifiedAmount = payment.verified_amount != null ? Number(payment.verified_amount).toFixed(2) + '€' : '';
+                    const title = `Geprüft von ${payment.verified_by || '-'}${verifiedAt ? ' am ' + verifiedAt : ''}${verifiedAmount ? ' (Auszug: ' + verifiedAmount + ')' : ''}`;
+                    const badgeClass = payment.verification_matches === false ? 'bg-warning text-dark' : 'bg-success';
+                    const icon = payment.verification_matches === false ? 'bi-exclamation-triangle' : 'bi-shield-check';
+                    const label = payment.verification_matches === false ? 'Abweichung' : 'Geprüft';
+                    verifiedCell.html(`<span class="badge ${badgeClass}" title="${title.replace(/"/g,'&quot;')}"><i class="bi ${icon}"></i> ${label}</span>`);
+                } else {
+                    verifiedCell.html('<span class="badge bg-light text-dark border">offen</span>');
+                }
+                row.append(verifiedCell);
+
                 // Actions
                 let actions = $('<td>');
                 if (isError) {

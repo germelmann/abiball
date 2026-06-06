@@ -853,6 +853,11 @@ class Main < Sinatra::Base
                    COALESCE(u.email, '') AS user_email,
                    COALESCE(e.name, '') AS event_name,
                    COALESCE(e.year, '') AS event_year,
+                   COALESCE(pay.verified, false) AS verified,
+                   pay.verified_amount AS verified_amount,
+                   pay.verified_by AS verified_by,
+                   pay.verified_at AS verified_at,
+                   pay.verification_matches AS verification_matches,
                    'payment' AS entry_type
             ORDER BY pay.timestamp DESC
         END_OF_QUERY
@@ -887,6 +892,169 @@ class Main < Sinatra::Base
         total_amount = payments.sum { |p| (p['amount'] || 0).to_f }
 
         respond(success: true, payments: all_entries, total_amount: total_amount, error_count: error_records.length)
+    end
+
+    # ===========================================
+    # Kassenprüfung (Audit) Endpoints
+    # ===========================================
+
+    # List bank accounts available for audit (optionally filtered by event)
+    post "/api/audit_list_bank_accounts" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(optional_keys: [:event_id])
+
+        if data[:event_id] && !data[:event_id].to_s.empty?
+            accounts = neo4j_query(<<~END_OF_QUERY, {event_id: data[:event_id]})
+                MATCH (e:Event {id: $event_id})-[:HAS_BANK_ACCOUNT]->(b:BankAccount)
+                RETURN b.id AS id,
+                       b.account_name AS account_name,
+                       b.bank_name AS bank_name,
+                       b.iban AS iban
+                ORDER BY b.account_name
+            END_OF_QUERY
+        else
+            accounts = neo4j_query(<<~END_OF_QUERY)
+                MATCH (b:BankAccount)
+                OPTIONAL MATCH (e:Event)-[:HAS_BANK_ACCOUNT]->(b)
+                WITH b, COLLECT(DISTINCT (CASE WHEN e IS NULL THEN NULL ELSE e.name + ' ' + toString(e.year) END)) AS event_names
+                RETURN b.id AS id,
+                       b.account_name AS account_name,
+                       b.bank_name AS bank_name,
+                       b.iban AS iban,
+                       [n IN event_names WHERE n IS NOT NULL] AS event_names
+                ORDER BY b.account_name
+            END_OF_QUERY
+        end
+
+        respond(success: true, accounts: accounts)
+    end
+
+    # Get all unverified payments for a given bank account (and optional event)
+    post "/api/audit_get_pending_payments" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:bank_account_id], optional_keys: [:event_id])
+
+        bank_account_id = data[:bank_account_id]
+        event_id = data[:event_id]
+
+        params = {bank_account_id: bank_account_id}
+        event_filter = ""
+        if event_id && !event_id.to_s.empty?
+            event_filter = "AND e.id = $event_id"
+            params[:event_id] = event_id
+        end
+
+        payments = neo4j_query(<<~END_OF_QUERY, params)
+            MATCH (o:TicketOrder)-[:HAS_PAYMENT]->(pay:Payment)
+            MATCH (o)-[:FOR]->(e:Event)
+            MATCH (u:User)-[:PLACED]->(o)
+            WHERE (pay.verified IS NULL OR pay.verified = false)
+              #{event_filter}
+            OPTIONAL MATCH (o)-[:HAS_PAYMENT_REQUEST]->(pr:PaymentRequest)-[:USES_ACCOUNT]->(b:BankAccount)
+            WITH o, e, u, pay, b, pr
+            ORDER BY pr.created_at DESC
+            WITH o, e, u, pay, HEAD(COLLECT(b)) AS bank
+            WHERE bank IS NULL OR bank.id = $bank_account_id
+            RETURN pay.id AS id,
+                   pay.amount AS amount,
+                   pay.timestamp AS timestamp,
+                   pay.recorded_by AS recorded_by,
+                   pay.note AS note,
+                   o.id AS order_id,
+                   o.payment_reference AS payment_reference,
+                   o.total_price AS total_price,
+                   COALESCE(u.name, '') AS user_name,
+                   COALESCE(u.email, '') AS user_email,
+                   COALESCE(e.name, '') AS event_name,
+                   COALESCE(e.year, '') AS event_year,
+                   CASE WHEN bank IS NULL THEN true ELSE false END AS account_unknown
+            ORDER BY pay.timestamp ASC
+        END_OF_QUERY
+
+        respond(success: true, payments: payments)
+    end
+
+    # Mark a payment as verified (Kassenprüfung)
+    post "/api/audit_verify_payment" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:payment_id, :verified_amount, :bank_account_id],
+                                  optional_keys: [:note])
+
+        payment_id = data[:payment_id]
+        verified_amount = data[:verified_amount].to_f
+        bank_account_id = data[:bank_account_id]
+        note = data[:note].to_s
+        timestamp = Time.now.iso8601
+
+        existing = neo4j_query(<<~END_OF_QUERY, {payment_id: payment_id})
+            MATCH (pay:Payment {id: $payment_id})
+            RETURN pay.amount AS amount, pay.verified AS verified
+        END_OF_QUERY
+
+        if existing.empty?
+            respond(success: false, error: "Zahlung nicht gefunden")
+            return
+        end
+
+        original_amount = existing.first['amount'].to_f
+        matches = (original_amount - verified_amount).abs < 0.005
+
+        verify_params = {
+            payment_id: payment_id,
+            verified_amount: verified_amount,
+            verified_by: @session_user[:username],
+            verified_at: timestamp,
+            verified_account_id: bank_account_id,
+            verification_matches: matches,
+            verification_note: note
+        }
+        neo4j_query(<<~END_OF_QUERY, verify_params)
+            MATCH (pay:Payment {id: $payment_id})
+            SET pay.verified = true,
+                pay.verified_amount = $verified_amount,
+                pay.verified_by = $verified_by,
+                pay.verified_at = $verified_at,
+                pay.verified_account_id = $verified_account_id,
+                pay.verification_matches = $verification_matches,
+                pay.verification_note = $verification_note
+        END_OF_QUERY
+
+        log("Zahlung #{payment_id} bei Kassenprüfung verifiziert (gebucht: #{sprintf('%.2f', original_amount)}€, Kontoauszug: #{sprintf('%.2f', verified_amount)}€, Übereinstimmung: #{matches})")
+
+        respond(success: true, matches: matches, original_amount: original_amount, verified_amount: verified_amount)
+    end
+
+    # Remove verification flag (undo audit)
+    post "/api/audit_unverify_payment" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:payment_id])
+
+        payment_id = data[:payment_id]
+
+        existing = neo4j_query(<<~END_OF_QUERY, {payment_id: payment_id})
+            MATCH (pay:Payment {id: $payment_id})
+            RETURN pay.id AS id
+        END_OF_QUERY
+
+        if existing.empty?
+            respond(success: false, error: "Zahlung nicht gefunden")
+            return
+        end
+
+        neo4j_query(<<~END_OF_QUERY, {payment_id: payment_id})
+            MATCH (pay:Payment {id: $payment_id})
+            REMOVE pay.verified,
+                   pay.verified_amount,
+                   pay.verified_by,
+                   pay.verified_at,
+                   pay.verified_account_id,
+                   pay.verification_matches,
+                   pay.verification_note
+        END_OF_QUERY
+
+        log("Verifizierungs-Markierung für Zahlung #{payment_id} entfernt von #{@session_user[:username]}")
+
+        respond(success: true)
     end
 
     # ===========================================
