@@ -66,21 +66,25 @@
                     <div class="alert alert-info py-2 mb-3" id="yearbook_name_hint" style="display:none;"></div>
                     <div id="profile_fields_container"></div>
 
-                    <hr>
-                    <div class="d-flex align-items-center gap-3 flex-wrap" id="accent_color_row">
-                        <div class="flex-shrink-0">
-                            <label for="accent_color_input" class="form-label mb-0">
-                                <i class="bi bi-droplet-half"></i> <strong>Akzentfarbe</strong>
-                            </label>
-                            <div class="text-body-secondary small">
-                                Wird in der Jahrbuch-Vorlage als Hintergrund-/Akzentfarbe deiner Seite verwendet.
+                    <!-- Akzentfarbe ist eine Designentscheidung — nur yearbook_manage darf sie setzen,
+                         und nur im Manage-Modus (für andere Schüler:innen) wird die Zeile sichtbar. -->
+                    <div id="accent_color_row" style="display: none;">
+                        <hr>
+                        <div class="d-flex align-items-center gap-3 flex-wrap">
+                            <div class="flex-shrink-0">
+                                <label for="accent_color_input" class="form-label mb-0">
+                                    <i class="bi bi-droplet-half"></i> <strong>Akzentfarbe</strong>
+                                </label>
+                                <div class="text-body-secondary small">
+                                    Wird in der Jahrbuch-Vorlage als Hintergrund-/Akzentfarbe der Schüler:innen-Seite verwendet.
+                                </div>
                             </div>
+                            <input type="color" class="form-control form-control-color" id="accent_color_input" value="#0d6efd" title="Akzentfarbe wählen">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="accent_color_reset" title="Auf Standard zurücksetzen">
+                                <i class="bi bi-arrow-counterclockwise"></i> Standard
+                            </button>
+                            <span class="small text-body-secondary" id="accent_color_status"></span>
                         </div>
-                        <input type="color" class="form-control form-control-color" id="accent_color_input" value="#0d6efd" title="Akzentfarbe wählen">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="accent_color_reset" title="Auf Standard zurücksetzen">
-                            <i class="bi bi-arrow-counterclockwise"></i> Standard
-                        </button>
-                        <span class="small text-body-secondary" id="accent_color_status"></span>
                     </div>
 
                     <div id="profile_save_status" class="mt-2"></div>
@@ -370,23 +374,25 @@ function setAccentStatus(text, kind) {
 }
 
 function loadAccentColor() {
-    const params = viewUsername ? { target_username: viewUsername } : {};
+    const row = document.getElementById('accent_color_row');
+    // Only yearbook_manage users editing another student's entry should see the picker.
+    // Students no longer pick their own accent — it is a design decision of the yearbook team.
+    const showPicker = !!(viewUsername && canManage);
+    if (row) row.style.display = showPicker ? '' : 'none';
+    if (!showPicker) return;
+
+    const params = { target_username: viewUsername };
     api_call('/api/yearbook/accent_color/get', params, function(data) {
         if (!data || !data.success) return;
         defaultAccentColor = data.default_color || defaultAccentColor;
         const input = document.getElementById('accent_color_input');
         if (input) input.value = data.color || defaultAccentColor;
-        // Lock the picker in read-only mode (yearbook_manage users keep edit rights).
-        const editable = !readOnlyMode;
-        if (input) input.disabled = !editable;
-        const reset = document.getElementById('accent_color_reset');
-        if (reset) reset.disabled = !editable;
     });
 }
 
 function saveAccentColor(color) {
-    const params = { color: color };
-    if (viewUsername) params.target_username = viewUsername;
+    if (!viewUsername || !canManage) return;
+    const params = { color: color, target_username: viewUsername };
     setAccentStatus('Speichere…');
     api_call('/api/yearbook/accent_color/set', params, function(data) {
         if (data && data.success) {

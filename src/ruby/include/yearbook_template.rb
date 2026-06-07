@@ -21,9 +21,13 @@ class Main < Sinatra::Base
 
     YEARBOOK_DEFAULT_ACCENT_COLOR = '#0d6efd'
     # Schema entries whose name starts with this prefix have their colour properties
-    # rewritten to the student's accent colour at render time.
+    # rewritten to the student's accent colour at render time (legacy mechanism, kept
+    # for back-compat — the hex-substitution path below is the recommended way now).
     YEARBOOK_ACCENT_NAME_PREFIX = '__accent_'
     YEARBOOK_ACCENT_PROPERTIES = %w[color fontColor borderColor backgroundColor].freeze
+    # Default sentinel colour for the hex-substitution mechanism. Admins can override
+    # per-variant via accent_placeholder_hex.
+    YEARBOOK_DEFAULT_ACCENT_PLACEHOLDER = '#FF00FF'
 
     # Synthetic catalog field that pulls every non-empty profile field + non-anonymous
     # text/textarea answer into a single multi-line text element. Placed once on the
@@ -181,6 +185,11 @@ class Main < Sinatra::Base
             tpl['basePdf']['padding'] = [0, 0, 0, 0]
         end
         tpl['schemas'] = [[]] unless tpl['schemas'].is_a?(Array) && !tpl['schemas'].empty?
+        # Page 0 = Steckbrief (always exactly one page). Page 1+ = comment pages, the
+        # last of which is duplicated at render time to spill all of a student's comments.
+        # Auto-append a blank Page 1 if a legacy variant only has the Steckbrief — the
+        # admin can decorate it later.
+        tpl['schemas'] << [] while tpl['schemas'].length < 2
         # yearbook_blocks lives on the variant (not inside the template) so pdfme's
         # Designer never sees it and can't strip it during schema validation.
         blocks = v['yearbook_blocks'].is_a?(Hash) ? v['yearbook_blocks'] : {}
@@ -191,13 +200,19 @@ class Main < Sinatra::Base
         bg = v['background_pdf'].to_s.strip
         bg = nil unless bg =~ /\A[a-zA-Z0-9._-]+\.pdf\z/i && yearbook_background_files.include?(bg)
 
+        # accent_placeholder_hex is the sentinel colour that the render path swaps with
+        # the student's actual accent colour. Validated as #RRGGBB.
+        placeholder = v['accent_placeholder_hex'].to_s
+        placeholder = YEARBOOK_DEFAULT_ACCENT_PLACEHOLDER unless placeholder =~ /\A#[0-9A-Fa-f]{6}\z/
+
         {
-            'id'              => (v['id'].is_a?(String) && !v['id'].empty?) ? v['id'] : "v_#{RandomTag.generate(8)}",
-            'name'            => (v['name'] || 'Unbenannt').to_s,
-            'photo_count'     => (v['photo_count'].is_a?(Integer) ? v['photo_count'] : nil),
-            'template'        => tpl,
-            'yearbook_blocks' => blocks,
-            'background_pdf'  => bg
+            'id'                     => (v['id'].is_a?(String) && !v['id'].empty?) ? v['id'] : "v_#{RandomTag.generate(8)}",
+            'name'                   => (v['name'] || 'Unbenannt').to_s,
+            'photo_count'            => (v['photo_count'].is_a?(Integer) ? v['photo_count'] : nil),
+            'template'               => tpl,
+            'yearbook_blocks'        => blocks,
+            'background_pdf'         => bg,
+            'accent_placeholder_hex' => placeholder
         }
     end
 
@@ -286,18 +301,27 @@ class Main < Sinatra::Base
         matching[idx]
     end
 
-    # Walk a template and replace the colour-like properties of every schema entry whose
-    # `name` starts with __accent_ . Returns a deep copy so the original variant set isn't
-    # mutated for the next render.
-    def apply_accent_color_to_template(template, color)
+    # Walk a template and inject the student's accent colour in two ways:
+    #   1. Legacy: every schema entry whose `name` starts with __accent_ has its
+    #      colour-like properties rewritten.
+    #   2. Hex substitution: any colour-like property whose value equals the variant's
+    #      placeholder hex (e.g. #FF00FF by default) gets rewritten — admins just pick
+    #      that colour in pdfme's normal colour picker, no special naming required.
+    # Returns a deep copy so the original variant set isn't mutated for the next render.
+    def apply_accent_color_to_template(template, color, placeholder_hex)
         cloned = JSON.parse(JSON.dump(template))
+        placeholder = (placeholder_hex || YEARBOOK_DEFAULT_ACCENT_PLACEHOLDER).to_s.downcase
         (cloned['schemas'] || []).each do |page|
             next unless page.is_a?(Array)
             page.each do |entry|
                 next unless entry.is_a?(Hash)
-                next unless entry['name'].is_a?(String) && entry['name'].start_with?(YEARBOOK_ACCENT_NAME_PREFIX)
+                name_match = entry['name'].is_a?(String) && entry['name'].start_with?(YEARBOOK_ACCENT_NAME_PREFIX)
                 YEARBOOK_ACCENT_PROPERTIES.each do |prop|
-                    entry[prop] = color if entry.key?(prop)
+                    next unless entry.key?(prop)
+                    val = entry[prop].to_s.downcase
+                    if name_match || val == placeholder
+                        entry[prop] = color
+                    end
                 end
             end
         end
@@ -428,6 +452,10 @@ class Main < Sinatra::Base
         [line_h * lines, line_h].max
     end
 
+    def estimate_text_width_mm(content, font_size_pt)
+        content.to_s.length * font_size_pt * 0.5 * PT_TO_MM
+    end
+
     def make_block_text_schema(x, y, width, height, font_name, font_size, content, color, alignment, line_height)
         s = {
             'name' => "_blockchild_#{RandomTag.generate(8)}",
@@ -471,16 +499,39 @@ class Main < Sinatra::Base
             label = yearbook_block_field_label(fid)
 
             if show_labels && inline
-                line = "#{label}: #{value}"
-                h = estimate_text_height_mm(line, font_size, line_height, width)
-                break if y + h > max_y + 0.5
-                out << make_block_text_schema(x, y, width, h, value_font, font_size, line, color, alignment, line_height)
-                y += h + entry_gap
+                # Two adjacent text elements on the same Y line: "Label: " in label_font,
+                # value in value_font. A single text element can't mix font weights, so
+                # we measure the label width and place value to its right.
+                label_text = "#{label}: "
+                label_w = [estimate_text_width_mm(label_text, font_size), width].min
+                # Leave at least some room for the value; if the label is wider than the
+                # block, drop back to two stacked lines.
+                if label_w >= width - 5
+                    label_with_colon = "#{label}:"
+                    label_h = estimate_text_height_mm(label_with_colon, font_size, line_height, width)
+                    value_h = estimate_text_height_mm(value, font_size, line_height, width)
+                    break if y + label_h + value_h > max_y + 0.5
+                    out << make_block_text_schema(x, y, width, label_h, label_font, font_size, label_with_colon, color, alignment, line_height)
+                    y += label_h
+                    out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, color, alignment, line_height)
+                    y += value_h + entry_gap
+                else
+                    value_w = width - label_w
+                    row_h = [estimate_text_height_mm(label_text, font_size, line_height, label_w),
+                             estimate_text_height_mm(value, font_size, line_height, value_w)].max
+                    break if y + row_h > max_y + 0.5
+                    out << make_block_text_schema(x, y, label_w, row_h, label_font, font_size, label_text, color, alignment, line_height)
+                    out << make_block_text_schema(x + label_w, y, value_w, row_h, value_font, font_size, value, color, alignment, line_height)
+                    y += row_h + entry_gap
+                end
             elsif show_labels
-                label_h = estimate_text_height_mm(label, font_size, line_height, width)
+                # Label on its own line above the value. Label ends with a colon so the
+                # visual relationship to its answer stays clear.
+                label_with_colon = "#{label}:"
+                label_h = estimate_text_height_mm(label_with_colon, font_size, line_height, width)
                 value_h = estimate_text_height_mm(value, font_size, line_height, width)
                 break if y + label_h + value_h > max_y + 0.5
-                out << make_block_text_schema(x, y, width, label_h, label_font, font_size, label, color, alignment, line_height)
+                out << make_block_text_schema(x, y, width, label_h, label_font, font_size, label_with_colon, color, alignment, line_height)
                 y += label_h
                 out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, color, alignment, line_height)
                 y += value_h + entry_gap
@@ -494,7 +545,19 @@ class Main < Sinatra::Base
         out
     end
 
-    def render_comments_block(block, config, comments)
+    # Filter the raw comment list down to what this block should render (approved + optionally
+    # pending). Comments with no text after stripping are dropped — those can never produce
+    # visible output on the page.
+    def visible_comments_for_block(comments, include_pending)
+        comments.select do |c|
+            status = (c['status'] || 'pending').to_s
+            (status == 'approved' || (include_pending && status == 'pending')) && !c['text'].to_s.strip.empty?
+        end
+    end
+
+    # Render as many comments as fit, starting from `start_idx` in the already-filtered list.
+    # Returns [emitted_schemas, end_idx] so the caller can decide whether to paginate.
+    def render_comments_block(block, config, visible_comments, start_idx = 0)
         out = []
         pos = block['position'] || { 'x' => 0, 'y' => 0 }
         x = pos['x'].to_f
@@ -510,24 +573,24 @@ class Main < Sinatra::Base
         color = block['fontColor'] || '#000000'
         alignment = block['alignment'] || 'left'
         show_author = config['show_author'] != false
-        include_pending = config['include_pending'] == true
 
-        visible = comments.select do |c|
-            status = (c['status'] || 'pending').to_s
-            status == 'approved' || (include_pending && status == 'pending')
-        end
-
+        idx = start_idx
         y = y_start
-        visible.each do |c|
+        while idx < visible_comments.length
+            c = visible_comments[idx]
             text = c['text'].to_s.strip
-            next if text.empty?
             author = c['commenter_name'].to_s.strip
             author_line = author.empty? ? '' : "— #{author}"
 
             text_h = estimate_text_height_mm(text, font_size, line_height, width)
             author_h = (show_author && !author_line.empty?) ? estimate_text_height_mm(author_line, font_size, line_height, width) : 0.0
 
-            break if y + text_h + author_h > max_y + 0.5
+            # If this comment doesn't fit and we've already emitted at least one, stop —
+            # the caller will paginate. If we've emitted nothing and this single comment
+            # is larger than the block, force-render it anyway so we never deadlock.
+            if y + text_h + author_h > max_y + 0.5
+                break if idx > start_idx
+            end
 
             out << make_block_text_schema(x, y, width, text_h, text_font, font_size, text, color, alignment, line_height)
             y += text_h
@@ -536,36 +599,45 @@ class Main < Sinatra::Base
                 y += author_h
             end
             y += entry_gap
+            idx += 1
         end
-        out
+        [out, idx]
     end
 
-    # Walk a template, swap every block placeholder with its expanded text schemas.
-    # The block configuration map is passed in (it lives on the variant, not the
-    # template, to keep pdfme's schema validation happy).
-    def expand_yearbook_blocks!(template, blocks_config, profile, answers, comments)
-        return template unless blocks_config.is_a?(Hash) && !blocks_config.empty?
+    # Expand block placeholders on a single page. Returns [new_page_schemas, end_idx]
+    # where end_idx is the next index into visible_comments after this page consumed its
+    # share — the page builder uses that to paginate the comments-overflow page.
+    def expand_page_blocks(page_schemas, blocks_config, profile, answers, visible_comments, comments_start_idx)
+        return [page_schemas, comments_start_idx] unless blocks_config.is_a?(Hash) && !blocks_config.empty?
 
-        new_schemas = []
-        (template['schemas'] || []).each do |page|
-            new_page = []
-            (page || []).each do |entry|
-                cfg = entry.is_a?(Hash) ? blocks_config[entry['name']] : nil
-                if cfg.is_a?(Hash)
-                    expanded = case cfg['kind']
-                               when 'fields'   then render_fields_block(entry, cfg, profile, answers)
-                               when 'comments' then render_comments_block(entry, cfg, comments)
-                               else []
-                               end
-                    new_page.concat(expanded)
-                else
-                    new_page << entry
+        new_page = []
+        end_idx = comments_start_idx
+        (page_schemas || []).each do |entry|
+            cfg = entry.is_a?(Hash) ? blocks_config[entry['name']] : nil
+            if cfg.is_a?(Hash)
+                case cfg['kind']
+                when 'fields'
+                    new_page.concat(render_fields_block(entry, cfg, profile, answers))
+                when 'comments'
+                    emitted, next_idx = render_comments_block(entry, cfg, visible_comments, end_idx)
+                    new_page.concat(emitted)
+                    end_idx = next_idx
                 end
+            else
+                new_page << entry
             end
-            new_schemas << new_page
         end
-        template['schemas'] = new_schemas
-        template
+        [new_page, end_idx]
+    end
+
+    # Are there any comments-kind blocks on this page? If not, the page builder doesn't
+    # need to spin the "duplicate the page to fit overflow" loop.
+    def page_has_comments_block?(page_schemas, blocks_config)
+        return false unless blocks_config.is_a?(Hash) && !blocks_config.empty?
+        (page_schemas || []).any? do |e|
+            e.is_a?(Hash) && blocks_config[e['name']].is_a?(Hash) &&
+                blocks_config[e['name']]['kind'] == 'comments'
+        end
     end
 
     # Look up the latest upload (if any) for a given context+field_id and return a data URL,
@@ -742,16 +814,24 @@ class Main < Sinatra::Base
         template
     end
 
-    def build_yearbook_job_for_user(username, variant_set)
+    # Build one or more pdfme jobs for a user. Returns an array of {template, inputs}.
+    #
+    # Page 0 = Steckbrief, rendered exactly once.
+    # Pages 1..N-1 = additional pages (typically comment pages). The LAST page acts as
+    # the comments-overflow template: it is duplicated as many times as needed to fit
+    # all of the student's comments. If the student has no comments but the last page
+    # has a comments block, the page is still rendered once (so every student gets at
+    # least one comment page).
+    def build_yearbook_jobs_for_user(username, variant_set)
         variant = pick_yearbook_variant_for_user(username, variant_set)
-        return nil unless variant
+        return [] unless variant
 
         # Load the per-user data once and reuse it across all expansion stages.
         user_info = neo4j_query(<<~END_OF_QUERY, {username: username}).first
             MATCH (u:User {username: $username})
             RETURN u.username AS username
         END_OF_QUERY
-        return nil unless user_info
+        return [] unless user_info
         profile = get_yearbook_profile_data(username) || {}
         answer_rows = neo4j_query(<<~END_OF_QUERY, {username: username})
             MATCH (u:User {username: $username})-[:HAS_YEARBOOK_ENTRY]->(y:YearbookEntry)
@@ -761,18 +841,54 @@ class Main < Sinatra::Base
         comments = yearbook_comments_for_user(username)
 
         accent = yearbook_accent_color_for_user(username)
-        template = apply_accent_color_to_template(variant['template'], accent)
-        # Background PDF (if any) replaces the blank basePdf with the file's bytes.
-        apply_background_pdf_to_template!(template, variant['background_pdf'])
-        # Block expansion must run BEFORE readOnly-marking and inputs-building so the
-        # generated child schemas (which have random _blockchild_* names) get treated
-        # as static content rather than catalog-driven inputs.
-        expand_yearbook_blocks!(template, variant['yearbook_blocks'] || {}, profile, answers, comments)
+        base_template = apply_accent_color_to_template(variant['template'], accent, variant['accent_placeholder_hex'])
+        apply_background_pdf_to_template!(base_template, variant['background_pdf'])
+
+        blocks_config = variant['yearbook_blocks'] || {}
         catalog_names = yearbook_template_field_catalog.map { |f| f['name'] }
-        force_static_schemas_readonly!(template, catalog_names)
-        inputs = build_yearbook_inputs_for_user(username, template)
-        return nil if inputs.nil?
-        { 'template' => template, 'inputs' => inputs }
+
+        pages = base_template['schemas'] || []
+        return [] if pages.empty?
+
+        jobs = []
+        comments_idx = 0
+
+        # Pre-filter comments for any include_pending settings in use. Different comments
+        # blocks could in principle use different filters; in practice they don't, so we
+        # take the most permissive view (include_pending=true if any block enables it).
+        any_include_pending = blocks_config.values.any? { |c| c.is_a?(Hash) && c['kind'] == 'comments' && c['include_pending'] }
+        visible_comments = visible_comments_for_block(comments, any_include_pending)
+
+        last_idx = pages.length - 1
+        pages.each_with_index do |page_schemas, page_idx|
+            is_last = (page_idx == last_idx)
+            iterations = 0
+            loop do
+                iterations += 1
+                expanded_page, next_comments_idx = expand_page_blocks(
+                    page_schemas, blocks_config, profile, answers, visible_comments, comments_idx
+                )
+                page_template = base_template.dup
+                page_template['schemas'] = [expanded_page]
+                force_static_schemas_readonly!(page_template, catalog_names)
+                inputs = build_yearbook_inputs_for_user(username, page_template)
+                jobs << { 'template' => page_template, 'inputs' => inputs } if inputs
+
+                comments_idx = next_comments_idx if next_comments_idx > comments_idx
+
+                if is_last && page_has_comments_block?(page_schemas, blocks_config)
+                    # Spill the last page as many times as needed to consume remaining comments.
+                    break if comments_idx >= visible_comments.length
+                    # Safety brake: if a single iteration made no progress AND we've looped
+                    # several times, bail out so we don't hang the request.
+                    break if iterations > 50
+                else
+                    break
+                end
+            end
+        end
+
+        jobs
     end
 
     # ----- routes ----------------------------------------------------------
@@ -923,18 +1039,20 @@ class Main < Sinatra::Base
                 default_color: YEARBOOK_DEFAULT_ACCENT_COLOR)
     end
 
-    # Set accent colour. Same permission model as the profile/answer endpoints.
+    # Set accent colour. yearbook_manage only — students do not pick their own colour
+    # (the accent is a design decision, owned by the yearbook team).
     post '/api/yearbook/accent_color/set' do
         require_user!
         require_yearbook_accessible!
-        require_user_with_permission!("yearbook_create")
+        require_user_with_permission!("yearbook_manage")
 
-        data = parse_request_data(required_keys: [:color], optional_keys: [:target_username])
+        data = parse_request_data(required_keys: [:color, :target_username])
         color = data[:color].to_s.strip
         assert(color =~ /\A#[0-9A-Fa-f]{6}\z/, "Ungültiger Farbwert (#RRGGBB erwartet)")
-        username = resolve_target_username(data[:target_username])
+        target = data[:target_username].to_s.strip
+        assert(target =~ /\A[a-z0-9_-]+\z/, "Ungültiger Benutzername")
 
-        neo4j_query(<<~END_OF_QUERY, {username: username, color: color})
+        neo4j_query(<<~END_OF_QUERY, {username: target, color: color})
             MATCH (u:User {username: $username}) SET u.yearbook_accent_color = $color
         END_OF_QUERY
         respond(success: true, color: color)
@@ -950,10 +1068,10 @@ class Main < Sinatra::Base
         assert(username =~ /\A[a-z0-9_-]+\z/, "Ungültiger Benutzername")
 
         variant_set = load_yearbook_variant_set
-        job = build_yearbook_job_for_user(username, variant_set)
-        assert(job, "Benutzer nicht gefunden oder keine Vorlage verfügbar")
+        jobs = build_yearbook_jobs_for_user(username, variant_set)
+        assert(!jobs.empty?, "Benutzer nicht gefunden oder keine Vorlage verfügbar")
 
-        pdf_bytes = render_yearbook_pdf_jobs([job])
+        pdf_bytes = render_yearbook_pdf_jobs(jobs)
 
         # respond_raw_with_mimetype sets @respond_content / @respond_mimetype so the after-hook
         # writes the PDF body verbatim. We add an explicit inline Content-Disposition so the
@@ -981,8 +1099,7 @@ class Main < Sinatra::Base
 
         jobs = []
         targets.each do |row|
-            job = build_yearbook_job_for_user(row['username'], variant_set)
-            jobs << job if job
+            jobs.concat(build_yearbook_jobs_for_user(row['username'], variant_set))
         end
 
         # Always send at least one job so the Node script doesn't fail; a blank A4

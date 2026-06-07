@@ -105,6 +105,12 @@
     <select class="form-select form-select-sm" id="yb_variant_background" style="width: 200px;">
         <option value="">— keiner —</option>
     </select>
+    <label class="form-label mb-0 small" title="Jede Farbe in dieser Variante, die diesem Wert exakt entspricht, wird beim Render durch die individuelle Akzentfarbe der Schüler:in ersetzt.">
+        Akzent-Platzhalter
+    </label>
+    <input type="color" class="form-control form-control-color form-control-sm" id="yb_variant_accent_placeholder"
+           value="#FF00FF" style="width: 44px; height: 28px; padding: 2px;"
+           title="Sentinel-Farbe für die Akzent-Substitution">
     <button type="button" class="btn btn-outline-success btn-sm" id="yb_variant_add" title="Neue Variante">
         <i class="bi bi-plus-lg"></i>
     </button>
@@ -139,6 +145,14 @@
 
 <div class="yb-designer-layout">
     <div class="yb-sidebar">
+        <div class="mb-3">
+            <label class="form-label small mb-1"><i class="bi bi-file-earmark"></i> Aktive Seite (Ziel beim Einfügen)</label>
+            <select class="form-select form-select-sm" id="yb_target_page">
+                <option value="0">Seite 1 — Steckbrief</option>
+                <option value="1">Seite 2 — Kommentare</option>
+            </select>
+        </div>
+
         <h6 class="mb-2"><i class="bi bi-plus-square"></i> Felder hinzufügen</h6>
         <div class="text-body-secondary small mb-2">
             Klick auf ein Feld, um es auf die aktuelle Variante zu legen.
@@ -286,7 +300,11 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
     'use strict';
 
     const BASE_PDF = { width: 210, height: 297, padding: [0, 0, 0, 0] };
-    const ACCENT_PLACEHOLDER = '#FF00FF'; // visible-but-unmistakable design-time colour
+    const DEFAULT_ACCENT_PLACEHOLDER = '#FF00FF'; // visible-but-unmistakable default sentinel
+    function currentAccentPlaceholder() {
+        const v = currentVariant();
+        return (v && v.accent_placeholder_hex) || DEFAULT_ACCENT_PLACEHOLDER;
+    }
 
     let designer = null;
     let availableFields = [];
@@ -318,8 +336,10 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
         return variantSet.variants.find(function (v) { return v.id === currentVariantId; });
     }
 
+    // Each variant has at least two pages: page 0 = Steckbrief, page 1 = comments page
+    // (which Ruby duplicates at render time to spill all of a student's comments).
     function ensureDefaultTemplate() {
-        return { basePdf: BASE_PDF, schemas: [[]] };
+        return { basePdf: BASE_PDF, schemas: [[], []] };
     }
 
     // ---------- variant bar -------------------------------------------------
@@ -342,6 +362,8 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
             v && typeof v.photo_count === 'number' ? String(v.photo_count) : '';
         const bgSel = document.getElementById('yb_variant_background');
         if (bgSel) bgSel.value = (v && v.background_pdf) ? v.background_pdf : '';
+        const phInput = document.getElementById('yb_variant_accent_placeholder');
+        if (phInput) phInput.value = (v && v.accent_placeholder_hex) || DEFAULT_ACCENT_PLACEHOLDER;
         document.getElementById('yb_variant_delete').disabled = variantSet.variants.length <= 1;
     }
 
@@ -456,6 +478,7 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
             photo_count: null,
             template: seedTemplate ? JSON.parse(JSON.stringify(seedTemplate)) : ensureDefaultTemplate(),
             background_pdf: null,
+            accent_placeholder_hex: DEFAULT_ACCENT_PLACEHOLDER,
         };
         variantSet.variants.push(v);
         currentVariantId = v.id;
@@ -520,13 +543,24 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
         });
     }
 
+    function activeTargetPageIndex() {
+        const sel = document.getElementById('yb_target_page');
+        if (!sel) return 0;
+        const v = parseInt(sel.value, 10);
+        return isFinite(v) && v >= 0 ? v : 0;
+    }
+
     function pushToCurrentPage(entry) {
         if (!designer) return;
         const tpl = designer.getTemplate();
-        const schemas = (tpl.schemas && tpl.schemas.length > 0) ? tpl.schemas : [[]];
-        const page0 = Array.isArray(schemas[0]) ? schemas[0].slice() : [];
-        page0.push(entry);
-        designer.updateTemplate(Object.assign({}, tpl, { schemas: [page0].concat(schemas.slice(1)) }));
+        const schemas = (tpl.schemas && tpl.schemas.length > 0) ? tpl.schemas.slice() : [[]];
+        // Ensure the target page exists in the schemas array.
+        const targetIdx = Math.min(activeTargetPageIndex(), schemas.length - 1);
+        while (schemas.length <= targetIdx) schemas.push([]);
+        const page = Array.isArray(schemas[targetIdx]) ? schemas[targetIdx].slice() : [];
+        page.push(entry);
+        schemas[targetIdx] = page;
+        designer.updateTemplate(Object.assign({}, tpl, { schemas: schemas }));
     }
 
     function addAssetToTemplate(asset) {
@@ -582,28 +616,31 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
     }
 
     function addAccentBackground() {
+        const ph = currentAccentPlaceholder();
         pushToCurrentPage({
             name: nextAccentName(), type: 'rectangle',
             position: { x: 0, y: 0 }, width: 210, height: 297,
-            color: ACCENT_PLACEHOLDER, borderColor: ACCENT_PLACEHOLDER, borderWidth: 0,
+            color: ph, borderColor: ph, borderWidth: 0,
         });
         setStatus('Akzent-Hintergrund hinzugefügt (Farbe wird pro Schüler:in eingesetzt).');
     }
 
     function addAccentStrip() {
+        const ph = currentAccentPlaceholder();
         pushToCurrentPage({
             name: nextAccentName(), type: 'rectangle',
             position: { x: 0, y: 0 }, width: 210, height: 12,
-            color: ACCENT_PLACEHOLDER, borderColor: ACCENT_PLACEHOLDER, borderWidth: 0,
+            color: ph, borderColor: ph, borderWidth: 0,
         });
         setStatus('Akzent-Streifen hinzugefügt.');
     }
 
     function addAccentRect() {
+        const ph = currentAccentPlaceholder();
         pushToCurrentPage({
             name: nextAccentName(), type: 'rectangle',
             position: { x: 20, y: 20 }, width: 60, height: 40,
-            color: ACCENT_PLACEHOLDER, borderColor: ACCENT_PLACEHOLDER, borderWidth: 0,
+            color: ph, borderColor: ph, borderWidth: 0,
         });
         setStatus('Akzent-Rechteck hinzugefügt.');
     }
@@ -687,13 +724,21 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
         const name = nextBlockName('__commentsblock');
         const cfg = defaultCommentsBlockConfig();
         currentBlocks()[name] = cfg;
+        // Kommentare landen immer auf der letzten Seite — die ist die Render-Vorlage,
+        // die zur Render-Zeit so oft dupliziert wird, bis alle Kommentare aufgebraucht sind.
+        const sel = document.getElementById('yb_target_page');
+        const tpl = designer ? designer.getTemplate() : null;
+        const pageCount = tpl && tpl.schemas ? tpl.schemas.length : 2;
+        const previousTarget = sel ? sel.value : '0';
+        if (sel) sel.value = String(pageCount - 1);
         pushToCurrentPage({
             name: name, type: 'text',
-            position: { x: 10, y: 100 }, width: 90, height: 80,
+            position: { x: 10, y: 20 }, width: 190, height: 250,
             fontSize: 10, fontColor: '#888888', alignment: 'left',
             content: placeholderTextForBlock(name, cfg),
             readOnly: true,
         });
+        if (sel) sel.value = previousTarget;
         renderBlockList();
         openBlockEditor(name);
     }
@@ -1111,6 +1156,28 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
             plugins: pdfmePlugins(),
             options: options,
         });
+        renderTargetPageSelect(template);
+    }
+
+    // Keep the "Aktive Seite" dropdown synced with the current variant's actual page
+    // count. Page 0 is always the Steckbrief; the last page is the comments-overflow
+    // page (duplicated at render time as needed).
+    function renderTargetPageSelect(template) {
+        const sel = document.getElementById('yb_target_page');
+        if (!sel) return;
+        const previous = sel.value;
+        const pages = (template && template.schemas) ? template.schemas.length : 2;
+        sel.innerHTML = '';
+        for (let i = 0; i < pages; i++) {
+            const opt = document.createElement('option');
+            opt.value = String(i);
+            if (i === 0) opt.textContent = 'Seite 1 — Steckbrief';
+            else if (i === pages - 1) opt.textContent = 'Seite ' + (i + 1) + ' — Kommentare';
+            else opt.textContent = 'Seite ' + (i + 1);
+            sel.appendChild(opt);
+        }
+        const restored = parseInt(previous, 10);
+        sel.value = (isFinite(restored) && restored >= 0 && restored < pages) ? String(restored) : '0';
     }
 
     // ---------- data loading -----------------------------------------------
@@ -1241,6 +1308,11 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
         });
         document.getElementById('yb_variant_background').addEventListener('change', function (e) {
             onBackgroundChanged(e.target.value || null);
+        });
+        document.getElementById('yb_variant_accent_placeholder').addEventListener('change', function (e) {
+            const v = currentVariant(); if (!v) return;
+            v.accent_placeholder_hex = (e.target.value || DEFAULT_ACCENT_PLACEHOLDER).toUpperCase();
+            setStatus('Akzent-Platzhalter auf ' + v.accent_placeholder_hex + ' gesetzt — jede Farbe in dieser Variante mit diesem Wert wird beim Render durch die Akzentfarbe ersetzt.');
         });
         document.getElementById('yb_variant_add').addEventListener('click', function () { addVariant(); });
         document.getElementById('yb_variant_duplicate').addEventListener('click', function () {
