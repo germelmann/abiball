@@ -105,7 +105,10 @@ class Main < Sinatra::Base
                 io.puts '    </a>'
                 io.puts '</li>'
                 
-                if yearbook_accessible? && user_has_permission?("yearbook_create")
+                # yearbook_create-only students keep "Jahrbuch" as a top-level nav link.
+                # yearbook_manage users see it inside the Jahrbuch dropdown below, next
+                # to "Jahrbuch verwalten" / "Jahrbuch-Vorlage", so the navbar stays tidy.
+                if yearbook_accessible? && user_has_permission?("yearbook_create") && !user_has_permission?("yearbook_manage")
                     io.puts '<li class="nav-item">'
                     io.puts '    <a class="nav-link" href="/jahrbuch">'
                     io.puts '        <i class="bi bi-book"></i>&nbsp;Jahrbuch'
@@ -115,73 +118,52 @@ class Main < Sinatra::Base
                 
             end
             
-            # Administration dropdown
-            admin_items = []
-            
-            if user_has_permission?("view_users")
-                admin_items << {label: 'Benutzer verwalten', icon: 'bi-people', url: '/users'}
-            end
-            
-            if user_has_permission?("edit_users")
-                admin_items << {label: 'Tags verwalten', icon: 'bi-tags', url: '/tags'}
-            end
-            
-            if user_has_permission?("view_users")
-                admin_items << {label: 'Bestellungsmanagement', icon: 'bi-list-check', url: '/order_management'}
-            end
+            # Top-level menu groups. Each entry has items that the current user is
+            # allowed to see; empty groups are skipped so we never render a dead
+            # dropdown.
+            groups = []
 
-            if user_has_permission?("view_users")
-                admin_items << {label: 'Teilnehmerverwaltung', icon: 'bi-people', url: '/participants_management'}
-            end
-            
-            if user_has_permission?("manage_orders")
-                admin_items << {label: 'Quick Payment', icon: 'bi-credit-card', url: '/quick_payment'}
-            end
-            
-            if user_has_permission?("manage_orders")
-                admin_items << {label: 'Zahlungen', icon: 'bi-cash-stack', url: '/payments'}
-            end
+            # Veranstaltung covers everything about running the event itself:
+            # the event configuration, who's attending, and money flowing in.
+            event = []
+            event << {label: 'Events verwalten',        icon: 'bi-calendar-plus', url: '/events'}                  if user_has_permission?("create_events")
+            event << {label: 'Teilnehmerverwaltung',    icon: 'bi-people-fill',   url: '/participants_management'} if user_has_permission?("view_users")
+            event << {label: 'Bestellungsmanagement',   icon: 'bi-list-check',    url: '/order_management'}        if user_has_permission?("view_users")
+            event << {label: 'Quick Payment',           icon: 'bi-credit-card',   url: '/quick_payment'}           if user_has_permission?("manage_orders")
+            event << {label: 'Zahlungen',               icon: 'bi-cash-stack',    url: '/payments'}                if user_has_permission?("manage_orders")
+            event << {label: 'Kassenprüfung',           icon: 'bi-calculator',    url: '/kassenpruefung'}          if user_has_permission?("manage_orders")
+            event << {label: 'Ticket Scanner',          icon: 'bi-qr-code-scan',  url: '/ticket_scanner'}          if user_has_permission?("manage_orders")
+            groups << {label: 'Veranstaltung', icon: 'bi-calendar-event', items: event} unless event.empty?
 
-            if user_has_permission?("manage_orders")
-                admin_items << {label: 'Kassenprüfung', icon: 'bi-shield-check', url: '/kassenpruefung'}
+            yearbook = []
+            if yearbook_accessible? && user_has_permission?("yearbook_manage") && user_has_permission?("yearbook_create")
+                yearbook << {label: 'Jahrbuch', icon: 'bi-book', url: '/jahrbuch'}
             end
-
-            if user_has_permission?("manage_orders")
-                admin_items << {label: 'Ticket Scanner', icon: 'bi-qr-code-scan', url: '/ticket_scanner'}
-            end
-            
-            if user_has_permission?("create_invites")
-                admin_items << {label: 'Einladungslinks', icon: 'bi-person-plus', url: '/invitations'}
-            end
-            
-            if user_has_permission?("create_events")
-                admin_items << {label: 'Events verwalten', icon: 'bi-calendar-plus', url: '/events'}
-            end
-            
-            if user_has_permission?("view_logs")
-                admin_items << {label: 'Log', icon: 'bi-file-text', url: '/log'}
-            end
-
             if user_has_permission?("yearbook_view") || user_has_permission?("yearbook_manage")
-                admin_items << {label: 'Jahrbuch verwalten', icon: 'bi-book', url: '/jahrbuch_manage'}
+                yearbook << {label: 'Jahrbuch verwalten', icon: 'bi-journal-text', url: '/jahrbuch_manage'}
             end
-
             if user_has_permission?("yearbook_manage")
-                admin_items << {label: 'Jahrbuch-Vorlage', icon: 'bi-layout-text-window-reverse', url: '/jahrbuch_template_edit'}
+                yearbook << {label: 'Jahrbuch-Vorlage', icon: 'bi-layout-text-window-reverse', url: '/jahrbuch_template_edit'}
             end
+            groups << {label: 'Jahrbuch', icon: 'bi-book', items: yearbook} unless yearbook.empty?
 
-            if user_has_permission?("admin")
-                admin_items << {label: 'Administration', icon: 'bi-gear', url: '/admin'}
-            end
-            
-            # Add dropdown if there are admin items
-            if admin_items.length > 0
+            # System holds the platform-level admin entries — managing accounts,
+            # invites, taxonomy, logs, and the catch-all Administration page.
+            system = []
+            system << {label: 'Benutzer verwalten',  icon: 'bi-people',       url: '/users'}        if user_has_permission?("view_users")
+            system << {label: 'Tags verwalten',      icon: 'bi-tags',         url: '/tags'}         if user_has_permission?("edit_users")
+            system << {label: 'Einladungslinks',     icon: 'bi-person-plus',  url: '/invitations'}  if user_has_permission?("create_invites")
+            system << {label: 'Log',                 icon: 'bi-file-text',    url: '/log'}          if user_has_permission?("view_logs")
+            system << {label: 'Administration',      icon: 'bi-gear',         url: '/admin'}        if user_has_permission?("admin")
+            groups << {label: 'System', icon: 'bi-sliders', items: system} unless system.empty?
+
+            groups.each do |group|
                 io.puts '<li class="nav-item dropdown">'
                 io.puts '    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">'
-                io.puts '        <i class="bi bi-tools"></i>&nbsp;Administration'
+                io.puts "        <i class=\"#{group[:icon]}\"></i>&nbsp;#{group[:label]}"
                 io.puts '    </a>'
                 io.puts '    <ul class="dropdown-menu">'
-                admin_items.each do |item|
+                group[:items].each do |item|
                     io.puts '        <li>'
                     io.puts "            <a class=\"dropdown-item\" href=\"#{item[:url]}\">"
                     io.puts "                <i class=\"#{item[:icon]}\"></i>&nbsp;#{item[:label]}"
