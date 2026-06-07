@@ -554,17 +554,28 @@ function displayPreviousOrders(orders) {
                         `${order.total_price}€`
                     )
                 ),
-                order.participants && order.participants.length > 0 ? 
+                order.participants && order.participants.length > 0 ?
                     $('<div>').addClass('mt-3').append(
                         $('<strong>').text('Teilnehmer:'),
                         $('<ul>').addClass('list-unstyled ms-3 mt-2').append(
                             order.participants.map(function(p) {
                                 const contactInfo = [p.phone, p.email].filter(x => x && x.length > 0).join(', ');
-                                return $('<li>').append(
+                                const $li = $('<li>').append(
                                     $('<i>').addClass('bi bi-person-fill me-2'),
                                     p.name,
                                     contactInfo ? $('<span>').addClass('text-muted ms-2').text(`(${contactInfo})`) : ''
                                 );
+                                if (p.redeemed) {
+                                    let title = 'Eingecheckt';
+                                    if (p.redeemed_at) {
+                                        try { title += ' am ' + new Date(p.redeemed_at).toLocaleString('de-DE'); } catch (e) {}
+                                    }
+                                    $li.append(
+                                        $('<span>').addClass('badge bg-success ms-2').attr('title', title)
+                                            .html('<i class="bi bi-check-circle-fill"></i> Eingecheckt')
+                                    );
+                                }
+                                return $li;
                             })
                         )
                     ) : '',

@@ -1675,13 +1675,13 @@ class Main < Sinatra::Base
             OPTIONAL MATCH (pr)-[:USES_ACCOUNT]->(b:BankAccount)
             WITH u, o, e, p, pr, b
             ORDER BY pr.created_at DESC
-            WITH u, o, e, 
-                 COLLECT(DISTINCT {name: p.name, phone: p.phone, email: p.email, birthdate: p.birthdate, ticket_number: p.ticket_number}) AS participants,
+            WITH u, o, e,
+                 COLLECT(DISTINCT {name: p.name, phone: p.phone, email: p.email, birthdate: p.birthdate, ticket_number: p.ticket_number, redeemed: COALESCE(p.redeemed, false), redeemed_at: p.redeemed_at, redeemed_by: p.redeemed_by}) AS participants,
                  COLLECT(DISTINCT CASE WHEN pr IS NOT NULL THEN {
-                    id: pr.id, 
-                    status: pr.status, 
+                    id: pr.id,
+                    status: pr.status,
                     created_at: pr.created_at,
-                    sent_at: pr.sent_at, 
+                    sent_at: pr.sent_at,
                     paid_at: pr.paid_at,
                     bank_account_id: b.id,
                     bank_account_name: b.account_name,
@@ -1859,8 +1859,8 @@ class Main < Sinatra::Base
             OPTIONAL MATCH (o)-[:FOR_TIER]->(t:TicketTier)
             OPTIONAL MATCH (o)-[:HAS_PAYMENT_REQUEST]->(pr:PaymentRequest)
             OPTIONAL MATCH (pr)-[:USES_ACCOUNT]->(b:BankAccount)
-            WITH o, e, t, 
-                 COLLECT(DISTINCT {name: p.name, phone: p.phone, email: p.email, birthdate: p.birthdate, ticket_number: p.ticket_number}) AS participants,
+            WITH o, e, t,
+                 COLLECT(DISTINCT {name: p.name, phone: p.phone, email: p.email, birthdate: p.birthdate, ticket_number: p.ticket_number, redeemed: COALESCE(p.redeemed, false), redeemed_at: p.redeemed_at}) AS participants,
                  pr, b
             ORDER BY pr.created_at DESC
             WITH o, e, t, participants,
@@ -3390,6 +3390,48 @@ class Main < Sinatra::Base
         )
     end
 
+    # Undo redemption of a specific ticket (by order_id + ticket_number)
+    post "/api/undo_ticket_redemption" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:order_id, :ticket_number])
+
+        order_id = data[:order_id]
+        ticket_number = data[:ticket_number].to_i
+
+        result = neo4j_query(<<~END_OF_QUERY, {order_id: order_id, ticket_number: ticket_number})
+            MATCH (o:TicketOrder {id: $order_id})-[:INCLUDES]->(p:Participant {ticket_number: $ticket_number})
+            RETURN p.redeemed AS redeemed, p.name AS name
+        END_OF_QUERY
+
+        if result.empty?
+            respond(success: false, error: "Ticket nicht gefunden")
+            return
+        end
+
+        unless result.first['redeemed']
+            respond(success: false, error: "Ticket ist nicht eingelöst")
+            return
+        end
+
+        neo4j_query(<<~END_OF_QUERY, {order_id: order_id, ticket_number: ticket_number})
+            MATCH (o:TicketOrder {id: $order_id})-[:INCLUDES]->(p:Participant {ticket_number: $ticket_number})
+            SET p.redeemed = false
+            REMOVE p.redeemed_at, p.redeemed_by
+        END_OF_QUERY
+
+        log("Ticket Einlösung rückgängig gemacht (Order Management): Order #{order_id}, Ticket ##{ticket_number} durch #{@session_user[:email]}")
+
+        respond(
+            success: true,
+            message: "Einlösung rückgängig gemacht",
+            ticket: {
+                order_id: order_id,
+                ticket_number: ticket_number,
+                name: result.first['name']
+            }
+        )
+    end
+
     # Correct birthdate for a participant (with audit logging)
     post "/api/correct_birthdate" do
         require_user_with_permission!("manage_orders")
@@ -3656,6 +3698,9 @@ class Main < Sinatra::Base
                 p.name          AS name,
                 p.birthdate     AS birthdate,
                 p.ticket_number AS ticket_number,
+                COALESCE(p.redeemed, false) AS redeemed,
+                p.redeemed_at   AS redeemed_at,
+                p.redeemed_by   AS redeemed_by,
                 o.id            AS order_id,
                 o.payment_reference AS payment_reference,
                 COALESCE(o.status, '') AS order_status,
@@ -3693,7 +3738,10 @@ class Main < Sinatra::Base
                 payment_reference: row['payment_reference'],
                 order_status:     row['order_status'],
                 event_id:         row['event_id'],
-                event_name:       row['event_name']
+                event_name:       row['event_name'],
+                redeemed:         row['redeemed'] ? true : false,
+                redeemed_at:      row['redeemed_at'],
+                redeemed_by:      row['redeemed_by']
             }
         end
 

@@ -661,7 +661,10 @@
                     <!-- TAB: Participants -->
                     <div class="tab-pane fade" id="pane-participants" role="tabpanel">
                         <div class="card mb-3">
-                            <div class="card-header"><h6 class="mb-0"><i class="bi bi-people"></i> Teilnehmer</h6></div>
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0"><i class="bi bi-people"></i> Teilnehmer</h6>
+                                <span id="checkin_summary" class="small text-muted"></span>
+                            </div>
                             <div class="card-body" id="participants_section">
                             </div>
                         </div>
@@ -1616,9 +1619,12 @@
         let html = '';
         for (let i = 0; i < participants.length; i++) {
             const participant = participants[i];
+            const ticketNumber = participant.ticket_number || (i + 1);
+            const checkinHtml = renderCheckinStatus(participant, ticketNumber);
             html += `
-                <div class="card mb-2 participant-card" data-index="${i}">
+                <div class="card mb-2 participant-card" data-index="${i}" data-ticket-number="${ticketNumber}">
                     <div class="card-body">
+                        ${checkinHtml}
                         <div class="row align-items-center">
                             <div class="col-md-3">
                                 <label class="form-label">Ticket #${i + 1} - Name</label>
@@ -1658,16 +1664,109 @@
         `;
         
         $('#participants_section').html(html);
-        
+
         // Set up event handlers for remove buttons
         $('.remove-participant-btn').on('click', function() {
             const index = $(this).data('index');
             $(`.participant-card[data-index="${index}"]`).remove();
             renumberParticipants();
         });
-        
+
         // Set up event handler for add button
         $('#add_participant_btn').on('click', addNewParticipant);
+
+        // Set up event handlers for "undo redemption" buttons
+        $('.undo-checkin-btn').on('click', function() {
+            const $btn = $(this);
+            const orderId = $btn.data('order-id');
+            const ticketNumber = $btn.data('ticket-number');
+            const name = $btn.data('name') || '';
+            undoTicketRedemption(orderId, ticketNumber, name);
+        });
+
+        // Update the check-in summary in the participants tab header
+        updateCheckinSummary(participants);
+    }
+
+    function renderCheckinStatus(participant, ticketNumber) {
+        if (participant.redeemed) {
+            const orderId = $('#order_id_input').val();
+            const redeemedAt = formatCheckinDateTime(participant.redeemed_at);
+            const redeemedBy = participant.redeemed_by ? escapeHtml(participant.redeemed_by) : 'Unbekannt';
+            return `
+                <div class="alert alert-success py-2 mb-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <span class="badge bg-success me-1"><i class="bi bi-check-circle-fill"></i> Eingecheckt</span>
+                        <small class="text-muted">
+                            ${redeemedAt ? 'am ' + escapeHtml(redeemedAt) : ''}
+                            ${participant.redeemed_by ? ' durch ' + redeemedBy : ''}
+                        </small>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-warning undo-checkin-btn"
+                            data-order-id="${escapeHtml(orderId)}"
+                            data-ticket-number="${ticketNumber}"
+                            data-name="${escapeHtml(participant.name || '')}">
+                        <i class="bi bi-arrow-counterclockwise"></i> Einlösung rückgängig
+                    </button>
+                </div>
+            `;
+        }
+        return `
+            <div class="alert alert-secondary py-1 mb-2 d-flex align-items-center">
+                <span class="badge bg-secondary me-2"><i class="bi bi-circle"></i> Nicht eingecheckt</span>
+                <small class="text-muted">Ticket wurde noch nicht eingelöst</small>
+            </div>
+        `;
+    }
+
+    function updateCheckinSummary(participants) {
+        if (!participants || participants.length === 0) {
+            $('#checkin_summary').text('');
+            return;
+        }
+        const total = participants.length;
+        const checkedIn = participants.filter(p => p.redeemed).length;
+        $('#checkin_summary').html(
+            `<i class="bi bi-check2-circle"></i> Eingecheckt: <strong>${checkedIn}</strong> / ${total}`
+        );
+    }
+
+    function formatCheckinDateTime(dateTimeStr) {
+        if (!dateTimeStr) return '';
+        try {
+            return new Date(dateTimeStr).toLocaleString('de-DE');
+        } catch (e) {
+            return dateTimeStr;
+        }
+    }
+
+    function undoTicketRedemption(orderId, ticketNumber, name) {
+        const label = name ? `"${name}"` : `#${ticketNumber}`;
+        showTemplateModal(
+            'Einlösung rückgängig machen',
+            `Möchtest du die Einlösung des Tickets ${label} wirklich rückgängig machen?`,
+            'Ja, rückgängig machen',
+            'btn-warning',
+            'Abbrechen',
+            'btn-secondary',
+            function() {
+                api_call('/api/undo_ticket_redemption', {
+                    order_id: orderId,
+                    ticket_number: ticketNumber
+                }, function(data) {
+                    if (data.success) {
+                        showTemplateModal('Erfolg', 'Einlösung wurde rückgängig gemacht.', 'OK', 'btn-success', null, null, function() {});
+                        // Reload the order to refresh participant cards
+                        const currentOrderId = $('#order_id_input').val();
+                        if (currentOrderId) {
+                            loadOrderDetails(currentOrderId);
+                        }
+                    } else {
+                        showTemplateModal('Fehler', data.error || 'Fehler beim Rückgängigmachen', 'OK', 'btn-danger', null, null, function() {});
+                    }
+                });
+            }
+        );
     }
     
     function addNewParticipant() {

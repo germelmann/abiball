@@ -4,56 +4,47 @@
     body.scanner-only-mode .header {
         display: none;
     }
-    
+
     body.scanner-only-mode .container {
         max-width: 100%;
         padding: 0.5rem;
     }
-    
-    /* Mobile optimization for scanner */
-    @media (max-width: 768px) {
-        #scanner-container {
-            max-width: 100%;
-        }
-        
-        .card {
-            margin-bottom: 0.5rem;
-        }
-        
-        .card-body {
-            padding: 0.75rem;
-        }
-        
-        h1 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-        }
-        
-        .btn {
-            font-size: 1rem;
-            padding: 0.5rem 1rem;
-        }
-        
-        .btn-lg {
-            font-size: 1.1rem;
-            padding: 0.75rem 1.5rem;
-        }
-        
-        /* Ensure ticket info is visible without scrolling */
-        .ticket-info-card {
-            font-size: 0.9rem;
-        }
-        
-        .ticket-info-card .row {
-            margin-bottom: 0.25rem;
-        }
-        
-        /* Make scanner video responsive */
-        body.scanner-only-mode #scanner-video {
-            max-height: 40vh;
-        }
+
+    /* Fullscreen mode styles */
+    body.scanner-fullscreen {
+        overflow: hidden;
     }
-    
+
+    body.scanner-fullscreen .header,
+    body.scanner-fullscreen footer,
+    body.scanner-fullscreen .footer {
+        display: none !important;
+    }
+
+    body.scanner-fullscreen .container {
+        max-width: 100%;
+        padding: 0.25rem;
+        margin: 0;
+    }
+
+    body.scanner-fullscreen .row.mt-4 {
+        margin-top: 0 !important;
+    }
+
+    body.scanner-fullscreen .card {
+        margin-bottom: 0.4rem;
+        border-radius: 6px;
+    }
+
+    body.scanner-fullscreen .card-body {
+        padding: 0.5rem;
+    }
+
+    body.scanner-fullscreen .card-header {
+        padding: 0.35rem 0.6rem;
+    }
+
+    /* Compact scanner card */
     #scanner-container {
         position: relative;
         width: 100%;
@@ -64,6 +55,7 @@
         width: 100%;
         border-radius: 8px;
         background: #000;
+        display: block;
     }
     .scanner-overlay {
         position: absolute;
@@ -77,15 +69,84 @@
         pointer-events: none;
     }
     .ticket-info-card {
-        animation: fadeIn 0.3s;
+        animation: fadeIn 0.2s;
     }
     @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(-10px); }
+        from { opacity: 0; transform: translateY(-6px); }
         to { opacity: 1; transform: translateY(0); }
     }
     .status-badge {
-        font-size: 1.2rem;
-        padding: 0.5rem 1rem;
+        font-size: 1rem;
+        padding: 0.35rem 0.75rem;
+    }
+
+    /* Compact info rows */
+    .ticket-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 0.5rem;
+        padding: 0.15rem 0;
+        border-bottom: 1px solid rgba(0,0,0,0.05);
+        font-size: 0.9rem;
+        line-height: 1.25;
+    }
+    .ticket-row:last-of-type {
+        border-bottom: none;
+    }
+    .ticket-row .label {
+        font-weight: 600;
+        color: #555;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    .ticket-row .value {
+        text-align: right;
+        word-break: break-word;
+        min-width: 0;
+    }
+
+    .scanner-toolbar {
+        display: flex;
+        gap: 0.35rem;
+        margin-bottom: 0.5rem;
+    }
+    .scanner-toolbar .btn {
+        flex: 1;
+    }
+
+    /* Mobile optimization */
+    @media (max-width: 768px) {
+        .container {
+            padding: 0.5rem;
+        }
+        .card {
+            margin-bottom: 0.5rem;
+            border-radius: 6px;
+        }
+        .card-body {
+            padding: 0.6rem;
+        }
+        .card-header {
+            padding: 0.4rem 0.6rem;
+        }
+        h1, h5 { font-size: 1rem; margin-bottom: 0.25rem; }
+        .btn { font-size: 0.95rem; padding: 0.4rem 0.75rem; }
+        .btn-lg { font-size: 1rem; padding: 0.55rem 1rem; }
+        .scanner-overlay { width: 75%; height: 75%; border-width: 2px; }
+        #scanner-video { max-height: 38vh; }
+        .ticket-row { font-size: 0.85rem; }
+        .status-badge { font-size: 0.9rem; padding: 0.3rem 0.6rem; }
+    }
+
+    /* When in fullscreen, push video even more compact */
+    body.scanner-fullscreen #scanner-video {
+        max-height: 42vh;
+    }
+    @media (max-width: 768px) {
+        body.scanner-fullscreen #scanner-video {
+            max-height: 35vh;
+        }
     }
 </style>
 
@@ -109,7 +170,8 @@ let lastScannedTicket = null;
 $(document).ready(function() {
     loadScannerMode();
     updateModeDisplay();
-    
+    updateFullscreenButton();
+
     // Initialize scanner button
     $('#start-scanner-btn').click(function() {
         if (scannerActive) {
@@ -118,29 +180,77 @@ $(document).ready(function() {
             startScanner();
         }
     });
-    
+
     // Mode toggle
     $('#mode-toggle-btn').click(function() {
         autoRedeemMode = !autoRedeemMode;
         saveScannerMode();
         updateModeDisplay();
     });
-    
+
+    // Fullscreen toggle
+    $('#fullscreen-btn').click(function() {
+        toggleFullscreen();
+    });
+
     // Redeem button (for info-only mode)
     $(document).on('click', '#redeem-ticket-btn', function() {
         redeemTicket();
     });
-    
+
     // Undo button
     $('#undo-redemption-btn').click(function() {
         undoLastRedemption();
     });
-    
+
     // Age correction button (delegated event handler)
     $(document).on('click', '#correct-age-btn', function() {
         showAgeCorrectionDialog();
     });
+
+    // Track fullscreen changes (user can leave via ESC)
+    document.addEventListener('fullscreenchange', updateFullscreenButton);
+    document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
 });
+
+function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}
+
+function toggleFullscreen() {
+    if (isFullscreen()) {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) exit.call(document);
+    } else {
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (req) {
+            const result = req.call(el);
+            if (result && typeof result.catch === 'function') {
+                result.catch(function(err) {
+                    console.warn('Fullscreen request failed:', err);
+                });
+            }
+        }
+    }
+}
+
+function updateFullscreenButton() {
+    const fs = isFullscreen();
+    if (fs) {
+        $('body').addClass('scanner-fullscreen');
+        $('#fullscreen-btn')
+            .removeClass('btn-outline-secondary')
+            .addClass('btn-secondary')
+            .html('<i class="bi bi-fullscreen-exit"></i>');
+    } else {
+        $('body').removeClass('scanner-fullscreen');
+        $('#fullscreen-btn')
+            .removeClass('btn-secondary')
+            .addClass('btn-outline-secondary')
+            .html('<i class="bi bi-arrows-fullscreen"></i>');
+    }
+}
 
 function loadScannerMode() {
     const savedMode = localStorage.getItem('scannerAutoRedeemMode');
@@ -157,24 +267,22 @@ function updateModeDisplay() {
     const modeText = autoRedeemMode ? 'Auto-Einlösung' : 'Nur-Info';
     const modeIcon = autoRedeemMode ? 'bi-check-circle-fill' : 'bi-info-circle-fill';
     const modeClass = autoRedeemMode ? 'btn-success' : 'btn-info';
-    
+
     $('#mode-toggle-btn')
         .removeClass('btn-success btn-info')
         .addClass(modeClass)
-        .html(`<i class="bi ${modeIcon}"></i> Modus: ${modeText}`);
-    
+        .html(`<i class="bi ${modeIcon}"></i> ${modeText}`);
+
     $('#mode-description').text(
-        autoRedeemMode 
-            ? 'Tickets werden automatisch beim Scannen eingelöst' 
+        autoRedeemMode
+            ? 'Tickets werden automatisch beim Scannen eingelöst'
             : 'Tickets werden gescannt und angezeigt, aber nicht automatisch eingelöst'
     );
 }
 
 function startScanner() {
-    // $('#scanner-status').html('<span class="text-warning"><i class="bi bi-hourglass-split"></i> Scanner wird gestartet...</span>');
-    
     codeReader = new ZXing.BrowserQRCodeReader();
-    
+
     codeReader.decodeFromVideoDevice(undefined, 'scanner-video', (result, err) => {
         if (result) {
             handleQRCodeScanned(result.text);
@@ -187,11 +295,9 @@ function startScanner() {
         $('#start-scanner-btn')
             .removeClass('btn-primary')
             .addClass('btn-danger')
-            .html('<i class="bi bi-stop-circle"></i> Scanner stoppen');
-        // $('#scanner-status').html('<span class="text-success"><i class="bi bi-camera-video"></i> Scanner aktiv</span>');
+            .html('<i class="bi bi-stop-circle"></i> Stoppen');
     }).catch(err => {
         console.error(err);
-        // $('#scanner-status').html('<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Fehler beim Starten des Scanners</span>');
         showTemplateModal('Fehler', 'Kamera konnte nicht gestartet werden. Bitte überprüfe die Kamera-Berechtigungen.', 'OK', 'btn-danger', null, null, function() {});
     });
 }
@@ -206,7 +312,6 @@ function stopScanner() {
         .removeClass('btn-danger')
         .addClass('btn-primary')
         .html('<i class="bi bi-camera"></i> Scanner starten');
-    // $('#scanner-status').html('<span class="text-muted"><i class="bi bi-camera-video-off"></i> Scanner gestoppt</span>');
 }
 
 function handleQRCodeScanned(qrData) {
@@ -215,9 +320,7 @@ function handleQRCodeScanned(qrData) {
         codeReader.reset();
         scannerActive = false;
     }
-    
-    // $('#scanner-status').html('<span class="text-info"><i class="bi bi-hourglass-split"></i> Ticket wird überprüft...</span>');
-    
+
     // Parse QR data to get order_id and ticket_number for later use
     let qrDataParsed = null;
     try {
@@ -225,13 +328,12 @@ function handleQRCodeScanned(qrData) {
     } catch (e) {
         // Will be handled by server
     }
-    
+
     api_call('/api/scan_ticket', {
         qr_data: qrData,
         auto_redeem: autoRedeemMode
     }, function(data) {
         if (data.success) {
-            // Store order_id and ticket_number from QR data
             if (qrDataParsed) {
                 data.ticket.order_id = qrDataParsed.order_id;
                 data.ticket.ticket_number = qrDataParsed.ticket_number;
@@ -241,8 +343,7 @@ function handleQRCodeScanned(qrData) {
         } else {
             displayError(data.error || 'Unbekannter Fehler');
         }
-        
-        // Restart scanner after 2 seconds in auto-redeem mode, or immediately in info mode
+
         const restartDelay = (autoRedeemMode && data.success && data.status === 'redeemed') ? 2000 : 500;
         setTimeout(() => {
             if (!scannerActive) {
@@ -255,12 +356,12 @@ function handleQRCodeScanned(qrData) {
 function displayTicketInfo(data) {
     const ticket = data.ticket;
     const status = data.status;
-    
+
     let statusBadgeClass = '';
     let statusIcon = '';
     let statusText = '';
     let cardClass = '';
-    
+
     switch(status) {
         case 'redeemed':
             statusBadgeClass = 'bg-success';
@@ -286,33 +387,33 @@ function displayTicketInfo(data) {
             statusText = 'Fehler';
             cardClass = 'border-danger';
     }
-    
+
     let redeemButton = '';
     if (status === 'valid' && !autoRedeemMode) {
         redeemButton = `
-            <button class="btn btn-success btn-lg w-100 mt-3" id="redeem-ticket-btn">
+            <button class="btn btn-success btn-lg w-100 mt-2" id="redeem-ticket-btn">
                 <i class="bi bi-check-circle"></i> Ticket einlösen
             </button>
         `;
     }
-    
+
     let redemptionInfo = '';
     if (status === 'already_redeemed') {
         redemptionInfo = `
-            <div class="alert alert-warning mt-3">
+            <div class="alert alert-warning py-2 mt-2 mb-2 small">
                 <strong>Eingelöst am:</strong> ${formatDateTime(data.redeemed_at)}<br>
                 <strong>Eingelöst von:</strong> ${data.redeemed_by || 'Unbekannt'}
             </div>
         `;
     }
-    
+
     // Display age status if available
     let ageStatusHtml = '';
     if (ticket.age_status) {
         const ageStatus = ticket.age_status;
         let ageBadgeColor = 'bg-success';
         let ageIcon = 'bi-check-circle-fill';
-        
+
         switch(ageStatus.color) {
             case 'danger':
                 ageBadgeColor = 'bg-danger';
@@ -331,63 +432,48 @@ function displayTicketInfo(data) {
                 ageIcon = 'bi-check-circle-fill';
                 break;
         }
-        
+
         ageStatusHtml = `
-            <div class="alert alert-${ageStatus.color} mt-3 d-flex align-items-center justify-content-between" role="alert">
-                <div>
-                    <span class="badge ${ageBadgeColor} me-2">
+            <div class="alert alert-${ageStatus.color} py-2 mb-2 d-flex align-items-center justify-content-between gap-2" role="alert">
+                <div class="flex-grow-1">
+                    <span class="badge ${ageBadgeColor} me-1">
                         <i class="bi ${ageIcon}"></i> ${ageStatus.category}
                     </span>
                     <strong>${ageStatus.text}</strong>
                 </div>
-                <button class="btn btn-sm btn-outline-secondary" id="correct-age-btn">
-                    <i class="bi bi-pencil"></i> Alter ist falsch
+                <button class="btn btn-sm btn-outline-secondary flex-shrink-0" id="correct-age-btn">
+                    <i class="bi bi-pencil"></i>
                 </button>
             </div>
         `;
     }
-    
+
+    const fieldRow = (label, value, isCode) => {
+        const v = value || '-';
+        const display = isCode ? `<code>${v}</code>` : v;
+        return `<div class="ticket-row"><span class="label">${label}</span><span class="value">${display}</span></div>`;
+    };
+
     const html = `
-        <div class="card ticket-info-card ${cardClass}">
-            <div class="card-header text-center">
+        <div class="card ticket-info-card ${cardClass} mb-0">
+            <div class="card-header text-center py-1">
                 <span class="badge status-badge ${statusBadgeClass}">
                     <i class="bi ${statusIcon}"></i> ${statusText}
                 </span>
             </div>
             <div class="card-body">
                 ${ageStatusHtml}
-                <div class="row mb-2">
-                    <div class="col-md-4"><strong>Name:</strong></div>
-                    <div class="col-md-8">${ticket.name || '-'}</div>
-                </div>
-                <div class="row mb-2">
-                    <div class="col-md-4"><strong>Telefon:</strong></div>
-                    <div class="col-md-8">${ticket.phone || '-'}</div>
-                </div>
-                <div class="row mb-2">
-                    <div class="col-md-4"><strong>E-Mail (Teilnehmer):</strong></div>
-                    <div class="col-md-8">${ticket.email || '-'}</div>
-                </div>
-                <div class="row mb-2">
-                    <div class="col-md-4"><strong>Besteller:</strong></div>
-                    <div class="col-md-8">${ticket.user_name || '-'}</div>
-                </div>
-                <div class="row mb-2">
-                    <div class="col-md-4"><strong>E-Mail (Besteller):</strong></div>
-                    <div class="col-md-8">${ticket.user_email || '-'}</div>
-                </div>
-                <div class="row mb-2">
-                    <div class="col-md-4"><strong>Referenz:</strong></div>
-                    <div class="col-md-8"><code>${ticket.payment_reference || '-'}</code></div>
-                </div>
+                ${fieldRow('Name', ticket.name)}
+                ${fieldRow('Geburtsdatum', formatDate(ticket.birthdate))}
+                ${fieldRow('Referenz', ticket.payment_reference, true)}
                 ${redemptionInfo}
                 ${redeemButton}
             </div>
         </div>
     `;
-    
+
     $('#ticket-info').html(html);
-    
+
     // Play success sound if ticket was redeemed
     if (status === 'redeemed') {
         playSuccessSound();
@@ -398,34 +484,27 @@ function displayTicketInfo(data) {
 
 function displayError(errorMessage) {
     const html = `
-        <div class="card ticket-info-card border-danger">
-            <div class="card-header text-center bg-danger">
+        <div class="card ticket-info-card border-danger mb-0">
+            <div class="card-header text-center bg-danger py-1">
                 <span class="badge status-badge bg-danger">
                     <i class="bi bi-x-circle-fill"></i> Ungültig
                 </span>
             </div>
             <div class="card-body">
-                <div class="alert alert-danger mb-0">
+                <div class="alert alert-danger mb-0 py-2">
                     <i class="bi bi-exclamation-triangle"></i> ${errorMessage}
                 </div>
             </div>
         </div>
     `;
-    
+
     $('#ticket-info').html(html);
     playErrorSound();
 }
 
 function redeemTicket() {
     if (!lastScannedTicket) return;
-    
-    const orderIdMatch = $('#ticket-info').text().match(/Referenz:\s*([A-Z0-9]+)/);
-    if (!orderIdMatch) return;
-    
-    // Find order_id from the scanned data (we need to store it)
-    // For now, we'll use the API with the payment reference
-    // Better approach: store order_id in lastScannedTicket
-    
+
     showTemplateModal(
         'Ticket einlösen',
         `Möchtest du das Ticket für "${lastScannedTicket.name}" wirklich einlösen?`,
@@ -434,15 +513,12 @@ function redeemTicket() {
         'Abbrechen',
         'btn-secondary',
         function() {
-            // We need the order_id and ticket_number
-            // Since we have the ticket info, we need to extract these
             api_call('/api/redeem_ticket', {
                 order_id: lastScannedTicket.order_id,
                 ticket_number: lastScannedTicket.ticket_number
             }, function(data) {
                 if (data.success) {
                     showTemplateModal('Erfolg', 'Ticket erfolgreich eingelöst!', 'OK', 'btn-success', null, null, function() {});
-                    // Update display to show as redeemed
                     displayTicketInfo({
                         success: true,
                         status: 'redeemed',
@@ -469,10 +545,9 @@ function undoLastRedemption() {
                 if (data.success) {
                     const message = `Einlösung für Ticket #${data.ticket.ticket_number} (${data.ticket.name}) wurde rückgängig gemacht.`;
                     showTemplateModal('Erfolg', message, 'OK', 'btn-success', null, null, function() {});
-                    
-                    // Clear ticket info display
+
                     $('#ticket-info').html(`
-                        <div class="alert alert-success">
+                        <div class="alert alert-success py-2 mb-0">
                             <i class="bi bi-check-circle"></i> ${message}
                         </div>
                     `);
@@ -489,8 +564,7 @@ function showAgeCorrectionDialog() {
         showTemplateModal('Fehler', 'Kein Ticket ausgewählt', 'OK', 'btn-danger', null, null, function() {});
         return;
     }
-    
-    // Create a custom modal for birthdate correction
+
     const modalHtml = `
         <div class="modal fade" id="ageCorrectionModal" tabindex="-1">
             <div class="modal-dialog">
@@ -520,41 +594,34 @@ function showAgeCorrectionDialog() {
             </div>
         </div>
     `;
-    
-    // Remove existing modal if any
+
     $('#ageCorrectionModal').remove();
-    
-    // Add modal to body
     $('body').append(modalHtml);
-    
-    // Show modal
+
     const modal = new bootstrap.Modal(document.getElementById('ageCorrectionModal'));
     modal.show();
-    
-    // Handle submit
+
     $('#submit-correction-btn').off('click').on('click', function() {
         const newBirthdate = $('#new_birthdate').val();
         const reason = $('#correction_reason').val()?.trim();
-        
+
         if (!newBirthdate) {
             showTemplateModal('Fehler', 'Bitte gib ein Geburtsdatum ein', 'OK', 'btn-danger', null, null, function() {});
             return;
         }
-        
+
         if (!reason || reason.length < 5) {
             showTemplateModal('Fehler', 'Bitte gib eine aussagekräftige Begründung ein (mindestens 5 Zeichen)', 'OK', 'btn-danger', null, null, function() {});
             return;
         }
-        
-        // Validate birthdate is not in the future
+
         const birthdateObj = new Date(newBirthdate);
         const today = new Date();
         if (birthdateObj > today) {
             showTemplateModal('Fehler', 'Das Geburtsdatum darf nicht in der Zukunft liegen', 'OK', 'btn-danger', null, null, function() {});
             return;
         }
-        
-        // Submit correction
+
         api_call('/api/correct_birthdate', {
             order_id: lastScannedTicket.order_id,
             ticket_number: lastScannedTicket.ticket_number,
@@ -562,11 +629,10 @@ function showAgeCorrectionDialog() {
             reason: reason
         }, function(data) {
             modal.hide();
-            
+
             if (data.success) {
                 showTemplateModal('Erfolg', 'Geburtsdatum wurde erfolgreich korrigiert', 'OK', 'btn-success', null, null, function() {});
-                
-                // Update the ticket display with new age status
+
                 if (data.age_status) {
                     lastScannedTicket.age_status = data.age_status;
                     displayTicketInfo({
@@ -580,11 +646,21 @@ function showAgeCorrectionDialog() {
             }
         });
     });
-    
-    // Clean up modal when hidden
+
     $('#ageCorrectionModal').on('hidden.bs.modal', function () {
         $(this).remove();
     });
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    try {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return dateStr;
+        return d.toLocaleDateString('de-DE');
+    } catch (e) {
+        return dateStr;
+    }
 }
 
 function formatDateTime(dateTimeStr) {
@@ -598,21 +674,20 @@ function formatDateTime(dateTimeStr) {
 }
 
 function playSuccessSound() {
-    // Simple beep using Web Audio API
     try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         const oscillator = audioCtx.createOscillator();
         const gainNode = audioCtx.createGain();
-        
+
         oscillator.connect(gainNode);
         gainNode.connect(audioCtx.destination);
-        
+
         oscillator.frequency.value = 800;
         oscillator.type = 'sine';
-        
+
         gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
         gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
-        
+
         oscillator.start(audioCtx.currentTime);
         oscillator.stop(audioCtx.currentTime + 0.15);
     } catch (e) {
@@ -625,16 +700,16 @@ function playWarningSound() {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         const oscillator = audioCtx.createOscillator();
         const gainNode = audioCtx.createGain();
-        
+
         oscillator.connect(gainNode);
         gainNode.connect(audioCtx.destination);
-        
+
         oscillator.frequency.value = 400;
         oscillator.type = 'square';
-        
+
         gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
         gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-        
+
         oscillator.start(audioCtx.currentTime);
         oscillator.stop(audioCtx.currentTime + 0.3);
     } catch (e) {
@@ -645,22 +720,21 @@ function playWarningSound() {
 function playErrorSound() {
     try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        
-        // Double beep for error
+
         for (let i = 0; i < 2; i++) {
             const oscillator = audioCtx.createOscillator();
             const gainNode = audioCtx.createGain();
-            
+
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
-            
+
             oscillator.frequency.value = 300;
             oscillator.type = 'sawtooth';
-            
+
             const startTime = audioCtx.currentTime + (i * 0.2);
             gainNode.gain.setValueAtTime(0.2, startTime);
             gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.15);
-            
+
             oscillator.start(startTime);
             oscillator.stop(startTime + 0.15);
         }
@@ -672,65 +746,44 @@ function playErrorSound() {
 
 <div class='container'>
     <div class='row'>
-        <div class='col-md-12'>           
-            <div class="row mt-4">
-                <div class="col-md-6">
+        <div class='col-12'>
+            <div class="row g-2 mt-2">
+                <div class="col-12 col-lg-6">
                     <div class="card">
-                        <div class="card-header">
-                            <h5 class="mb-0"><i class="bi bi-camera-video"></i> Scanner</h5>
-                        </div>
                         <div class="card-body">
-                            <div class="mb-3">
-                                <button id="mode-toggle-btn" class="btn btn-success w-100">
-                                    <i class="bi bi-check-circle-fill"></i> Modus: Auto-Einlösung
+                            <div class="scanner-toolbar">
+                                <button id="mode-toggle-btn" class="btn btn-success">
+                                    <i class="bi bi-check-circle-fill"></i> Auto-Einlösung
                                 </button>
-                                <!-- <small class="text-muted d-block mt-2" id="mode-description">
-                                    Tickets werden automatisch beim Scannen eingelöst
-                                </small> -->
+                                <button id="fullscreen-btn" class="btn btn-outline-secondary flex-grow-0" title="Vollbild">
+                                    <i class="bi bi-arrows-fullscreen"></i>
+                                </button>
                             </div>
                             <div id="scanner-container">
-                                <video id="scanner-video" style="display: block;"></video>
+                                <video id="scanner-video"></video>
                                 <div class="scanner-overlay"></div>
                             </div>
-                            
-                            <div class="mt-3 text-center">
-                                <button id="start-scanner-btn" class="btn btn-primary btn-lg">
+
+                            <div class="mt-2 text-center">
+                                <button id="start-scanner-btn" class="btn btn-primary btn-lg w-100">
                                     <i class="bi bi-camera"></i> Scanner starten
                                 </button>
                             </div>
-                            
-                            <!-- <div class="mt-3 text-center" id="scanner-status">
-                                <span class="text-muted"><i class="bi bi-camera-video-off"></i> Scanner gestoppt</span>
-                            </div> -->
                         </div>
                     </div>
-                    
-                    <!-- <div class="card mt-3">
-                        <div class="card-body">
-                            <button id="undo-redemption-btn" class="btn btn-warning w-100">
-                                <i class="bi bi-arrow-counterclockwise"></i> Letzte Einlösung rückgängig machen
-                            </button>
-                            <small class="text-muted d-block mt-2">
-                                Macht die zuletzt von dir eingelöste Ticket-Einlösung rückgängig
-                            </small>
-                        </div>
-                    </div> -->
                 </div>
-                
-                <div class="col-md-6">
+
+                <div class="col-12 col-lg-6">
                     <div class="card">
-                        <div class="card-header">
-                            <h5 class="mb-0"><i class="bi bi-info-circle"></i> Ticket-Informationen</h5>
-                        </div>
                         <div class="card-body">
                             <div id="ticket-info">
-                                <div class="text-center text-muted py-5">
-                                    <i class="bi bi-qr-code" style="font-size: 3rem;"></i>
-                                    <p class="mt-3">Scanne ein Ticket, um Details anzuzeigen</p>
+                                <div class="text-center text-muted py-4">
+                                    <i class="bi bi-qr-code" style="font-size: 2.5rem;"></i>
+                                    <p class="mt-2 mb-0">Scanne ein Ticket, um Details anzuzeigen</p>
                                 </div>
                             </div>
-                            <div class="mb-3">
-                                <button id="undo-redemption-btn" class="btn btn-warning w-100">
+                            <div class="mt-2">
+                                <button id="undo-redemption-btn" class="btn btn-warning btn-sm w-100">
                                     <i class="bi bi-arrow-counterclockwise"></i> Letzte Einlösung rückgängig machen
                                 </button>
                             </div>
