@@ -166,6 +166,10 @@ class Main < Sinatra::Base
                 admin_items << {label: 'Jahrbuch verwalten', icon: 'bi-book', url: '/jahrbuch_manage'}
             end
 
+            if user_has_permission?("yearbook_manage")
+                admin_items << {label: 'Jahrbuch-Vorlage', icon: 'bi-layout-text-window-reverse', url: '/jahrbuch_template_edit'}
+            end
+
             if user_has_permission?("admin")
                 admin_items << {label: 'Administration', icon: 'bi-gear', url: '/admin'}
             end

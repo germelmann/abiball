@@ -1,0 +1,12 @@
+{
+  "name": "abiball-yearbook-pdfme",
+  "version": "1.0.0",
+  "private": true,
+  "description": "pdfme runtime for yearbook PDF generation",
+  "dependencies": {
+    "@pdfme/common": "^5.0.0",
+    "@pdfme/generator": "^5.0.0",
+    "@pdfme/schemas": "^5.0.0",
+    "pdf-lib": "^1.17.1"
+  }
+}

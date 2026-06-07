@@ -65,6 +65,24 @@
                     </p>
                     <div class="alert alert-info py-2 mb-3" id="yearbook_name_hint" style="display:none;"></div>
                     <div id="profile_fields_container"></div>
+
+                    <hr>
+                    <div class="d-flex align-items-center gap-3 flex-wrap" id="accent_color_row">
+                        <div class="flex-shrink-0">
+                            <label for="accent_color_input" class="form-label mb-0">
+                                <i class="bi bi-droplet-half"></i> <strong>Akzentfarbe</strong>
+                            </label>
+                            <div class="text-body-secondary small">
+                                Wird in der Jahrbuch-Vorlage als Hintergrund-/Akzentfarbe deiner Seite verwendet.
+                            </div>
+                        </div>
+                        <input type="color" class="form-control form-control-color" id="accent_color_input" value="#0d6efd" title="Akzentfarbe wählen">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="accent_color_reset" title="Auf Standard zurücksetzen">
+                            <i class="bi bi-arrow-counterclockwise"></i> Standard
+                        </button>
+                        <span class="small text-body-secondary" id="accent_color_status"></span>
+                    </div>
+
                     <div id="profile_save_status" class="mt-2"></div>
                 </div>
             </div>
@@ -332,11 +350,63 @@ function renderYearbook() {
     renderProfileFields();
     renderQuestions();
     updateYearbookNameHint();
+    loadAccentColor();
     // Load comments in background to update badge (personal mode only)
     if (!viewUsername) {
         loadReceivedCommentsBadge();
     }
 }
+
+// ─────────────────── Akzentfarbe ───────────────────
+
+let defaultAccentColor = '#0d6efd';
+
+function setAccentStatus(text, kind) {
+    const el = document.getElementById('accent_color_status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.style.color = kind === 'error' ? 'var(--bs-danger)' :
+                     kind === 'ok'    ? 'var(--bs-success)' : '';
+}
+
+function loadAccentColor() {
+    const params = viewUsername ? { target_username: viewUsername } : {};
+    api_call('/api/yearbook/accent_color/get', params, function(data) {
+        if (!data || !data.success) return;
+        defaultAccentColor = data.default_color || defaultAccentColor;
+        const input = document.getElementById('accent_color_input');
+        if (input) input.value = data.color || defaultAccentColor;
+        // Lock the picker in read-only mode (yearbook_manage users keep edit rights).
+        const editable = !readOnlyMode;
+        if (input) input.disabled = !editable;
+        const reset = document.getElementById('accent_color_reset');
+        if (reset) reset.disabled = !editable;
+    });
+}
+
+function saveAccentColor(color) {
+    const params = { color: color };
+    if (viewUsername) params.target_username = viewUsername;
+    setAccentStatus('Speichere…');
+    api_call('/api/yearbook/accent_color/set', params, function(data) {
+        if (data && data.success) {
+            setAccentStatus('Gespeichert', 'ok');
+            setTimeout(function() { setAccentStatus(''); }, 1500);
+        } else {
+            setAccentStatus('Fehler: ' + ((data && data.error) || 'unbekannt'), 'error');
+        }
+    });
+}
+
+$(document).on('change', '#accent_color_input', function() {
+    saveAccentColor(this.value);
+});
+$(document).on('click', '#accent_color_reset', function() {
+    const input = document.getElementById('accent_color_input');
+    if (!input || input.disabled) return;
+    input.value = defaultAccentColor;
+    saveAccentColor(defaultAccentColor);
+});
 
 
 // ─────────────────── Steckbrief ───────────────────

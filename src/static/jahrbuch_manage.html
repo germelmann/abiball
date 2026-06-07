@@ -65,6 +65,7 @@
                                     <th>Name</th>
                                     <th>Benutzername</th>
                                     <th>Fortschritt</th>
+                                    <th title="Akzentfarbe der Schüler-Jahrbuchseite">Farbe</th>
                                     <th>Aktionen</th>
                                 </tr>
                             </thead>
@@ -116,6 +117,8 @@ let manageQuestions = [];
 let manageProfileFields = [];
 let allUserAnswers = {};
 let allProfiles = [];
+let accentColors = {};        // username -> "#rrggbb"
+let defaultAccentColor = '#0d6efd';
 let attributedAnonymous = {};
 let allowDeleteAll = false;
 let isManage = false;
@@ -181,7 +184,13 @@ function loadManageData() {
                 if (configData.success) {
                     manageProfileFields = configData.profile_fields || [];
                 }
-                renderManageView();
+                api_call('/api/yearbook/template/accent_colors', {}, function(colorData) {
+                    if (colorData && colorData.success) {
+                        accentColors = colorData.colors || {};
+                        defaultAccentColor = colorData.default_color || defaultAccentColor;
+                    }
+                    renderManageView();
+                }, function() { renderManageView(); });
             }, function() {
                 renderManageView();
             });
@@ -245,6 +254,23 @@ function renderManageProfiles() {
             '</div>'
         );
         tr.append(progressCell);
+
+        // Accent colour swatch — yearbook_manage can edit inline, yearbook_view sees read-only.
+        const accentCell = $('<td>');
+        const accentInput = $('<input type="color" class="form-control form-control-color form-control-sm" style="width: 44px; height: 28px; padding: 2px;">')
+            .val(accentColors[profile.username] || defaultAccentColor)
+            .attr('title', 'Akzentfarbe für ' + (profile.name || profile.username));
+        if (!isManage) accentInput.prop('disabled', true);
+        accentInput.on('change', function() {
+            const newColor = this.value;
+            api_call('/api/yearbook/accent_color/set',
+                { color: newColor, target_username: profile.username },
+                function(resp) {
+                    if (resp && resp.success) accentColors[profile.username] = newColor;
+                });
+        });
+        accentCell.append(accentInput);
+        tr.append(accentCell);
 
         const actions = $('<td class="d-flex gap-1 flex-wrap">');
 

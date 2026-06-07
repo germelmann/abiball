@@ -1,0 +1,1315 @@
+#{site_for_user_with_permission!("yearbook_manage")}
+
+<style>
+    .yb-designer-layout {
+        display: flex;
+        gap: 12px;
+        align-items: stretch;
+        height: calc(100vh - 130px);
+        padding: 0 12px 12px 12px;
+    }
+    .yb-sidebar {
+        width: 290px;
+        flex: 0 0 290px;
+        overflow-y: auto;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 6px;
+        padding: 10px;
+        background: var(--bs-tertiary-bg);
+    }
+    .yb-canvas {
+        flex: 1 1 auto;
+        min-width: 0;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 6px;
+        background: #fff;
+        overflow: hidden;
+        position: relative;
+    }
+    .yb-designer-mount {
+        width: 100%;
+        height: 100%;
+    }
+    .yb-field-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-bottom: 6px;
+        padding: 6px 8px;
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color-translucent);
+        border-radius: 4px;
+    }
+    .yb-field-row .yb-label {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.9rem;
+    }
+    .yb-field-row .yb-type {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        color: var(--bs-secondary-color);
+    }
+    .yb-toolbar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--bs-border-color-translucent);
+    }
+    .yb-toolbar .yb-sep {
+        width: 1px;
+        align-self: stretch;
+        background: var(--bs-border-color);
+        margin: 0 4px;
+    }
+    .yb-status {
+        font-size: 0.85rem;
+        color: var(--bs-secondary-color);
+    }
+    .yb-variant-bar {
+        background: var(--bs-tertiary-bg);
+    }
+    .yb-assign-table input[type="color"] {
+        width: 40px;
+        height: 28px;
+        padding: 0;
+        border: 1px solid var(--bs-border-color);
+        background: transparent;
+    }
+</style>
+
+<div class="yb-toolbar yb-variant-bar">
+    <h1 class="mb-0 me-2" style="font-size: 1.3rem;">
+        <i class="bi bi-layout-text-window-reverse"></i> Jahrbuch-Vorlage
+    </h1>
+    <span class="yb-sep"></span>
+    <label class="form-label mb-0 small">Variante</label>
+    <select class="form-select form-select-sm" id="yb_variant_select" style="width: 220px;"></select>
+    <input type="text" class="form-control form-control-sm" id="yb_variant_name" placeholder="Variantenname" style="width: 200px;">
+    <label class="form-label mb-0 small">Fotos</label>
+    <select class="form-select form-select-sm" id="yb_variant_photo_count" style="width: 130px;">
+        <option value="">beliebig</option>
+        <option value="0">0 Fotos</option>
+        <option value="1">1 Foto</option>
+        <option value="2">2 Fotos</option>
+        <option value="3">3 Fotos</option>
+        <option value="4">4 Fotos</option>
+        <option value="5">5 Fotos</option>
+    </select>
+    <label class="form-label mb-0 small">Hintergrund-PDF</label>
+    <select class="form-select form-select-sm" id="yb_variant_background" style="width: 200px;">
+        <option value="">— keiner —</option>
+    </select>
+    <button type="button" class="btn btn-outline-success btn-sm" id="yb_variant_add" title="Neue Variante">
+        <i class="bi bi-plus-lg"></i>
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="yb_variant_duplicate" title="Aktuelle Variante duplizieren">
+        <i class="bi bi-files"></i>
+    </button>
+    <button type="button" class="btn btn-outline-danger btn-sm" id="yb_variant_delete" title="Variante löschen">
+        <i class="bi bi-trash"></i>
+    </button>
+</div>
+
+<div class="yb-toolbar">
+    <button type="button" class="btn btn-primary" id="yb_save_btn">
+        <i class="bi bi-save"></i> Speichern
+    </button>
+    <span class="yb-sep"></span>
+    <select class="form-select" id="yb_preview_user" style="max-width: 280px;">
+        <option value="">— Schüler/in für Vorschau wählen —</option>
+    </select>
+    <button type="button" class="btn btn-outline-primary" id="yb_preview_btn" disabled>
+        <i class="bi bi-file-earmark-pdf"></i> Vorschau
+    </button>
+    <a href="/api/yearbook/export_pdf" class="btn btn-outline-secondary" target="_blank" title="Alle Schüler als PDF exportieren">
+        <i class="bi bi-file-earmark-pdf-fill"></i> Komplettes PDF
+    </a>
+    <span class="yb-sep"></span>
+    <button type="button" class="btn btn-outline-info" id="yb_assign_btn" title="Schüler-Vorlagen-Zuweisungen verwalten">
+        <i class="bi bi-people"></i> Schüler-Zuweisungen
+    </button>
+    <span class="yb-status ms-auto" id="yb_status"></span>
+</div>
+
+<div class="yb-designer-layout">
+    <div class="yb-sidebar">
+        <h6 class="mb-2"><i class="bi bi-plus-square"></i> Felder hinzufügen</h6>
+        <div class="text-body-secondary small mb-2">
+            Klick auf ein Feld, um es auf die aktuelle Variante zu legen.
+            Der Eintrag <em>Steckbrief-Block</em> rendert alle ausgefüllten Felder
+            ohne Lücken untereinander.
+        </div>
+        <div id="yb_field_list">
+            <div class="text-body-secondary small">Felder werden geladen…</div>
+        </div>
+
+        <h6 class="mt-4 mb-2"><i class="bi bi-droplet-half"></i> Akzentfarbe</h6>
+        <div class="text-body-secondary small mb-2">
+            Die Akzentfarbe wird pro Schüler:in gesetzt und zur Render-Zeit
+            in die Farb-Eigenschaften der unten platzierten Elemente eingesetzt.
+        </div>
+        <div class="d-flex gap-1 mb-3 flex-wrap">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="yb_accent_bg"
+                title="Vollflächiges farbiges Rechteck als Hintergrund">
+                <i class="bi bi-square-fill"></i> Hintergrund
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="yb_accent_strip"
+                title="Schmaler Akzentstreifen oben">
+                <i class="bi bi-dash-lg"></i> Streifen
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="yb_accent_rect"
+                title="Frei platzierbares farbiges Rechteck">
+                <i class="bi bi-bounding-box"></i> Rechteck
+            </button>
+        </div>
+
+        <h6 class="mt-2 mb-2"><i class="bi bi-list-task"></i> Blöcke</h6>
+        <div class="text-body-secondary small mb-2">
+            Ein Block ist ein Bereich, in dem ausgewählte Felder oder Kommentare ohne Lücken
+            untereinander erscheinen. Konfiguration über das Zahnrad.
+        </div>
+        <div class="d-flex gap-1 mb-2 flex-wrap">
+            <button type="button" class="btn btn-sm btn-outline-success" id="yb_add_field_block">
+                <i class="bi bi-plus-lg"></i> Feldblock
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-success" id="yb_add_comments_block">
+                <i class="bi bi-plus-lg"></i> Kommentar-Block
+            </button>
+        </div>
+        <div id="yb_block_list">
+            <div class="text-body-secondary small">Noch keine Blöcke.</div>
+        </div>
+
+        <h6 class="mt-4 mb-2"><i class="bi bi-images"></i> Bilder / Assets</h6>
+        <div class="text-body-secondary small mb-2">
+            Dateien im Ordner <code>src/static/include/yearbook_assets/</code>.
+        </div>
+        <div id="yb_asset_list">
+            <div class="text-body-secondary small">—</div>
+        </div>
+
+        <h6 class="mt-4 mb-2"><i class="bi bi-fonts"></i> Schriftarten</h6>
+        <div class="text-body-secondary small mb-2" id="yb_font_summary">
+            Lege <code>.ttf</code>/<code>.otf</code>-Dateien in
+            <code>src/static/include/yearbook_fonts/</code> ab — sie tauchen dann automatisch
+            im Schrift-Dropdown der Textelemente auf.
+        </div>
+    </div>
+    <div class="yb-canvas">
+        <div id="yb_designer" class="yb-designer-mount"></div>
+    </div>
+</div>
+
+<!-- Block-Konfigurations-Modal -->
+<div class="modal fade" id="yb_block_modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-sliders"></i> <span id="yb_block_modal_title">Block</span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="yb_block_modal_body">
+                <!-- populated by JS -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+                <button type="button" class="btn btn-primary" id="yb_block_save_btn">Übernehmen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Schüler-Zuweisungen Modal -->
+<div class="modal fade" id="yb_assign_modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-people"></i> Schüler-Vorlagen-Zuweisungen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-body-secondary small">
+                    Pro Schüler:in kann eine bestimmte Variante festgepinnt werden — sonst wird
+                    automatisch eine zur Fotoanzahl passende gewählt (bei mehreren eine deterministisch
+                    zufällige). Die Akzentfarbe kann hier auch direkt angepasst werden; speichert sofort.
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover yb-assign-table">
+                        <thead>
+                            <tr>
+                                <th>Schüler:in</th>
+                                <th class="text-center">Fotos</th>
+                                <th>Variante</th>
+                                <th>Akzentfarbe</th>
+                            </tr>
+                        </thead>
+                        <tbody id="yb_assign_tbody">
+                            <tr><td colspan="4" class="text-body-secondary small">Lade…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!--
+  pdfme is loaded as native ES modules via an import map. @pdfme/schemas does not ship a
+  UMD bundle, and @pdfme/ui's "umd" file is really an IIFE that only attaches to
+  globalThis["@pdfme/ui"] without resolving its peer dependencies. esm.sh transforms the
+  npm packages on the fly and resolves the React/antd/etc. transitive deps for us.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "@pdfme/ui":      "https://esm.sh/@pdfme/ui@5?bundle",
+    "@pdfme/schemas": "https://esm.sh/@pdfme/schemas@5",
+    "@pdfme/common":  "https://esm.sh/@pdfme/common@5"
+  }
+}
+</script>
+
+<script type="module">
+import { Designer } from '@pdfme/ui';
+import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
+
+(function () {
+    'use strict';
+
+    const BASE_PDF = { width: 210, height: 297, padding: [0, 0, 0, 0] };
+    const ACCENT_PLACEHOLDER = '#FF00FF'; // visible-but-unmistakable design-time colour
+
+    let designer = null;
+    let availableFields = [];
+    let availableBlockFields = [];   // [{id, label, source}] — eligible for fields blocks
+    let availableAssets = [];
+    let availableBackgrounds = [];   // [{filename, url}]
+    const backgroundDataUrlCache = {}; // filename -> "data:application/pdf;base64,..."
+    let availableFonts = [];
+    let pdfmeFontRegistry = null;
+    let assetCounter = 0;
+    let accentCounter = 0;
+    let blockCounter = 0;
+
+    let variantSet = { version: 2, variants: [] };
+    let currentVariantId = null;
+
+    function setStatus(text, kind) {
+        const el = document.getElementById('yb_status');
+        if (!el) return;
+        el.textContent = text || '';
+        el.style.color = kind === 'error' ? 'var(--bs-danger)' : '';
+    }
+
+    function pdfmePlugins() { return { text, image, line, rectangle, ellipse }; }
+
+    function genId() { return 'v_' + Math.random().toString(36).slice(2, 10); }
+
+    function currentVariant() {
+        return variantSet.variants.find(function (v) { return v.id === currentVariantId; });
+    }
+
+    function ensureDefaultTemplate() {
+        return { basePdf: BASE_PDF, schemas: [[]] };
+    }
+
+    // ---------- variant bar -------------------------------------------------
+
+    function renderVariantBar() {
+        const sel = document.getElementById('yb_variant_select');
+        sel.innerHTML = '';
+        variantSet.variants.forEach(function (v) {
+            const opt = document.createElement('option');
+            opt.value = v.id;
+            const pc = (typeof v.photo_count === 'number') ? (' · ' + v.photo_count + ' Fotos') : ' · beliebig';
+            opt.textContent = (v.name || 'Unbenannt') + pc;
+            sel.appendChild(opt);
+        });
+        sel.value = currentVariantId || (variantSet.variants[0] && variantSet.variants[0].id);
+
+        const v = currentVariant();
+        document.getElementById('yb_variant_name').value = v ? (v.name || '') : '';
+        document.getElementById('yb_variant_photo_count').value =
+            v && typeof v.photo_count === 'number' ? String(v.photo_count) : '';
+        const bgSel = document.getElementById('yb_variant_background');
+        if (bgSel) bgSel.value = (v && v.background_pdf) ? v.background_pdf : '';
+        document.getElementById('yb_variant_delete').disabled = variantSet.variants.length <= 1;
+    }
+
+    function captureCurrentVariantFromDesigner() {
+        if (!designer) return;
+        const v = currentVariant();
+        if (!v) return;
+        v.template = designer.getTemplate();
+        // background_pdf is the source of truth for the file reference. The Designer
+        // expands basePdf to the inflated PDF bytes when previewing, but we never want
+        // those bytes in saved JSON — strip them back to the blank A4 object here.
+        if (v.background_pdf) {
+            v.template.basePdf = { width: 210, height: 297, padding: [0, 0, 0, 0] };
+        }
+        // Drop orphan block configs (block placeholder was deleted via pdfme's UI).
+        if (v.yearbook_blocks) {
+            const names = new Set();
+            (v.template.schemas || []).forEach(function (page) {
+                (page || []).forEach(function (e) { if (e && e.name) names.add(e.name); });
+            });
+            Object.keys(v.yearbook_blocks).forEach(function (k) {
+                if (!names.has(k)) delete v.yearbook_blocks[k];
+            });
+        }
+    }
+
+    // ---------- background PDFs --------------------------------------------
+
+    function fetchBackgroundDataUrl(filename) {
+        if (!filename) return Promise.resolve(null);
+        if (backgroundDataUrlCache[filename]) {
+            return Promise.resolve(backgroundDataUrlCache[filename]);
+        }
+        const meta = availableBackgrounds.find(function (b) { return b.filename === filename; });
+        if (!meta) return Promise.resolve(null);
+        return fetch(meta.url).then(function (res) {
+            if (!res.ok) throw new Error('background fetch failed: ' + meta.url);
+            return res.blob();
+        }).then(function (blob) {
+            return new Promise(function (resolve, reject) {
+                const reader = new FileReader();
+                reader.onloadend = function () { resolve(reader.result); };
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }).then(function (dataUrl) {
+            backgroundDataUrlCache[filename] = dataUrl;
+            return dataUrl;
+        });
+    }
+
+    // Inflate a variant's basePdf in place with its background-PDF bytes (or the blank
+    // basePdf object if no background is configured). Returns a Promise resolving to the
+    // template ready to hand to pdfme.
+    function templateForDesigner(variant) {
+        const tpl = variant.template || ensureDefaultTemplate();
+        if (!variant.background_pdf) return Promise.resolve(tpl);
+        return fetchBackgroundDataUrl(variant.background_pdf).then(function (dataUrl) {
+            if (dataUrl) tpl.basePdf = dataUrl;
+            return tpl;
+        }).catch(function (e) {
+            setStatus('Hintergrund-PDF konnte nicht geladen werden: ' + e.message, 'error');
+            return tpl;
+        });
+    }
+
+    function onBackgroundChanged(filename) {
+        const v = currentVariant();
+        if (!v) return;
+        captureCurrentVariantFromDesigner();
+        v.background_pdf = filename || null;
+        templateForDesigner(v).then(function (tpl) {
+            buildDesigner(tpl);
+            setStatus(filename ? ('Hintergrund "' + filename + '" geladen.') : 'Hintergrund entfernt.');
+        });
+    }
+
+    function renderBackgroundSelect() {
+        const sel = document.getElementById('yb_variant_background');
+        if (!sel) return;
+        sel.innerHTML = '';
+        const optNone = document.createElement('option');
+        optNone.value = ''; optNone.textContent = '— keiner —';
+        sel.appendChild(optNone);
+        availableBackgrounds.forEach(function (b) {
+            const o = document.createElement('option');
+            o.value = b.filename; o.textContent = b.filename;
+            sel.appendChild(o);
+        });
+        const v = currentVariant();
+        sel.value = (v && v.background_pdf) ? v.background_pdf : '';
+    }
+
+    function switchVariant(newId) {
+        if (newId === currentVariantId) return;
+        captureCurrentVariantFromDesigner();
+        currentVariantId = newId;
+        const v = currentVariant();
+        if (v) {
+            templateForDesigner(v).then(buildDesigner);
+        }
+        renderVariantBar();
+        renderBackgroundSelect();
+        renderBlockList();
+    }
+
+    function addVariant(seedTemplate) {
+        captureCurrentVariantFromDesigner();
+        const v = {
+            id: genId(),
+            name: 'Neue Variante',
+            photo_count: null,
+            template: seedTemplate ? JSON.parse(JSON.stringify(seedTemplate)) : ensureDefaultTemplate(),
+            background_pdf: null,
+        };
+        variantSet.variants.push(v);
+        currentVariantId = v.id;
+        templateForDesigner(v).then(buildDesigner);
+        renderVariantBar();
+        renderBackgroundSelect();
+        renderBlockList();
+    }
+
+    function deleteCurrentVariant() {
+        if (variantSet.variants.length <= 1) return;
+        if (!confirm('Variante wirklich löschen?')) return;
+        variantSet.variants = variantSet.variants.filter(function (v) { return v.id !== currentVariantId; });
+        currentVariantId = variantSet.variants[0].id;
+        templateForDesigner(currentVariant()).then(buildDesigner);
+        renderVariantBar();
+        renderBackgroundSelect();
+        renderBlockList();
+    }
+
+    // ---------- font loading ------------------------------------------------
+
+    function loadFontsIntoBrowser(fonts) {
+        availableFonts = fonts || [];
+        const registry = {};
+        return Promise.all(availableFonts.map(function (f, idx) {
+            return fetch(f.url).then(function (res) {
+                if (!res.ok) throw new Error('font fetch failed: ' + f.url);
+                return res.arrayBuffer();
+            }).then(function (buf) {
+                registry[f.name] = { data: buf, fallback: (idx === 0) };
+                try {
+                    const face = new FontFace(f.name, buf);
+                    return face.load().then(function (loaded) { document.fonts.add(loaded); });
+                } catch (_) { /* no-op */ }
+            }).catch(function (e) {
+                console.warn('[yearbook designer] Schriftart fehlgeschlagen:', f, e);
+            });
+        })).then(function () {
+            if (Object.keys(registry).length > 0) {
+                pdfmeFontRegistry = registry;
+                document.getElementById('yb_font_summary').innerHTML =
+                    'Geladene Schriftarten: ' +
+                    availableFonts.map(function (f) { return '<code>' + f.name + '</code>'; }).join(', ');
+            }
+        });
+    }
+
+    // ---------- asset placement --------------------------------------------
+
+    function fetchAsDataUrl(url) {
+        return fetch(url).then(function (r) {
+            if (!r.ok) throw new Error('asset fetch failed: ' + url);
+            return r.blob();
+        }).then(function (blob) {
+            return new Promise(function (resolve, reject) {
+                const reader = new FileReader();
+                reader.onloadend = function () { resolve(reader.result); };
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        });
+    }
+
+    function pushToCurrentPage(entry) {
+        if (!designer) return;
+        const tpl = designer.getTemplate();
+        const schemas = (tpl.schemas && tpl.schemas.length > 0) ? tpl.schemas : [[]];
+        const page0 = Array.isArray(schemas[0]) ? schemas[0].slice() : [];
+        page0.push(entry);
+        designer.updateTemplate(Object.assign({}, tpl, { schemas: [page0].concat(schemas.slice(1)) }));
+    }
+
+    function addAssetToTemplate(asset) {
+        if (!designer) return;
+        setStatus('Lade Bild …');
+        fetchAsDataUrl(asset.url).then(function (dataUrl) {
+            assetCounter += 1;
+            const safeName = ('_asset_' + assetCounter + '_' + asset.filename).replace(/[^A-Za-z0-9_.-]/g, '_');
+            pushToCurrentPage({
+                name: safeName, type: 'image',
+                position: { x: 0, y: 0 }, width: 60, height: 40,
+                content: dataUrl,
+            });
+            setStatus('Bild "' + asset.filename + '" hinzugefügt.');
+        }).catch(function (e) {
+            setStatus('Bild konnte nicht geladen werden: ' + e.message, 'error');
+        });
+    }
+
+    function renderAssetList() {
+        const wrap = document.getElementById('yb_asset_list');
+        wrap.innerHTML = '';
+        if (!availableAssets.length) {
+            wrap.innerHTML = '<div class="text-body-secondary small">Noch keine Bilder vorhanden.</div>';
+            return;
+        }
+        availableAssets.forEach(function (a) {
+            const row = document.createElement('div');
+            row.className = 'yb-field-row';
+            const thumb = document.createElement('img');
+            thumb.src = a.url;
+            thumb.alt = a.filename;
+            thumb.style.cssText = 'width:32px;height:32px;object-fit:contain;background:#fff;border:1px solid var(--bs-border-color-translucent);border-radius:2px;';
+            const label = document.createElement('div');
+            label.className = 'yb-label';
+            label.textContent = a.filename;
+            label.title = a.filename;
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-outline-primary';
+            btn.innerHTML = '<i class="bi bi-plus"></i>';
+            btn.title = 'Auf Seite einfügen';
+            btn.addEventListener('click', function () { addAssetToTemplate(a); });
+            row.appendChild(thumb); row.appendChild(label); row.appendChild(btn);
+            wrap.appendChild(row);
+        });
+    }
+
+    // ---------- accent elements --------------------------------------------
+
+    function nextAccentName() {
+        accentCounter += 1;
+        return '__accent_' + accentCounter;
+    }
+
+    function addAccentBackground() {
+        pushToCurrentPage({
+            name: nextAccentName(), type: 'rectangle',
+            position: { x: 0, y: 0 }, width: 210, height: 297,
+            color: ACCENT_PLACEHOLDER, borderColor: ACCENT_PLACEHOLDER, borderWidth: 0,
+        });
+        setStatus('Akzent-Hintergrund hinzugefügt (Farbe wird pro Schüler:in eingesetzt).');
+    }
+
+    function addAccentStrip() {
+        pushToCurrentPage({
+            name: nextAccentName(), type: 'rectangle',
+            position: { x: 0, y: 0 }, width: 210, height: 12,
+            color: ACCENT_PLACEHOLDER, borderColor: ACCENT_PLACEHOLDER, borderWidth: 0,
+        });
+        setStatus('Akzent-Streifen hinzugefügt.');
+    }
+
+    function addAccentRect() {
+        pushToCurrentPage({
+            name: nextAccentName(), type: 'rectangle',
+            position: { x: 20, y: 20 }, width: 60, height: 40,
+            color: ACCENT_PLACEHOLDER, borderColor: ACCENT_PLACEHOLDER, borderWidth: 0,
+        });
+        setStatus('Akzent-Rechteck hinzugefügt.');
+    }
+
+    // ---------- field & comment blocks -------------------------------------
+
+    // Block config lives on the variant (not inside the template) so pdfme's Designer
+    // never sees it and can't strip it during schema validation.
+    function currentBlocks() {
+        const v = currentVariant();
+        if (!v) return {};
+        if (!v.yearbook_blocks) v.yearbook_blocks = {};
+        return v.yearbook_blocks;
+    }
+
+    function nextBlockName(prefix) {
+        blockCounter += 1;
+        return prefix + '_' + blockCounter + '_' + Math.random().toString(36).slice(2, 6);
+    }
+
+    function defaultFieldBlockConfig() {
+        const labelFont = (availableFonts.find(function(f){ return /bold/i.test(f.name); }) || {}).name || '';
+        const valueFont = (availableFonts.find(function(f){ return /regular|book/i.test(f.name) || !/bold|italic/i.test(f.name); }) || {}).name || '';
+        return {
+            kind: 'fields',
+            fields: [],
+            show_labels: true,
+            label_inline: false,
+            label_font_name: labelFont,
+            value_font_name: valueFont,
+            font_size: 11,
+            line_height: 1.4,
+            entry_gap_mm: 1,
+        };
+    }
+
+    function defaultCommentsBlockConfig() {
+        const authorFont = (availableFonts.find(function(f){ return /bold/i.test(f.name); }) || {}).name || '';
+        const textFont = (availableFonts.find(function(f){ return /regular|book/i.test(f.name) || !/bold|italic/i.test(f.name); }) || {}).name || '';
+        return {
+            kind: 'comments',
+            include_pending: false,
+            show_author: true,
+            author_font_name: authorFont,
+            font_name: textFont,
+            font_size: 10,
+            line_height: 1.4,
+            entry_gap_mm: 2,
+        };
+    }
+
+    function placeholderTextForBlock(name, cfg) {
+        if (cfg.kind === 'comments') {
+            return '[Kommentar-Block]\n' +
+                   (cfg.show_author ? '— Absender' : '') +
+                   (cfg.include_pending ? ' (inkl. ausstehend)' : '');
+        }
+        const fieldList = (cfg.fields || []).map(function(fid) {
+            const f = availableBlockFields.find(function(x) { return x.id === fid; });
+            return f ? f.label : fid;
+        }).join(', ');
+        return '[Feldblock]\n' + (fieldList || '(noch keine Felder ausgewählt)');
+    }
+
+    function addFieldBlock() {
+        const name = nextBlockName('__fieldblock');
+        const cfg = defaultFieldBlockConfig();
+        currentBlocks()[name] = cfg;
+        pushToCurrentPage({
+            name: name, type: 'text',
+            position: { x: 10, y: 10 }, width: 90, height: 80,
+            fontSize: 11, fontColor: '#888888', alignment: 'left',
+            content: placeholderTextForBlock(name, cfg),
+            readOnly: true,
+        });
+        renderBlockList();
+        openBlockEditor(name);
+    }
+
+    function addCommentsBlock() {
+        const name = nextBlockName('__commentsblock');
+        const cfg = defaultCommentsBlockConfig();
+        currentBlocks()[name] = cfg;
+        pushToCurrentPage({
+            name: name, type: 'text',
+            position: { x: 10, y: 100 }, width: 90, height: 80,
+            fontSize: 10, fontColor: '#888888', alignment: 'left',
+            content: placeholderTextForBlock(name, cfg),
+            readOnly: true,
+        });
+        renderBlockList();
+        openBlockEditor(name);
+    }
+
+    function deleteBlock(name) {
+        if (!confirm('Block wirklich löschen?')) return;
+        delete currentBlocks()[name];
+        const tpl = designer.getTemplate();
+        const schemas = tpl.schemas || [];
+        const cleaned = schemas.map(function (page) {
+            return (page || []).filter(function (e) { return e.name !== name; });
+        });
+        designer.updateTemplate(Object.assign({}, tpl, { schemas: cleaned }));
+        renderBlockList();
+    }
+
+    function renderBlockList() {
+        const wrap = document.getElementById('yb_block_list');
+        if (!wrap) return;
+        wrap.innerHTML = '';
+        const blocks = currentBlocks();
+        const keys = Object.keys(blocks);
+        if (!keys.length) {
+            wrap.innerHTML = '<div class="text-body-secondary small">Noch keine Blöcke.</div>';
+            return;
+        }
+        keys.forEach(function (name) {
+            const cfg = blocks[name];
+            const row = document.createElement('div');
+            row.className = 'yb-field-row';
+            const label = document.createElement('div');
+            label.className = 'yb-label';
+            label.textContent = (cfg.kind === 'comments' ? 'Kommentare' : 'Felder');
+            label.title = name;
+            const typ = document.createElement('span');
+            typ.className = 'yb-type';
+            typ.textContent = cfg.kind === 'comments' ? 'Komm.' : 'Felder';
+            const editBtn = document.createElement('button');
+            editBtn.className = 'btn btn-sm btn-outline-secondary';
+            editBtn.innerHTML = '<i class="bi bi-gear"></i>';
+            editBtn.title = 'Konfigurieren';
+            editBtn.addEventListener('click', function () { openBlockEditor(name); });
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-sm btn-outline-danger';
+            delBtn.innerHTML = '<i class="bi bi-trash"></i>';
+            delBtn.title = 'Block löschen';
+            delBtn.addEventListener('click', function () { deleteBlock(name); });
+            row.appendChild(label); row.appendChild(typ);
+            row.appendChild(editBtn); row.appendChild(delBtn);
+            wrap.appendChild(row);
+        });
+    }
+
+    function updateBlockPlaceholderText(name) {
+        if (!designer) return;
+        const cfg = currentBlocks()[name];
+        if (!cfg) return;
+        const tpl = designer.getTemplate();
+        let changed = false;
+        const schemas = (tpl.schemas || []).map(function (page) {
+            return (page || []).map(function (e) {
+                if (e.name === name) {
+                    changed = true;
+                    return Object.assign({}, e, { content: placeholderTextForBlock(name, cfg) });
+                }
+                return e;
+            });
+        });
+        if (changed) designer.updateTemplate(Object.assign({}, tpl, { schemas: schemas }));
+    }
+
+    function buildFontSelect(currentValue) {
+        const sel = document.createElement('select');
+        sel.className = 'form-select form-select-sm';
+        const optDefault = document.createElement('option');
+        optDefault.value = '';
+        optDefault.textContent = '— Standard —';
+        sel.appendChild(optDefault);
+        availableFonts.forEach(function (f) {
+            const o = document.createElement('option');
+            o.value = f.name; o.textContent = f.name;
+            sel.appendChild(o);
+        });
+        sel.value = currentValue || '';
+        return sel;
+    }
+
+    let _blockModalCurrentName = null;
+
+    function openBlockEditor(name) {
+        const cfg = currentBlocks()[name];
+        if (!cfg) return;
+        _blockModalCurrentName = name;
+        document.getElementById('yb_block_modal_title').textContent =
+            (cfg.kind === 'comments' ? 'Kommentar-Block bearbeiten' : 'Feldblock bearbeiten');
+
+        const body = document.getElementById('yb_block_modal_body');
+        body.innerHTML = '';
+
+        if (cfg.kind === 'fields') {
+            body.appendChild(buildFieldsBlockForm(cfg));
+        } else {
+            body.appendChild(buildCommentsBlockForm(cfg));
+        }
+
+        const modal = new bootstrap.Modal(document.getElementById('yb_block_modal'));
+        modal.show();
+    }
+
+    function buildFieldsBlockForm(cfg) {
+        const wrap = document.createElement('div');
+
+        // Field picker with reorder buttons. We render the SELECTED list first (in order)
+        // and the UNSELECTED list below — admins toggle / reorder by clicking.
+        const fieldsLabel = document.createElement('label');
+        fieldsLabel.className = 'form-label fw-semibold mt-2';
+        fieldsLabel.textContent = 'Felder im Block (Reihenfolge bestimmt die Render-Reihenfolge)';
+        wrap.appendChild(fieldsLabel);
+
+        const fieldsBox = document.createElement('div');
+        fieldsBox.className = 'border rounded p-2 mb-3';
+        fieldsBox.style.maxHeight = '260px';
+        fieldsBox.style.overflowY = 'auto';
+        wrap.appendChild(fieldsBox);
+
+        function rerenderFieldsBox() {
+            fieldsBox.innerHTML = '';
+            const selected = (cfg.fields || []).slice();
+            const all = availableBlockFields.slice();
+            const unselectedIds = all.map(function(f){ return f.id; }).filter(function(id){
+                return selected.indexOf(id) === -1;
+            });
+
+            if (selected.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'text-body-secondary small';
+                empty.textContent = '— noch keine Felder ausgewählt —';
+                fieldsBox.appendChild(empty);
+            }
+
+            selected.forEach(function (id, idx) {
+                const meta = availableBlockFields.find(function(x){ return x.id === id; });
+                if (!meta) return;
+                const row = document.createElement('div');
+                row.className = 'd-flex align-items-center gap-1 py-1 border-bottom';
+
+                const up = document.createElement('button');
+                up.className = 'btn btn-sm btn-outline-secondary';
+                up.innerHTML = '<i class="bi bi-arrow-up"></i>';
+                up.disabled = idx === 0;
+                up.addEventListener('click', function() {
+                    [cfg.fields[idx-1], cfg.fields[idx]] = [cfg.fields[idx], cfg.fields[idx-1]];
+                    rerenderFieldsBox();
+                });
+
+                const down = document.createElement('button');
+                down.className = 'btn btn-sm btn-outline-secondary';
+                down.innerHTML = '<i class="bi bi-arrow-down"></i>';
+                down.disabled = idx === selected.length - 1;
+                down.addEventListener('click', function() {
+                    [cfg.fields[idx], cfg.fields[idx+1]] = [cfg.fields[idx+1], cfg.fields[idx]];
+                    rerenderFieldsBox();
+                });
+
+                const lbl = document.createElement('div');
+                lbl.className = 'flex-grow-1 small';
+                lbl.textContent = meta.label;
+                lbl.title = meta.label;
+
+                const rm = document.createElement('button');
+                rm.className = 'btn btn-sm btn-outline-danger';
+                rm.innerHTML = '<i class="bi bi-x-lg"></i>';
+                rm.addEventListener('click', function() {
+                    cfg.fields.splice(idx, 1);
+                    rerenderFieldsBox();
+                });
+
+                row.appendChild(up); row.appendChild(down);
+                row.appendChild(lbl); row.appendChild(rm);
+                fieldsBox.appendChild(row);
+            });
+
+            if (unselectedIds.length > 0) {
+                const sep = document.createElement('div');
+                sep.className = 'text-body-secondary small mt-2 mb-1';
+                sep.textContent = 'Verfügbar — klick zum Hinzufügen:';
+                fieldsBox.appendChild(sep);
+                unselectedIds.forEach(function (id) {
+                    const meta = availableBlockFields.find(function(x){ return x.id === id; });
+                    if (!meta) return;
+                    const btn = document.createElement('button');
+                    btn.className = 'btn btn-sm btn-outline-primary me-1 mb-1';
+                    btn.innerHTML = '<i class="bi bi-plus"></i> ' + escapeForHtml(meta.label);
+                    btn.addEventListener('click', function() {
+                        if (!cfg.fields) cfg.fields = [];
+                        cfg.fields.push(id);
+                        rerenderFieldsBox();
+                    });
+                    fieldsBox.appendChild(btn);
+                });
+            }
+        }
+        rerenderFieldsBox();
+
+        // Layout / format options
+        wrap.appendChild(makeFormCheckbox('Labels (Fragen) anzeigen', 'show_labels', cfg));
+        wrap.appendChild(makeFormCheckbox('Label und Wert in einer Zeile ("Label: Wert")', 'label_inline', cfg));
+
+        const fontRow = document.createElement('div');
+        fontRow.className = 'row g-2 mt-2';
+        fontRow.appendChild(makeFontFormCol(6, 'Label-Schrift (üblicherweise fett)', 'label_font_name', cfg));
+        fontRow.appendChild(makeFontFormCol(6, 'Wert-Schrift', 'value_font_name', cfg));
+        wrap.appendChild(fontRow);
+
+        const sizeRow = document.createElement('div');
+        sizeRow.className = 'row g-2 mt-2';
+        sizeRow.appendChild(makeFormNumCol(4, 'Schriftgröße (pt)', 'font_size', cfg, 0.5));
+        sizeRow.appendChild(makeFormNumCol(4, 'Zeilenhöhe', 'line_height', cfg, 0.1));
+        sizeRow.appendChild(makeFormNumCol(4, 'Abstand zw. Einträgen (mm)', 'entry_gap_mm', cfg, 0.5));
+        wrap.appendChild(sizeRow);
+
+        return wrap;
+    }
+
+    function buildCommentsBlockForm(cfg) {
+        const wrap = document.createElement('div');
+
+        const info = document.createElement('div');
+        info.className = 'text-body-secondary small mb-3';
+        info.innerHTML = 'Approved und (optional) ausstehende Kommentare werden in der Reihenfolge ihres Eingangs ' +
+                         'gerendert. Pro Kommentar erscheint optional eine kursivlose Absender-Zeile.';
+        wrap.appendChild(info);
+
+        wrap.appendChild(makeFormCheckbox('Auch ausstehende Kommentare anzeigen (sonst nur "angenommen")', 'include_pending', cfg));
+        wrap.appendChild(makeFormCheckbox('Absender-Namen anzeigen', 'show_author', cfg));
+
+        const fontRow = document.createElement('div');
+        fontRow.className = 'row g-2 mt-2';
+        fontRow.appendChild(makeFontFormCol(6, 'Schrift Kommentartext', 'font_name', cfg));
+        fontRow.appendChild(makeFontFormCol(6, 'Schrift Absender (üblicherweise fett)', 'author_font_name', cfg));
+        wrap.appendChild(fontRow);
+
+        const sizeRow = document.createElement('div');
+        sizeRow.className = 'row g-2 mt-2';
+        sizeRow.appendChild(makeFormNumCol(4, 'Schriftgröße (pt)', 'font_size', cfg, 0.5));
+        sizeRow.appendChild(makeFormNumCol(4, 'Zeilenhöhe', 'line_height', cfg, 0.1));
+        sizeRow.appendChild(makeFormNumCol(4, 'Abstand zw. Kommentaren (mm)', 'entry_gap_mm', cfg, 0.5));
+        wrap.appendChild(sizeRow);
+
+        return wrap;
+    }
+
+    function makeFormCheckbox(labelText, key, cfg) {
+        const wrap = document.createElement('div');
+        wrap.className = 'form-check mt-1';
+        const input = document.createElement('input');
+        input.type = 'checkbox'; input.className = 'form-check-input';
+        input.id = 'yb_blockcfg_' + key;
+        input.checked = cfg[key] !== false && cfg[key] !== undefined && cfg[key] !== null && cfg[key] !== '';
+        if (typeof cfg[key] === 'boolean') input.checked = cfg[key];
+        input.addEventListener('change', function() { cfg[key] = input.checked; });
+        const lbl = document.createElement('label');
+        lbl.className = 'form-check-label';
+        lbl.htmlFor = input.id;
+        lbl.textContent = labelText;
+        wrap.appendChild(input); wrap.appendChild(lbl);
+        return wrap;
+    }
+
+    function makeFontFormCol(cols, labelText, key, cfg) {
+        const col = document.createElement('div');
+        col.className = 'col-md-' + cols;
+        const lbl = document.createElement('label');
+        lbl.className = 'form-label small mb-1';
+        lbl.textContent = labelText;
+        col.appendChild(lbl);
+        const sel = buildFontSelect(cfg[key]);
+        sel.addEventListener('change', function() { cfg[key] = sel.value; });
+        col.appendChild(sel);
+        return col;
+    }
+
+    function makeFormNumCol(cols, labelText, key, cfg, step) {
+        const col = document.createElement('div');
+        col.className = 'col-md-' + cols;
+        const lbl = document.createElement('label');
+        lbl.className = 'form-label small mb-1';
+        lbl.textContent = labelText;
+        col.appendChild(lbl);
+        const inp = document.createElement('input');
+        inp.type = 'number'; inp.className = 'form-control form-control-sm';
+        inp.step = step || 1; inp.value = (cfg[key] !== undefined && cfg[key] !== null) ? cfg[key] : '';
+        inp.addEventListener('input', function() {
+            const v = parseFloat(inp.value);
+            cfg[key] = isFinite(v) ? v : cfg[key];
+        });
+        col.appendChild(inp);
+        return col;
+    }
+
+    function escapeForHtml(s) {
+        return String(s).replace(/[&<>"']/g, function(c){
+            return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c];
+        });
+    }
+
+    function attachBlockModalSave() {
+        document.getElementById('yb_block_save_btn').addEventListener('click', function() {
+            if (_blockModalCurrentName) {
+                updateBlockPlaceholderText(_blockModalCurrentName);
+                renderBlockList();
+                setStatus('Block-Konfiguration übernommen.');
+            }
+            const modalEl = document.getElementById('yb_block_modal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) modal.hide();
+        });
+    }
+
+    // When switching variants, the block list refreshes too.
+    function refreshAfterVariantSwitch() {
+        renderBlockList();
+    }
+
+    // ---------- field placement --------------------------------------------
+
+    function defaultSchemaForField(field, position) {
+        const x = position && typeof position.x === 'number' ? position.x : 10;
+        const y = position && typeof position.y === 'number' ? position.y : 10;
+        if (field.type === 'image') {
+            return { name: field.name, type: 'image',
+                     position: { x: x, y: y }, width: 60, height: 80, content: '' };
+        }
+        // The bio-block needs much more height than a normal text field.
+        const isBlock = (field.name === '__bio_block');
+        return {
+            name: field.name, type: 'text',
+            position: { x: x, y: y },
+            width:  isBlock ? 120 : 80,
+            height: isBlock ? 120 : 10,
+            fontSize: 11, fontColor: '#000000', alignment: 'left',
+            lineHeight: isBlock ? 1.4 : 1,
+            content: field.label || field.name,
+        };
+    }
+
+    function fieldAlreadyOnPage(name) {
+        if (!designer) return false;
+        const tpl = designer.getTemplate();
+        const schemas = (tpl && tpl.schemas) || [];
+        for (const page of schemas) {
+            if (!Array.isArray(page)) continue;
+            for (const entry of page) { if (entry && entry.name === name) return true; }
+        }
+        return false;
+    }
+
+    function addFieldToTemplate(field) {
+        if (!designer) return;
+        if (fieldAlreadyOnPage(field.name)) {
+            setStatus('"' + (field.label || field.name) + '" ist bereits auf der Seite.', 'info');
+            return;
+        }
+        const tpl = designer.getTemplate();
+        const schemas = (tpl.schemas && tpl.schemas.length > 0) ? tpl.schemas : [[]];
+        const page0 = Array.isArray(schemas[0]) ? schemas[0].slice() : [];
+        const offset = page0.length * 4;
+        page0.push(defaultSchemaForField(field, { x: 10 + offset, y: 10 + offset }));
+        designer.updateTemplate(Object.assign({}, tpl, { schemas: [page0].concat(schemas.slice(1)) }));
+        setStatus('"' + (field.label || field.name) + '" hinzugefügt.');
+    }
+
+    function renderFieldList() {
+        const wrap = document.getElementById('yb_field_list');
+        wrap.innerHTML = '';
+        if (!availableFields.length) {
+            wrap.innerHTML = '<div class="text-body-secondary small">Keine Felder konfiguriert.</div>';
+            return;
+        }
+        availableFields.forEach(function (f) {
+            const row = document.createElement('div');
+            row.className = 'yb-field-row';
+            const label = document.createElement('div');
+            label.className = 'yb-label';
+            label.textContent = f.label || f.name;
+            label.title = f.label || f.name;
+            const typ = document.createElement('span');
+            typ.className = 'yb-type';
+            typ.textContent = f.type === 'image' ? 'Bild' : 'Text';
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-outline-primary';
+            btn.innerHTML = '<i class="bi bi-plus"></i>';
+            btn.title = 'Auf Seite einfügen';
+            btn.addEventListener('click', function () { addFieldToTemplate(f); });
+            row.appendChild(label); row.appendChild(typ); row.appendChild(btn);
+            wrap.appendChild(row);
+        });
+    }
+
+    // ---------- designer mount ---------------------------------------------
+
+    function buildDesigner(template) {
+        if (!Designer) {
+            setStatus('pdfme konnte nicht geladen werden (Designer-Klasse fehlt).', 'error');
+            return;
+        }
+        const mount = document.getElementById('yb_designer');
+        if (designer) { try { designer.destroy(); } catch (_) {} }
+        mount.innerHTML = '';
+        const options = { lang: 'en' };
+        if (pdfmeFontRegistry) options.font = pdfmeFontRegistry;
+        designer = new Designer({
+            domContainer: mount,
+            template: template,
+            plugins: pdfmePlugins(),
+            options: options,
+        });
+    }
+
+    // ---------- data loading -----------------------------------------------
+
+    function loadFields() {
+        return new Promise(function (resolve, reject) {
+            api_call('/api/yearbook/template/fields', {}, function (data) {
+                if (!data || !data.success) return reject(data && data.error);
+                availableFields = data.fields || [];
+                availableBlockFields = data.block_fields || [];
+                availableAssets = data.assets || [];
+                availableBackgrounds = data.backgrounds || [];
+                loadFontsIntoBrowser(data.fonts || []).then(resolve, resolve);
+            });
+        });
+    }
+
+    function loadVariantSet() {
+        return new Promise(function (resolve, reject) {
+            api_call('/api/yearbook/template/get', {}, function (data) {
+                if (!data || !data.success) return reject(data && data.error);
+                const vs = data.variant_set || { version: 2, variants: [] };
+                if (!Array.isArray(vs.variants) || vs.variants.length === 0) {
+                    vs.variants = [{ id: 'default', name: 'Standard', photo_count: null, template: ensureDefaultTemplate() }];
+                }
+                variantSet = vs;
+                currentVariantId = vs.variants[0].id;
+                resolve();
+            });
+        });
+    }
+
+    function loadPreviewTargets() {
+        api_call('/api/yearbook/template/preview_targets', {}, function (data) {
+            if (!data || !data.success) return;
+            const sel = document.getElementById('yb_preview_user');
+            (data.users || []).forEach(function (u) {
+                const opt = document.createElement('option');
+                opt.value = u.username;
+                opt.textContent = u.display_name + ' (' + u.username + ')';
+                sel.appendChild(opt);
+            });
+        });
+    }
+
+    // ---------- Schüler-Zuweisungen modal -----------------------------------
+
+    function openAssignmentsModal() {
+        api_call('/api/yearbook/template/assignments', {}, function (data) {
+            if (!data || !data.success) {
+                setStatus('Zuweisungen konnten nicht geladen werden.', 'error');
+                return;
+            }
+            const tbody = document.getElementById('yb_assign_tbody');
+            tbody.innerHTML = '';
+            (data.users || []).forEach(function (u) {
+                const tr = document.createElement('tr');
+
+                const td1 = document.createElement('td');
+                td1.innerHTML = '<div>' + (u.display_name || '') + '</div>' +
+                                '<div class="text-body-secondary small">' + u.username + '</div>';
+                tr.appendChild(td1);
+
+                const td2 = document.createElement('td');
+                td2.className = 'text-center';
+                td2.textContent = u.photo_count;
+                tr.appendChild(td2);
+
+                const td3 = document.createElement('td');
+                const sel = document.createElement('select');
+                sel.className = 'form-select form-select-sm';
+                const optAuto = document.createElement('option');
+                optAuto.value = '';
+                optAuto.textContent = '— automatisch wählen —';
+                sel.appendChild(optAuto);
+                variantSet.variants.forEach(function (v) {
+                    const opt = document.createElement('option');
+                    opt.value = v.id;
+                    const pc = (typeof v.photo_count === 'number') ? (' · ' + v.photo_count + ' Fotos') : ' · beliebig';
+                    opt.textContent = (v.name || 'Unbenannt') + pc;
+                    sel.appendChild(opt);
+                });
+                sel.value = u.variant_id || '';
+                sel.addEventListener('change', function () {
+                    api_call('/api/yearbook/template/set_user_variant',
+                             { username: u.username, variant_id: sel.value }, function (resp) {
+                        if (!resp || !resp.success) setStatus('Zuweisung fehlgeschlagen.', 'error');
+                    });
+                });
+                td3.appendChild(sel);
+                tr.appendChild(td3);
+
+                const td4 = document.createElement('td');
+                const colorInput = document.createElement('input');
+                colorInput.type = 'color';
+                colorInput.value = u.accent_color || (data.default_accent_color || '#0d6efd');
+                colorInput.addEventListener('change', function () {
+                    api_call('/api/yearbook/accent_color/set',
+                             { color: colorInput.value, target_username: u.username }, function (resp) {
+                        if (!resp || !resp.success) setStatus('Akzentfarbe fehlgeschlagen.', 'error');
+                    });
+                });
+                td4.appendChild(colorInput);
+                tr.appendChild(td4);
+
+                tbody.appendChild(tr);
+            });
+            const modal = new bootstrap.Modal(document.getElementById('yb_assign_modal'));
+            modal.show();
+        });
+    }
+
+    // ---------- toolbar wiring ---------------------------------------------
+
+    function attachToolbar() {
+        document.getElementById('yb_variant_select').addEventListener('change', function (e) {
+            switchVariant(e.target.value);
+        });
+        document.getElementById('yb_variant_name').addEventListener('input', function (e) {
+            const v = currentVariant(); if (!v) return;
+            v.name = e.target.value;
+            renderVariantBar(); // refresh dropdown label
+        });
+        document.getElementById('yb_variant_photo_count').addEventListener('change', function (e) {
+            const v = currentVariant(); if (!v) return;
+            v.photo_count = e.target.value === '' ? null : parseInt(e.target.value, 10);
+            renderVariantBar();
+        });
+        document.getElementById('yb_variant_background').addEventListener('change', function (e) {
+            onBackgroundChanged(e.target.value || null);
+        });
+        document.getElementById('yb_variant_add').addEventListener('click', function () { addVariant(); });
+        document.getElementById('yb_variant_duplicate').addEventListener('click', function () {
+            captureCurrentVariantFromDesigner();
+            const v = currentVariant();
+            addVariant(v ? v.template : null);
+            const created = variantSet.variants[variantSet.variants.length - 1];
+            created.name = (v && v.name ? v.name : 'Variante') + ' (Kopie)';
+            created.photo_count = v ? v.photo_count : null;
+            renderVariantBar();
+        });
+        document.getElementById('yb_variant_delete').addEventListener('click', deleteCurrentVariant);
+
+        document.getElementById('yb_accent_bg').addEventListener('click', addAccentBackground);
+        document.getElementById('yb_accent_strip').addEventListener('click', addAccentStrip);
+        document.getElementById('yb_accent_rect').addEventListener('click', addAccentRect);
+
+        document.getElementById('yb_add_field_block').addEventListener('click', addFieldBlock);
+        document.getElementById('yb_add_comments_block').addEventListener('click', addCommentsBlock);
+        attachBlockModalSave();
+
+        document.getElementById('yb_save_btn').addEventListener('click', function () {
+            captureCurrentVariantFromDesigner();
+            setStatus('Speichere…');
+            api_call('/api/yearbook/template/save', { variant_set: variantSet }, function (data) {
+                if (data && data.success) {
+                    setStatus('Gespeichert (' + data.variant_count + ' Varianten, ' +
+                              new Date().toLocaleTimeString() + ').');
+                } else {
+                    setStatus('Fehler beim Speichern: ' + ((data && data.error) || 'unbekannt'), 'error');
+                }
+            });
+        });
+
+        const sel = document.getElementById('yb_preview_user');
+        const btn = document.getElementById('yb_preview_btn');
+        sel.addEventListener('change', function () { btn.disabled = !sel.value; });
+        btn.addEventListener('click', function () {
+            if (!sel.value) return;
+            // Persist current edits before previewing so the PDF reflects them.
+            captureCurrentVariantFromDesigner();
+            setStatus('Speichere vor Vorschau…');
+            api_call('/api/yearbook/template/save', { variant_set: variantSet }, function (data) {
+                if (data && data.success) {
+                    setStatus('');
+                    window.open('/api/yearbook/preview/' + encodeURIComponent(sel.value), '_blank');
+                } else {
+                    setStatus('Speichern fehlgeschlagen, Vorschau abgebrochen.', 'error');
+                }
+            });
+        });
+
+        document.getElementById('yb_assign_btn').addEventListener('click', openAssignmentsModal);
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        attachToolbar();
+        loadPreviewTargets();
+        Promise.all([loadFields(), loadVariantSet()]).then(function () {
+            renderFieldList();
+            renderAssetList();
+            renderVariantBar();
+            renderBackgroundSelect();
+            renderBlockList();
+            const v = currentVariant();
+            return templateForDesigner(v || { template: ensureDefaultTemplate() });
+        }).then(buildDesigner).catch(function (err) {
+            setStatus('Initialisierung fehlgeschlagen: ' + (err || ''), 'error');
+        });
+    });
+})();
+</script>
