@@ -3724,6 +3724,80 @@ class Main < Sinatra::Base
     end
 
     # ===========================================
+    # Seat Planning - Users and their participants (flat per row, grouped by user in Ruby)
+    # ===========================================
+    post "/api/get_seat_planning_data" do
+        require_user_with_permission!("seat_planning")
+        data = parse_request_data(optional_keys: [:event_id])
+
+        event_id = data[:event_id]
+        event_filter = (event_id && !event_id.to_s.empty?) ? "AND e.id = $event_id" : ""
+        query_params = (event_id && !event_id.to_s.empty?) ? { event_id: event_id } : {}
+
+        # Mirror the all_participants query: use a plain MATCH on Participant so the
+        # join is correct, then group by ordering user in Ruby.
+        rows = neo4j_query(<<~END_OF_QUERY, query_params)
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event)
+            MATCH (o)-[:INCLUDES]->(p:Participant)
+            WHERE p.name IS NOT NULL AND p.name <> ''
+            #{event_filter}
+            RETURN
+                u.username AS username,
+                u.name     AS user_name,
+                u.email    AS user_email,
+                u.phone    AS user_phone,
+                p.name     AS participant_name,
+                p.birthdate AS participant_birthdate,
+                e.id       AS event_id,
+                COALESCE(e.name, '') AS event_name,
+                e.start_datetime AS event_start_datetime
+            ORDER BY u.name, p.name
+        END_OF_QUERY
+
+        users_by_username = {}
+        rows.each do |row|
+            uname = row['username']
+            users_by_username[uname] ||= {
+                username:     uname,
+                name:         row['user_name'],
+                email:        row['user_email'],
+                phone:        row['user_phone'],
+                participants: []
+            }
+
+            birthdate = row['participant_birthdate']
+            reference_date = begin
+                event_start = row['event_start_datetime']
+                (event_start && !event_start.empty?) ? DateTime.parse(event_start).to_date : Date.today
+            rescue ArgumentError
+                Date.today
+            end
+            age = begin
+                birthdate ? calculate_age(birthdate, reference_date) : nil
+            rescue ArgumentError
+                nil
+            end
+            age_status = get_age_status(birthdate, reference_date)
+
+            users_by_username[uname][:participants] << {
+                name:         row['participant_name'],
+                birthdate:    birthdate,
+                age:          age,
+                age_category: age_status ? age_status[:category] : nil,
+                age_color:    age_status ? age_status[:color]    : nil,
+                event_id:     row['event_id'],
+                event_name:   row['event_name']
+            }
+        end
+
+        users = users_by_username.values
+            .each { |u| u[:participant_count] = u[:participants].size }
+            .sort_by { |u| (u[:name] || '').downcase }
+
+        respond(success: true, users: users)
+    end
+
+    # ===========================================
     # Dunning System (Mahnwesen) - Duration-based
     # ===========================================
 

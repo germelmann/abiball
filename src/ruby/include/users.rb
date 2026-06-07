@@ -13,6 +13,7 @@ class Main < Sinatra::Base
         { key: 'yearbook_view', icon: 'bi-book', label: 'Jahrbucheinträge ansehen', group: 'Jahrbuch', edit: false },
         { key: 'yearbook_manage', icon: 'bi-book', label: 'Jahrbucheinträge verwalten', group: 'Jahrbuch', edit: true },
         { key: 'view_logs', icon: 'bi-file-text', label: 'Logs ansehen', group: 'Admin', edit: false },
+        { key: 'seat_planning', icon: 'bi-diagram-3', label: 'Sitzplanung', group: 'Veranstaltung', edit: false },
         { key: 'admin', icon: 'bi-gear', label: 'Admin', group: 'Admin', edit: nil }
     ];
 
@@ -133,6 +134,7 @@ class Main < Sinatra::Base
             event << {label: 'Zahlungen',               icon: 'bi-cash-stack',    url: '/payments'}                if user_has_permission?("manage_orders")
             event << {label: 'Kassenprüfung',           icon: 'bi-calculator',    url: '/kassenpruefung'}          if user_has_permission?("manage_orders")
             event << {label: 'Ticket Scanner',          icon: 'bi-qr-code-scan',  url: '/ticket_scanner'}          if user_has_permission?("manage_orders")
+            event << {label: 'Sitzplanung',             icon: 'bi-diagram-3',     url: '/seat_planning'}           if user_has_permission?("seat_planning")
             groups << {label: 'Veranstaltung', icon: 'bi-calendar-event', items: event} unless event.empty?
 
             yearbook = []

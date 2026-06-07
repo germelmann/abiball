@@ -1,0 +1,262 @@
+#{site_for_user_with_permission!("seat_planning")}
+<div class='container'>
+    <h1><i class="bi bi-diagram-3"></i> Sitzplanung</h1>
+    <p class="text-muted">Übersicht aller bestellenden Nutzer und der Teilnehmer, die zu ihrem Konto gehören.</p>
+
+    <!-- Quick Navigation -->
+    <div class="mb-3">
+        <a href="/participants_management" class="btn btn-outline-success btn-sm">
+            <i class="bi bi-people"></i> Teilnehmerverwaltung
+        </a>
+        <a href="/order_management" class="btn btn-outline-info btn-sm">
+            <i class="bi bi-list-check"></i> Bestellungsmanagement
+        </a>
+    </div>
+
+    <!-- Filter Row -->
+    <div class='row mb-3 g-3 align-items-end'>
+        <div class='col-md-4'>
+            <label for="event_filter_select" class="form-label"><i class="bi bi-calendar-event"></i> Event-Filter:</label>
+            <select class="form-select" id="event_filter_select">
+                <option value="">Alle Events</option>
+            </select>
+        </div>
+        <div class='col-md-4'>
+            <label for="search_input" class="form-label"><i class="bi bi-search"></i> Suche (Nutzer / Teilnehmer):</label>
+            <input type="text" class="form-control" id="search_input" placeholder="Suchbegriff...">
+        </div>
+        <div class='col-md-4'>
+            <button class="btn btn-secondary" onclick="refresh()" title="Aktualisieren">
+                <i class="bi bi-arrow-clockwise"></i> Aktualisieren
+            </button>
+        </div>
+    </div>
+
+    <!-- Statistics -->
+    <div class='row mb-4'>
+        <div class="col-md-6">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h4 class="card-title mb-0" id="sp_stat_users">-</h4>
+                    <p class="card-text mb-0">Bestellende Nutzer</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h4 class="card-title mb-0" id="sp_stat_tickets">-</h4>
+                    <p class="card-text mb-0">Teilnehmer gesamt</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User -> participants list -->
+    <div id="seat_planning_container"></div>
+</div>
+
+<style>
+    .sp-group {
+        border: 1px solid var(--bs-border-color);
+        border-radius: 6px;
+        padding: 0.75rem 1rem;
+        margin-bottom: 0.75rem;
+        background-color: var(--bs-body-bg);
+    }
+    .sp-group-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.4rem;
+    }
+    .sp-group-title {
+        font-weight: 600;
+        font-size: 1rem;
+    }
+    .sp-group-title a {
+        text-decoration: none;
+        color: inherit;
+    }
+    .sp-group-title a:hover {
+        text-decoration: underline;
+    }
+    .sp-group-meta {
+        font-size: 0.85rem;
+        color: var(--bs-secondary-color);
+    }
+    .sp-participants {
+        margin: 0;
+        padding-left: 1.5rem;
+    }
+    .sp-participants li {
+        padding: 0.15rem 0;
+        font-size: 0.95rem;
+    }
+    .sp-participants li .badge {
+        margin-left: 0.4rem;
+        font-size: 0.7rem;
+        vertical-align: middle;
+    }
+    .sp-no-data {
+        text-align: center;
+        padding: 2rem;
+        color: var(--bs-secondary-color);
+    }
+</style>
+
+<script>
+    let allUsers = [];
+
+    function escapeHtml(s) {
+        if (s == null) return '';
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function ageBadgeClass(color) {
+        switch (color) {
+            case 'danger':  return 'bg-danger';
+            case 'warning': return 'bg-warning text-dark';
+            case 'info':    return 'bg-info text-dark';
+            case 'success': return 'bg-success';
+            default:        return 'bg-secondary';
+        }
+    }
+
+    function renderUsers(users) {
+        const $container = $('#seat_planning_container');
+        $container.empty();
+
+        if (!users || users.length === 0) {
+            $container.append('<div class="sp-no-data">Keine Nutzer mit Teilnehmern gefunden.</div>');
+            $('#sp_stat_users').text(0);
+            $('#sp_stat_tickets').text(0);
+            return;
+        }
+
+        let totalParticipants = 0;
+
+        users.forEach(function(u) {
+            totalParticipants += u.participants ? u.participants.length : 0;
+
+            let $group = $('<div class="sp-group">');
+
+            let header = '<div class="sp-group-header">'
+                + '<div class="sp-group-title">'
+                + '<i class="bi bi-person-circle"></i>&nbsp;'
+                + '<a href="/user/' + encodeURIComponent(u.username || '') + '" target="_blank">'
+                + escapeHtml(u.name || u.username || '-')
+                + '</a>'
+                + '</div>'
+                + '<div class="sp-group-meta">'
+                + escapeHtml(u.email || '')
+                + (u.phone ? ' &middot; ' + escapeHtml(u.phone) : '')
+                + ' &middot; <strong>' + (u.participants ? u.participants.length : 0) + '</strong> Teilnehmer'
+                + '</div>'
+                + '</div>';
+            $group.append(header);
+
+            if (u.participants && u.participants.length > 0) {
+                let $ul = $('<ul class="sp-participants">');
+                u.participants.forEach(function(p) {
+                    let badge = '';
+                    if (p.age != null) {
+                        badge = ' <span class="badge ' + ageBadgeClass(p.age_color) + '">'
+                            + p.age + ' J.' + (p.age_category ? ' &middot; ' + p.age_category : '')
+                            + '</span>';
+                    } else {
+                        badge = ' <span class="badge bg-secondary">Alter ?</span>';
+                    }
+                    $ul.append('<li>' + escapeHtml(p.name || '-') + badge + '</li>');
+                });
+                $group.append($ul);
+            } else {
+                $group.append('<div class="sp-group-meta">Keine Teilnehmer</div>');
+            }
+
+            $container.append($group);
+        });
+
+        $('#sp_stat_users').text(users.length);
+        $('#sp_stat_tickets').text(totalParticipants);
+    }
+
+    function filterAndRender() {
+        let term = ($('#search_input').val() || '').trim().toLowerCase();
+        if (!term) {
+            renderUsers(allUsers);
+            return;
+        }
+
+        let tokens = term.split(/\s+/);
+
+        let filtered = allUsers.map(function(u) {
+            let userBlob = [u.name, u.username, u.email, u.phone].filter(Boolean).join(' ').toLowerCase();
+
+            let matchingParticipants = (u.participants || []).filter(function(p) {
+                let blob = (userBlob + ' ' + (p.name || '')).toLowerCase();
+                return tokens.every(function(t) { return blob.indexOf(t) !== -1; });
+            });
+
+            if (matchingParticipants.length > 0) {
+                return Object.assign({}, u, { participants: matchingParticipants });
+            }
+
+            // Whole user matches (e.g. by email) → show all their participants
+            if (tokens.every(function(t) { return userBlob.indexOf(t) !== -1; })) {
+                return u;
+            }
+            return null;
+        }).filter(function(u) { return u !== null; });
+
+        renderUsers(filtered);
+    }
+
+    function refresh() {
+        let eventId = $('#event_filter_select').val();
+        let params = {};
+        if (eventId) params.event_id = eventId;
+
+        api_call('/api/get_seat_planning_data', params, function(data) {
+            if (!data.success) {
+                showTemplateModal('Fehler', 'Fehler beim Laden: ' + (data.error || 'Unbekannter Fehler'), 'OK', 'btn-primary', null, null, function() {});
+                return;
+            }
+            allUsers = data.users || [];
+            filterAndRender();
+        });
+    }
+
+    $(document).ready(function() {
+        api_call('/api/get_events', {}, function(data) {
+            if (data.success && data.events) {
+                data.events.forEach(function(event) {
+                    $('#event_filter_select').append(
+                        $('<option>').val(event.id).text(event.name || event.id)
+                    );
+                });
+            }
+            const urlParams = new URLSearchParams(window.location.search);
+            const eventIdParam = urlParams.get('event_id');
+            if (eventIdParam) {
+                $('#event_filter_select').val(eventIdParam);
+            }
+            refresh();
+        });
+
+        $('#event_filter_select').on('change', refresh);
+
+        let searchDebounce = null;
+        $('#search_input').on('input', function() {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(filterAndRender, 150);
+        });
+    });
+</script>
