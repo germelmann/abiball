@@ -1294,4 +1294,80 @@ class Main < Sinatra::Base
             "jahrbuch_export_#{Date.today}.csv"
         )
     end
+
+    # Build a ZIP archive (stored / no compression) from [name, bytes] pairs. Images are
+    # already compressed, so storing them keeps things simple and dependency-free.
+    def build_zip(files)
+        buf = "".b
+        central = "".b
+        files.each do |name, data|
+            data = data.to_s.b
+            name_b = name.to_s.b
+            crc = Zlib.crc32(data)
+            size = data.bytesize
+            offset = buf.bytesize
+            buf << [0x04034b50, 20, 0, 0, 0, 0, crc, size, size, name_b.bytesize, 0].pack('VvvvvvVVVvv')
+            buf << name_b << data
+            central << [0x02014b50, 20, 20, 0, 0, 0, 0, crc, size, size, name_b.bytesize, 0, 0, 0, 0, 0, offset].pack('VvvvvvvVVVvvvvvVV')
+            central << name_b
+        end
+        cd_offset = buf.bytesize
+        buf << central
+        buf << [0x06054b50, 0, 0, files.size, files.size, central.bytesize, cd_offset, 0].pack('VvvvvVVv')
+        buf
+    end
+
+    # Sanitize a string into a safe path segment for use inside the ZIP.
+    def sanitize_zip_name(name)
+        s = name.to_s.gsub(/[^a-zA-Z0-9 _\-]+/, '_').strip
+        s = s[0, 60].strip
+        s.empty? ? 'frage' : s
+    end
+
+    # Bulk download of all images uploaded for upload-type survey questions, collected as a
+    # ZIP with no attribution (folder = question text, files numbered sequentially). Works
+    # for anonymous and non-anonymous questions alike — no names are included either way.
+    get '/api/yearbook/export_survey_images' do
+        require_user!
+        require_yearbook_accessible!
+        require_user_with_permission!("yearbook_view")
+
+        upload_questions = yearbook_questions.select { |q| q[:type] == 'upload' }
+        assert(!upload_questions.empty?, "Keine Upload-Fragen konfiguriert")
+
+        files = []
+        used_folders = Hash.new(0)
+        upload_questions.each do |q|
+            field_id = q[:id]
+            rows = neo4j_query(<<~END_OF_QUERY, {field_id: field_id})
+                MATCH (:User)-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload {context: 'answer', field_id: $field_id})
+                WHERE up.mimetype STARTS WITH 'image/'
+                RETURN up.id AS id, up.original_filename AS filename
+                ORDER BY up.created_at
+            END_OF_QUERY
+
+            base_folder = sanitize_zip_name(q[:question].to_s.empty? ? field_id : q[:question])
+            used_folders[base_folder] += 1
+            folder = used_folders[base_folder] > 1 ? "#{base_folder}_#{used_folders[base_folder]}" : base_folder
+
+            idx = 0
+            rows.each do |r|
+                path = File.join(YEARBOOK_UPLOAD_PATH, "#{r['id']}_#{r['filename']}")
+                next unless File.exist?(path)
+                idx += 1
+                ext = File.extname(r['filename'].to_s)
+                ext = '.jpg' if ext.empty?
+                files << ["#{folder}/#{format('%03d', idx)}#{ext}", File.binread(path)]
+            end
+        end
+
+        assert(!files.empty?, "Keine Bilder vorhanden")
+
+        zip_bytes = build_zip(files)
+        respond_raw_with_mimetype_and_filename(
+            zip_bytes,
+            'application/zip',
+            "jahrbuch_umfrage_bilder_#{Date.today}.zip"
+        )
+    end
 end

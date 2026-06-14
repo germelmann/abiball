@@ -203,6 +203,9 @@
         <h6 class="mt-4 mb-2"><i class="bi bi-images"></i> Bilder / Assets</h6>
         <div class="text-body-secondary small mb-2">
             Dateien im Ordner <code>src/static/include/yearbook_assets/</code>.
+            <br><i class="bi bi-droplet-half text-warning"></i> = umfärbbar einfügen: Pixel in
+            der Platzhalterfarbe (PNG) werden pro Schüler:in durch die Akzentfarbe ersetzt.
+            Hochgeladene Fotos sind nie betroffen.
         </div>
         <div id="yb_asset_list">
             <div class="text-body-secondary small">—</div>
@@ -379,13 +382,19 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
             v.template.basePdf = { width: 210, height: 297, padding: [0, 0, 0, 0] };
         }
         // Drop orphan block configs (block placeholder was deleted via pdfme's UI).
+        const liveNames = new Set();
+        (v.template.schemas || []).forEach(function (page) {
+            (page || []).forEach(function (e) { if (e && e.name) liveNames.add(e.name); });
+        });
         if (v.yearbook_blocks) {
-            const names = new Set();
-            (v.template.schemas || []).forEach(function (page) {
-                (page || []).forEach(function (e) { if (e && e.name) names.add(e.name); });
-            });
             Object.keys(v.yearbook_blocks).forEach(function (k) {
-                if (!names.has(k)) delete v.yearbook_blocks[k];
+                if (!liveNames.has(k)) delete v.yearbook_blocks[k];
+            });
+        }
+        // Drop orphan recolor flags (image deleted via pdfme's UI).
+        if (v.recolor_images) {
+            Object.keys(v.recolor_images).forEach(function (k) {
+                if (!liveNames.has(k)) delete v.recolor_images[k];
             });
         }
     }
@@ -479,6 +488,7 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
             template: seedTemplate ? JSON.parse(JSON.stringify(seedTemplate)) : ensureDefaultTemplate(),
             background_pdf: null,
             accent_placeholder_hex: DEFAULT_ACCENT_PLACEHOLDER,
+            recolor_images: {},
         };
         variantSet.variants.push(v);
         currentVariantId = v.id;
@@ -563,7 +573,7 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
         designer.updateTemplate(Object.assign({}, tpl, { schemas: schemas }));
     }
 
-    function addAssetToTemplate(asset) {
+    function addAssetToTemplate(asset, recolor) {
         if (!designer) return;
         setStatus('Lade Bild …');
         fetchAsDataUrl(asset.url).then(function (dataUrl) {
@@ -574,7 +584,12 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
                 position: { x: 0, y: 0 }, width: 60, height: 40,
                 content: dataUrl,
             });
-            setStatus('Bild "' + asset.filename + '" hinzugefügt.');
+            if (recolor) {
+                currentRecolorImages()[safeName] = true;
+                setStatus('Bild "' + asset.filename + '" als umfärbbar hinzugefügt (Platzhalterfarbe wird pro Schüler:in ersetzt).');
+            } else {
+                setStatus('Bild "' + asset.filename + '" hinzugefügt.');
+            }
         }).catch(function (e) {
             setStatus('Bild konnte nicht geladen werden: ' + e.message, 'error');
         });
@@ -602,8 +617,13 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
             btn.className = 'btn btn-sm btn-outline-primary';
             btn.innerHTML = '<i class="bi bi-plus"></i>';
             btn.title = 'Auf Seite einfügen';
-            btn.addEventListener('click', function () { addAssetToTemplate(a); });
-            row.appendChild(thumb); row.appendChild(label); row.appendChild(btn);
+            btn.addEventListener('click', function () { addAssetToTemplate(a, false); });
+            const accentBtn = document.createElement('button');
+            accentBtn.className = 'btn btn-sm btn-outline-warning';
+            accentBtn.innerHTML = '<i class="bi bi-droplet-half"></i>';
+            accentBtn.title = 'Umfärbbar einfügen: Platzhalterfarbe in diesem Bild wird durch die Akzentfarbe ersetzt';
+            accentBtn.addEventListener('click', function () { addAssetToTemplate(a, true); });
+            row.appendChild(thumb); row.appendChild(label); row.appendChild(btn); row.appendChild(accentBtn);
             wrap.appendChild(row);
         });
     }
@@ -654,6 +674,14 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
         if (!v) return {};
         if (!v.yearbook_blocks) v.yearbook_blocks = {};
         return v.yearbook_blocks;
+    }
+
+    // Map of image schema names that opted in to accent-colour replacement.
+    function currentRecolorImages() {
+        const v = currentVariant();
+        if (!v) return {};
+        if (!v.recolor_images) v.recolor_images = {};
+        return v.recolor_images;
     }
 
     function nextBlockName(prefix) {

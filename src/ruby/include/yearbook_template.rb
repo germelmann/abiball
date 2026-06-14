@@ -1,14 +1,26 @@
 require 'base64'
+require 'chunky_png'
 require 'digest'
 require 'fileutils'
 require 'json'
 require 'open3'
+require 'zlib'
 
 class Main < Sinatra::Base
 
     YEARBOOK_TEMPLATE_PATH = '/raw/yearbook_template.json'
+    # Per-user personalised templates. Each student who customises their page gets one
+    # JSON file here (named after their username). When present, it overrides the global
+    # variant for that student at render time.
+    YEARBOOK_USER_TEMPLATE_DIR = '/raw/yearbook_user_templates'
     YEARBOOK_PDFME_NODE_MODULES = '/opt/pdfme/node_modules'
     YEARBOOK_PDFME_SCRIPT = '/src/scripts/generate_pdf.js'
+
+    # Allowed username characters for route params. Usernames are normally [a-z0-9_-] but
+    # some accounts use their email address as username, so "@", "." and "+" are allowed
+    # too. Usernames are only ever used as parameterized Neo4j query values (never string-
+    # interpolated), so this is purely a sanity/URL-safety guard.
+    YEARBOOK_USERNAME_FORMAT = /\A[a-zA-Z0-9._@+-]+\z/
 
     # Auto-discovered admin-provided files. Drop fonts / images into these
     # directories and they appear in the designer + are baked into PDFs.
@@ -194,6 +206,15 @@ class Main < Sinatra::Base
         # Designer never sees it and can't strip it during schema validation.
         blocks = v['yearbook_blocks'].is_a?(Hash) ? v['yearbook_blocks'] : {}
 
+        # recolor_images: { "<image schema name>" => true } for image elements the admin
+        # explicitly opted in to accent-colour replacement. Stored on the variant (not in
+        # the template) for the same reason as yearbook_blocks. Uploaded student photos are
+        # never listed here, so they are never recoloured.
+        recolor = {}
+        if v['recolor_images'].is_a?(Hash)
+            v['recolor_images'].each { |k, val| recolor[k.to_s] = true if val }
+        end
+
         # background_pdf is a *filename* (not embedded data). Ruby reads the file at render
         # time and substitutes it into basePdf. Keeps saved variants small even when the
         # admin uses a multi-MB PDF as the page background.
@@ -211,6 +232,7 @@ class Main < Sinatra::Base
             'photo_count'            => (v['photo_count'].is_a?(Integer) ? v['photo_count'] : nil),
             'template'               => tpl,
             'yearbook_blocks'        => blocks,
+            'recolor_images'         => recolor,
             'background_pdf'         => bg,
             'accent_placeholder_hex' => placeholder
         }
@@ -244,6 +266,190 @@ class Main < Sinatra::Base
             debug_error "Failed to read yearbook template: #{e.message}"
             default_yearbook_variant_set
         end
+    end
+
+    # ----- per-user personalised templates --------------------------------
+
+    # Whether students may individualise their own yearbook page. Defaults to enabled;
+    # admins can switch it off via the YEARBOOK_USER_CUSTOMIZATION_ENABLED credential.
+    def yearbook_user_customization_enabled?
+        return YEARBOOK_USER_CUSTOMIZATION_ENABLED if defined?(YEARBOOK_USER_CUSTOMIZATION_ENABLED)
+        true
+    end
+
+    # Page guard for the personalisation designer: needs login plus either the create
+    # (own page) or manage (someone else's page) permission.
+    def site_for_yearbook_personalize!
+        unless user_logged_in?
+            redirect "#{WEB_ROOT}/no_permission"
+            return
+        end
+        unless user_has_permission?("yearbook_create") || user_has_permission?("yearbook_manage")
+            redirect "#{WEB_ROOT}/no_permission"
+        end
+    end
+
+    # Resolve who a personalisation request targets and authorise it: editing your own
+    # page needs yearbook_create; editing someone else's needs yearbook_manage (enforced
+    # by resolve_target_username). Returns the effective username.
+    def authorize_personalize_target!(target_username)
+        t = target_username.to_s.strip
+        if t.empty?
+            require_user_with_permission!("yearbook_create")
+            return @session_user[:username]
+        end
+        resolve_target_username(t)
+    end
+
+    def user_yearbook_template_path(username)
+        u = username.to_s.strip
+        assert(!u.empty?, "Ungültiger Benutzername")
+        # Usernames may contain characters that aren't filesystem-safe (e.g. email-style
+        # usernames with "@" and "."). Hash the username so the filename is always safe and
+        # free of path-traversal risk, regardless of the allowed username charset.
+        File.join(YEARBOOK_USER_TEMPLATE_DIR, "#{Digest::SHA256.hexdigest(u)}.json")
+    end
+
+    # Load a user's personalised template, or nil if they haven't customised their page.
+    def load_user_yearbook_template(username)
+        path = user_yearbook_template_path(username)
+        return nil unless File.exist?(path)
+        begin
+            data = JSON.parse(File.read(path))
+            return nil unless data.is_a?(Hash) && data['template'].is_a?(Hash)
+            tpl = data['template']
+            tpl['basePdf'] ||= YEARBOOK_DEFAULT_BASE_PDF
+            if tpl['basePdf'].is_a?(Hash) && tpl['basePdf']['width']
+                tpl['basePdf']['padding'] = [0, 0, 0, 0]
+            end
+            tpl['schemas'] = [[]] unless tpl['schemas'].is_a?(Array) && !tpl['schemas'].empty?
+            bg = data['background_pdf'].to_s.strip
+            bg = nil unless bg =~ /\A[a-zA-Z0-9._-]+\.pdf\z/i && yearbook_background_files.include?(bg)
+            { 'template' => tpl, 'background_pdf' => bg, 'updated_at' => data['updated_at'] }
+        rescue => e
+            debug_error "Failed to read user yearbook template for #{username}: #{e.message}"
+            nil
+        end
+    end
+
+    def save_user_yearbook_template(username, template, background_pdf)
+        assert(template.is_a?(Hash), "Ungültige Vorlage")
+        tpl = {}
+        tpl['basePdf'] = YEARBOOK_DEFAULT_BASE_PDF
+        tpl['schemas'] = (template['schemas'].is_a?(Array) && !template['schemas'].empty?) ? template['schemas'] : [[]]
+
+        bg = background_pdf.to_s.strip
+        bg = nil unless bg =~ /\A[a-zA-Z0-9._-]+\.pdf\z/i && yearbook_background_files.include?(bg)
+
+        payload = {
+            'version' => 1,
+            'template' => tpl,
+            'background_pdf' => bg,
+            'updated_at' => yearbook_timestamp
+        }
+        FileUtils.mkdir_p(YEARBOOK_USER_TEMPLATE_DIR)
+        File.write(user_yearbook_template_path(username), JSON.pretty_generate(payload))
+    end
+
+    def delete_user_yearbook_template(username)
+        path = user_yearbook_template_path(username)
+        File.delete(path) if File.exist?(path)
+    end
+
+    # Overwrite the `content` of every catalog-field schema entry with the user's current
+    # data. Custom elements (assets, shapes, manually typed text, expanded block children)
+    # keep their content. Used both for the designer seed and when re-opening a saved
+    # personal template so placed data fields always show fresh values.
+    def refresh_catalog_content!(template, username)
+        values = build_yearbook_inputs_for_user(username, template)
+        value_map = values ? (values.first || {}) : {}
+        (template['schemas'] || []).each do |page|
+            next unless page.is_a?(Array)
+            page.each do |entry|
+                next unless entry.is_a?(Hash)
+                name = entry['name']
+                entry['content'] = value_map[name] if value_map.key?(name)
+            end
+        end
+        template
+    end
+
+    # Catalog of placeable fields enriched with the target user's current value, so the
+    # personalisation sidebar can insert a field that already shows the student's data.
+    def yearbook_template_field_values_for_user(username)
+        catalog = yearbook_template_field_catalog
+        fake_template = { 'schemas' => [catalog.map { |f| { 'name' => f['name'] } }] }
+        values = build_yearbook_inputs_for_user(username, fake_template)
+        value_map = values ? (values.first || {}) : {}
+        catalog.map { |f| f.merge('value' => value_map[f['name']].to_s) }
+    end
+
+    # Build the initial personalised template for a user from the variant they would
+    # otherwise receive: accent colour applied, blocks expanded into concrete text, and
+    # the student's current data baked into the field contents so the designer shows a
+    # faithful preview that they can rearrange.
+    def build_baked_personal_seed(username, variant_set)
+        variant = pick_yearbook_variant_for_user(username, variant_set)
+        return nil unless variant
+
+        profile = get_yearbook_profile_data(username) || {}
+        answer_rows = neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username})-[:HAS_YEARBOOK_ENTRY]->(y:YearbookEntry)
+            RETURN y.question_id AS question_id, y.answer AS answer
+        END_OF_QUERY
+        answers = answer_rows.each_with_object({}) { |r, h| h[r['question_id']] = r['answer'] }
+        comments = yearbook_comments_for_user(username)
+
+        accent = yearbook_accent_color_for_user(username)
+        base_template = apply_accent_color_to_template(variant['template'], accent, variant['accent_placeholder_hex'])
+        # Bake the recoloured images into the seed so the personalised page shows (and keeps)
+        # the accent-replaced images even though it renders statically.
+        recolor_marked_images!(base_template, variant['recolor_images'], variant['accent_placeholder_hex'], accent)
+
+        blocks_config = variant['yearbook_blocks'] || {}
+        any_include_pending = blocks_config.values.any? { |c| c.is_a?(Hash) && c['kind'] == 'comments' && c['include_pending'] }
+        visible_comments = visible_comments_for_block(comments, any_include_pending)
+
+        pages = base_template['schemas'] || [[]]
+        comments_idx = 0
+        expanded_pages = pages.map do |page|
+            expanded, next_idx = expand_page_blocks(page, blocks_config, profile, answers, visible_comments, comments_idx)
+            comments_idx = next_idx if next_idx > comments_idx
+            expanded
+        end
+
+        seed_template = { 'basePdf' => YEARBOOK_DEFAULT_BASE_PDF, 'schemas' => expanded_pages }
+        refresh_catalog_content!(seed_template, username)
+        { 'template' => seed_template, 'background_pdf' => variant['background_pdf'] }
+    end
+
+    # Build pdfme jobs from a user's personalised template. The personalised template is a
+    # normal pdfme template: catalog fields keep updating with live data (via inputs),
+    # while custom elements and baked block text stay static (forced readOnly).
+    def build_personal_yearbook_jobs(username, personal)
+        user_info = neo4j_query(<<~END_OF_QUERY, {username: username}).first
+            MATCH (u:User {username: $username})
+            RETURN u.username AS username
+        END_OF_QUERY
+        return [] unless user_info
+
+        base_template = JSON.parse(JSON.dump(personal['template'] || {}))
+        base_template['basePdf'] ||= YEARBOOK_DEFAULT_BASE_PDF
+        apply_background_pdf_to_template!(base_template, personal['background_pdf'])
+
+        catalog_names = yearbook_template_field_catalog.map { |f| f['name'] }
+        pages = base_template['schemas'] || []
+        return [] if pages.empty?
+
+        jobs = []
+        pages.each do |page_schemas|
+            page_template = base_template.dup
+            page_template['schemas'] = [page_schemas]
+            force_static_schemas_readonly!(page_template, catalog_names)
+            inputs = build_yearbook_inputs_for_user(username, page_template)
+            jobs << { 'template' => page_template, 'inputs' => inputs } if inputs
+        end
+        jobs
     end
 
     # ----- per-user state stored on the User node -------------------------
@@ -326,6 +532,58 @@ class Main < Sinatra::Base
             end
         end
         cloned
+    end
+
+    # Replace the sentinel/placeholder colour inside image elements that the admin opted in
+    # to (via recolor_map) with the student's accent colour. Only PNG data-URL images are
+    # processed; everything else (incl. uploaded JPEG/other photos) is left untouched.
+    # Mutates the template in place.
+    def recolor_marked_images!(template, recolor_map, sentinel_hex, accent_color)
+        return template unless recolor_map.is_a?(Hash) && !recolor_map.empty?
+        (template['schemas'] || []).each do |page|
+            next unless page.is_a?(Array)
+            page.each do |entry|
+                next unless entry.is_a?(Hash)
+                next unless recolor_map[entry['name']]
+                content = entry['content'].to_s
+                next unless content.start_with?('data:image/png')
+                recolored = recolor_png_data_url(content, sentinel_hex, accent_color)
+                entry['content'] = recolored if recolored
+            end
+        end
+        template
+    end
+
+    # Recolour a PNG data URL: every pixel whose RGB exactly matches sentinel_hex becomes
+    # accent_hex (alpha preserved). Returns a new data URL, or nil on failure.
+    def recolor_png_data_url(data_url, sentinel_hex, accent_hex)
+        b64 = data_url.sub(/\Adata:image\/png;base64,/, '')
+        bytes = Base64.decode64(b64)
+        img = ChunkyPNG::Image.from_blob(bytes)
+
+        sentinel = ChunkyPNG::Color.from_hex(normalize_hex_for_chunky(sentinel_hex, YEARBOOK_DEFAULT_ACCENT_PLACEHOLDER))
+        accent = ChunkyPNG::Color.from_hex(normalize_hex_for_chunky(accent_hex, YEARBOOK_DEFAULT_ACCENT_COLOR))
+        s_r = ChunkyPNG::Color.r(sentinel); s_g = ChunkyPNG::Color.g(sentinel); s_b = ChunkyPNG::Color.b(sentinel)
+        a_r = ChunkyPNG::Color.r(accent);   a_g = ChunkyPNG::Color.g(accent);   a_b = ChunkyPNG::Color.b(accent)
+
+        img.pixels.map! do |p|
+            if ChunkyPNG::Color.r(p) == s_r && ChunkyPNG::Color.g(p) == s_g && ChunkyPNG::Color.b(p) == s_b
+                ChunkyPNG::Color.rgba(a_r, a_g, a_b, ChunkyPNG::Color.a(p))
+            else
+                p
+            end
+        end
+
+        "data:image/png;base64,#{Base64.strict_encode64(img.to_blob)}"
+    rescue => e
+        debug_error "recolor_png_data_url failed: #{e.message}"
+        nil
+    end
+
+    def normalize_hex_for_chunky(hex, fallback)
+        h = hex.to_s.strip
+        h = fallback unless h =~ /\A#[0-9A-Fa-f]{6}\z/
+        h
     end
 
     # Build the multi-line text for the synthetic Steckbrief-Block. Profile fields come
@@ -823,6 +1081,13 @@ class Main < Sinatra::Base
     # has a comments block, the page is still rendered once (so every student gets at
     # least one comment page).
     def build_yearbook_jobs_for_user(username, variant_set)
+        # A personalised template (if the student customised their page) takes precedence
+        # over the global variant selection.
+        if yearbook_user_customization_enabled?
+            personal = load_user_yearbook_template(username)
+            return build_personal_yearbook_jobs(username, personal) if personal
+        end
+
         variant = pick_yearbook_variant_for_user(username, variant_set)
         return [] unless variant
 
@@ -842,6 +1107,7 @@ class Main < Sinatra::Base
 
         accent = yearbook_accent_color_for_user(username)
         base_template = apply_accent_color_to_template(variant['template'], accent, variant['accent_placeholder_hex'])
+        recolor_marked_images!(base_template, variant['recolor_images'], variant['accent_placeholder_hex'], accent)
         apply_background_pdf_to_template!(base_template, variant['background_pdf'])
 
         blocks_config = variant['yearbook_blocks'] || {}
@@ -976,14 +1242,24 @@ class Main < Sinatra::Base
                    u.yearbook_accent_color AS accent_color
             ORDER BY display_name
         END_OF_QUERY
+        customization_enabled = yearbook_user_customization_enabled?
         users = rows.map { |r| {
             username: r['username'],
             display_name: r['display_name'],
             photo_count: r['photo_count'].to_i,
             variant_id: r['variant_id'],
-            accent_color: r['accent_color'] || YEARBOOK_DEFAULT_ACCENT_COLOR
+            accent_color: r['accent_color'] || YEARBOOK_DEFAULT_ACCENT_COLOR,
+            has_custom: customization_enabled && File.exist?(user_yearbook_template_path(r['username']))
         } }
-        respond(success: true, users: users, default_accent_color: YEARBOOK_DEFAULT_ACCENT_COLOR)
+
+        variant_set = load_yearbook_variant_set
+        variants = (variant_set['variants'] || []).map { |v| {
+            id: v['id'], name: v['name'], photo_count: v['photo_count']
+        } }
+
+        respond(success: true, users: users, variants: variants,
+                customization_enabled: customization_enabled,
+                default_accent_color: YEARBOOK_DEFAULT_ACCENT_COLOR)
     end
 
     # Pin a variant for a user (or clear by passing variant_id: ""). yearbook_manage only.
@@ -994,7 +1270,7 @@ class Main < Sinatra::Base
         data = parse_request_data(required_keys: [:username, :variant_id])
         username = data[:username].to_s.strip
         variant_id = data[:variant_id].to_s.strip
-        assert(username =~ /\A[a-z0-9_-]+\z/, "Ungültiger Benutzername")
+        assert(username =~ YEARBOOK_USERNAME_FORMAT, "Ungültiger Benutzername")
 
         if variant_id.empty?
             neo4j_query(<<~END_OF_QUERY, {username: username})
@@ -1050,7 +1326,7 @@ class Main < Sinatra::Base
         color = data[:color].to_s.strip
         assert(color =~ /\A#[0-9A-Fa-f]{6}\z/, "Ungültiger Farbwert (#RRGGBB erwartet)")
         target = data[:target_username].to_s.strip
-        assert(target =~ /\A[a-z0-9_-]+\z/, "Ungültiger Benutzername")
+        assert(target =~ YEARBOOK_USERNAME_FORMAT, "Ungültiger Benutzername")
 
         neo4j_query(<<~END_OF_QUERY, {username: target, color: color})
             MATCH (u:User {username: $username}) SET u.yearbook_accent_color = $color
@@ -1065,7 +1341,7 @@ class Main < Sinatra::Base
         require_user_with_permission!("yearbook_manage")
 
         username = params[:username].to_s.strip
-        assert(username =~ /\A[a-z0-9_-]+\z/, "Ungültiger Benutzername")
+        assert(username =~ YEARBOOK_USERNAME_FORMAT, "Ungültiger Benutzername")
 
         variant_set = load_yearbook_variant_set
         jobs = build_yearbook_jobs_for_user(username, variant_set)
@@ -1133,5 +1409,110 @@ class Main < Sinatra::Base
         END_OF_QUERY
         users = results.map { |r| { username: r['username'], display_name: r['display_name'] } }
         respond(success: true, users: users)
+    end
+
+    # ----- personalised (per-user) template routes -------------------------
+
+    # Load the user's personalised template (or a freshly baked seed from their variant if
+    # they haven't customised yet), plus everything the designer sidebar needs. With
+    # yearbook_manage, a target_username may be supplied to edit someone else's page.
+    post '/api/yearbook/my_template/get' do
+        require_user!
+        require_yearbook_accessible!
+        assert(yearbook_user_customization_enabled?, "Individualisierung ist deaktiviert")
+
+        data = parse_request_data(optional_keys: [:target_username])
+        username = authorize_personalize_target!(data[:target_username])
+
+        variant_set = load_yearbook_variant_set
+        personal = load_user_yearbook_template(username)
+        is_custom = !personal.nil?
+
+        if personal
+            template = personal['template']
+            background_pdf = personal['background_pdf']
+            refresh_catalog_content!(template, username)
+        else
+            seed = build_baked_personal_seed(username, variant_set)
+            assert(seed, "Keine Vorlage verfügbar")
+            template = seed['template']
+            background_pdf = seed['background_pdf']
+        end
+
+        fonts = yearbook_font_files.map do |filename|
+            { 'name' => yearbook_font_name_for(filename),
+              'filename' => filename,
+              'url' => "/include/yearbook_fonts/#{filename}" }
+        end
+        assets = yearbook_asset_files.map do |filename|
+            { 'filename' => filename, 'url' => "/include/yearbook_assets/#{filename}" }
+        end
+        backgrounds = yearbook_background_files.map do |filename|
+            { 'filename' => filename, 'url' => "/include/yearbook_backgrounds/#{filename}" }
+        end
+
+        respond(
+            success: true,
+            template: template,
+            background_pdf: background_pdf,
+            is_custom: is_custom,
+            fields: yearbook_template_field_values_for_user(username),
+            assets: assets,
+            backgrounds: backgrounds,
+            fonts: fonts
+        )
+    end
+
+    # Save the user's personalised template.
+    post '/api/yearbook/my_template/save' do
+        require_user!
+        require_yearbook_accessible!
+        assert(yearbook_user_customization_enabled?, "Individualisierung ist deaktiviert")
+
+        data = parse_request_data(
+            required_keys: [:template],
+            optional_keys: [:target_username, :background_pdf],
+            max_body_length: 50_000_000,
+            max_string_length: 50_000_000
+        )
+        username = authorize_personalize_target!(data[:target_username])
+
+        save_user_yearbook_template(username, data[:template], data[:background_pdf])
+
+        log("Persönliche Jahrbuch-Vorlage für #{username} gespeichert durch #{@session_user[:username]}")
+        respond(success: true, message: "Deine Jahrbuchseite wurde gespeichert.")
+    end
+
+    # Discard the user's personalisation and fall back to the global variant.
+    post '/api/yearbook/my_template/reset' do
+        require_user!
+        require_yearbook_accessible!
+        assert(yearbook_user_customization_enabled?, "Individualisierung ist deaktiviert")
+
+        data = parse_request_data(optional_keys: [:target_username])
+        username = authorize_personalize_target!(data[:target_username])
+
+        delete_user_yearbook_template(username)
+
+        log("Persönliche Jahrbuch-Vorlage für #{username} zurückgesetzt durch #{@session_user[:username]}")
+        respond(success: true, message: "Auf das Standard-Design zurückgesetzt.")
+    end
+
+    # Inline PDF preview of the requesting user's own page (uses their personalisation if
+    # present). For previewing another user's page, yearbook_manage uses
+    # /api/yearbook/preview/:username.
+    get '/api/yearbook/my_template/preview' do
+        require_user_with_permission!("yearbook_create")
+        require_yearbook_accessible!
+        assert(yearbook_user_customization_enabled?, "Individualisierung ist deaktiviert")
+
+        username = @session_user[:username]
+        variant_set = load_yearbook_variant_set
+        jobs = build_yearbook_jobs_for_user(username, variant_set)
+        assert(!jobs.empty?, "Keine Vorlage verfügbar")
+
+        pdf_bytes = render_yearbook_pdf_jobs(jobs)
+        respond_raw_with_mimetype(pdf_bytes, 'application/pdf')
+        response.headers['Content-Disposition'] = "inline; filename=\"jahrbuch_meine_seite.pdf\""
     end
 end

@@ -58,6 +58,12 @@ YEARBOOK_END_AT = nil    # e.g. '2026-06-30T23:59:59' or nil for no end restrict
 # Set to true to show the "Alle Einträge löschen" button in jahrbuch_manage.
 YEARBOOK_ALLOW_DELETE_ALL = false
 
+# Allow students to individualise their own yearbook page: they open the same designer,
+# pre-filled with their data on top of the design they would otherwise receive, and can
+# move things around or add their own elements. Set to false to keep everyone on the
+# global variant design only.
+YEARBOOK_USER_CUSTOMIZATION_ENABLED = true
+
 YEARBOOK_QUESTIONS = [
     # Non-anonymous question (namentlich):
     # {

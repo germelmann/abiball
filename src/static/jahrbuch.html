@@ -64,6 +64,20 @@
                         Erstelle deinen persönlichen Steckbrief für das Jahrbuch. Änderungen werden automatisch gespeichert.
                     </p>
                     <div class="alert alert-info py-2 mb-3" id="yearbook_name_hint" style="display:none;"></div>
+
+                    <div id="personalize_cta" style="display:none;"
+                        class="alert alert-primary d-flex justify-content-between align-items-center flex-wrap gap-2 py-2 mb-3">
+                        <div>
+                            <i class="bi bi-vector-pen"></i> <strong id="personalize_cta_title">Eigene Jahrbuchseite gestalten</strong>
+                            <div class="small" id="personalize_cta_desc">
+                                Übernimm das vorgegebene Design und passe es individuell an – verschiebe Felder oder füge eigene Elemente hinzu.
+                            </div>
+                        </div>
+                        <a id="personalize_link" href="/jahrbuch_personalize" class="btn btn-sm btn-primary">
+                            <i class="bi bi-pencil-square"></i> Seite gestalten
+                        </a>
+                    </div>
+
                     <div id="profile_fields_container"></div>
 
                     <!-- Akzentfarbe ist eine Designentscheidung — nur yearbook_manage darf sie setzen,
@@ -228,6 +242,7 @@ let viewUsername = null;
 let canManage = false;
 let canAdminComments = false;
 let readOnlyMode = false;
+const YB_CUSTOMIZE_ENABLED = #{yearbook_user_customization_enabled? ? 'true' : 'false'};
 
 (function() {
     const parts = window.location.pathname.replace(/^\/+/, '').split('/');
@@ -344,6 +359,7 @@ function loadViewEntry() {
         $('#yearbook_content').show();
         renderProfileFields();
         renderQuestions();
+        updatePersonalizeCta();
     }, function() {
         $('#entry_load_error_msg').text('Fehler beim Laden des Eintrags.');
         $('#entry_load_error').show();
@@ -355,9 +371,32 @@ function renderYearbook() {
     renderQuestions();
     updateYearbookNameHint();
     loadAccentColor();
+    updatePersonalizeCta();
     // Load comments in background to update badge (personal mode only)
     if (!viewUsername) {
         loadReceivedCommentsBadge();
+    }
+}
+
+// ─────────────────── Seite gestalten (Personalisierung) ───────────────────
+
+function updatePersonalizeCta() {
+    const cta = $('#personalize_cta');
+    if (!YB_CUSTOMIZE_ENABLED) { cta.hide(); return; }
+
+    if (viewUsername) {
+        // Manage mode: a yearbook_manage user may design another student's page.
+        if (canManage) {
+            $('#personalize_cta_title').text('Jahrbuchseite gestalten');
+            $('#personalize_cta_desc').text('Passe das Seitenlayout dieser Schüler:in individuell an.');
+            $('#personalize_link').attr('href', '/jahrbuch_personalize?user=' + encodeURIComponent(viewUsername));
+            cta.show();
+        } else {
+            cta.hide();
+        }
+    } else {
+        $('#personalize_link').attr('href', '/jahrbuch_personalize');
+        cta.show();
     }
 }
 

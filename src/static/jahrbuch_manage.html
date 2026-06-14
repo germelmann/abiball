@@ -24,6 +24,10 @@
             <button type="button" class="btn btn-outline-primary" id="export_csv_btn" title="Als CSV exportieren">
                 <i class="bi bi-filetype-csv"></i> CSV
             </button>
+            <button type="button" class="btn btn-outline-primary" id="export_survey_images_btn" style="display:none;"
+                title="Alle bei Umfragen hochgeladenen Bilder als ZIP herunterladen (ohne Namenszuordnung)">
+                <i class="bi bi-file-earmark-zip"></i> Umfrage-Bilder
+            </button>
             <button type="button" class="btn btn-outline-danger" id="delete_all_btn" style="display:none;"
                 title="Alle Jahrbuch-Einträge löschen">
                 <i class="bi bi-trash"></i> Alle löschen
@@ -65,6 +69,7 @@
                                     <th>Name</th>
                                     <th>Benutzername</th>
                                     <th>Fortschritt</th>
+                                    <th title="Welche Vorlage diese Schüler:in erhält">Vorlage</th>
                                     <th title="Akzentfarbe der Schüler-Jahrbuchseite">Farbe</th>
                                     <th>Aktionen</th>
                                 </tr>
@@ -123,11 +128,22 @@ let attributedAnonymous = {};
 let allowDeleteAll = false;
 let isManage = false;
 
+// Template-management state (populated from /template/assignments, which only
+// succeeds for yearbook_manage users).
+let canManageTemplates = false;
+let customizationEnabled = false;
+let templateVariants = [];     // [{id, name, photo_count}]
+let userVariantMap = {};       // username -> pinned variant_id ("" = auto)
+let userHasCustom = {};        // username -> bool (has a personalised page)
+
 $(document).ready(function() {
     loadManageData();
 
     $('#export_json_btn').on('click', function() { exportData('json'); });
     $('#export_csv_btn').on('click', function() { exportData('csv'); });
+    $('#export_survey_images_btn').on('click', function() {
+        window.location.href = '/api/yearbook/export_survey_images';
+    });
 
     $('#delete_all_btn').on('click', function() {
         showTemplateModal(
@@ -189,7 +205,19 @@ function loadManageData() {
                         accentColors = colorData.colors || {};
                         defaultAccentColor = colorData.default_color || defaultAccentColor;
                     }
-                    renderManageView();
+                    // Variant assignments + personalisation flags (yearbook_manage only).
+                    api_call('/api/yearbook/template/assignments', {}, function(assignData) {
+                        if (assignData && assignData.success) {
+                            canManageTemplates = true;
+                            templateVariants = assignData.variants || [];
+                            customizationEnabled = !!assignData.customization_enabled;
+                            (assignData.users || []).forEach(function(u) {
+                                userVariantMap[u.username] = u.variant_id || '';
+                                userHasCustom[u.username] = !!u.has_custom;
+                            });
+                        }
+                        renderManageView();
+                    }, function() { renderManageView(); });
                 }, function() { renderManageView(); });
             }, function() {
                 renderManageView();
@@ -210,6 +238,10 @@ function renderManageView() {
     renderManageProfiles();
     renderManageAnswers();
     renderManageSurveys();
+
+    // Show the bulk image download only when there is at least one upload-type question.
+    const hasUploadQuestions = manageQuestions.some(function(q) { return q.type === 'upload'; });
+    $('#export_survey_images_btn').toggle(hasUploadQuestions);
 }
 
 function renderManageProfiles() {
@@ -255,12 +287,41 @@ function renderManageProfiles() {
         );
         tr.append(progressCell);
 
+        // Vorlage (variant) picker — only yearbook_manage users can change it.
+        const variantCell = $('<td>');
+        if (canManageTemplates) {
+            const vsel = $('<select class="form-select form-select-sm" style="min-width: 150px;">');
+            vsel.append('<option value="">— automatisch —</option>');
+            templateVariants.forEach(function(v) {
+                const pc = (typeof v.photo_count === 'number') ? (' · ' + v.photo_count + ' Fotos') : ' · beliebig';
+                vsel.append($('<option>').val(v.id).text((v.name || 'Unbenannt') + pc));
+            });
+            vsel.val(userVariantMap[profile.username] || '');
+            if (userHasCustom[profile.username]) {
+                vsel.prop('disabled', true)
+                    .attr('title', 'Diese Schüler:in hat eine individuell gestaltete Seite – die Vorlagenauswahl wird dann nicht verwendet.');
+            }
+            vsel.on('change', function() {
+                const vid = this.value;
+                api_call('/api/yearbook/template/set_user_variant',
+                    { username: profile.username, variant_id: vid },
+                    function(resp) {
+                        if (resp && resp.success) { userVariantMap[profile.username] = vid; }
+                        else { show_error_message('Vorlage konnte nicht gesetzt werden.'); }
+                    });
+            });
+            variantCell.append(vsel);
+        } else {
+            variantCell.html('<span class="text-body-secondary">—</span>');
+        }
+        tr.append(variantCell);
+
         // Accent colour swatch — yearbook_manage can edit inline, yearbook_view sees read-only.
         const accentCell = $('<td>');
         const accentInput = $('<input type="color" class="form-control form-control-color form-control-sm" style="width: 44px; height: 28px; padding: 2px;">')
             .val(accentColors[profile.username] || defaultAccentColor)
             .attr('title', 'Akzentfarbe für ' + (profile.name || profile.username));
-        if (!isManage) accentInput.prop('disabled', true);
+        if (!canManageTemplates) accentInput.prop('disabled', true);
         accentInput.on('change', function() {
             const newColor = this.value;
             api_call('/api/yearbook/accent_color/set',
@@ -280,8 +341,31 @@ function renderManageProfiles() {
             .on('click', function() { window.location.href = '/jahrbuch/' + encodeURIComponent(profile.username); });
         actions.append(viewBtn);
 
-        // Per-entry delete button (always visible for yearbook_manage)
-        if (isManage) {
+        if (canManageTemplates) {
+            // Individuelle Seite gestalten (Personalisierung).
+            if (customizationEnabled) {
+                const hasCustom = !!userHasCustom[profile.username];
+                const customBtn = $('<button type="button" class="btn btn-sm">')
+                    .addClass(hasCustom ? 'btn-success' : 'btn-outline-success')
+                    .html('<i class="bi bi-vector-pen"></i>')
+                    .attr('title', hasCustom ? 'Individuelle Seite bearbeiten (bereits angepasst)' : 'Individuelle Seite gestalten')
+                    .on('click', function() {
+                        window.location.href = '/jahrbuch_personalize?user=' + encodeURIComponent(profile.username);
+                    });
+                actions.append(customBtn);
+            }
+            // PDF-Vorschau der gerenderten Seite.
+            const previewBtn = $('<button type="button" class="btn btn-sm btn-outline-secondary">')
+                .html('<i class="bi bi-file-earmark-pdf"></i>')
+                .attr('title', 'PDF-Vorschau')
+                .on('click', function() {
+                    window.open('/api/yearbook/preview/' + encodeURIComponent(profile.username), '_blank');
+                });
+            actions.append(previewBtn);
+        }
+
+        // Per-entry delete button (yearbook_manage only)
+        if (canManageTemplates) {
             const delBtn = $('<button type="button" class="btn btn-sm btn-outline-danger">')
                 .html('<i class="bi bi-trash"></i>')
                 .attr('title', 'Eintrag löschen')
