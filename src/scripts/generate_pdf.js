@@ -22,7 +22,9 @@ const mm2pt = (mm) => Number(mm) * MM_TO_PT;
 function dataUrlToBytes(dataUrl) {
   const comma = dataUrl.indexOf(',');
   const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-  return Buffer.from(b64, 'base64');
+  // @pdfme/pdf-lib's embed{Png,Jpg} reject a Node Buffer (their type check only accepts a
+  // plain Uint8Array or a base64 string); a Buffer silently fails with "not a PNG file".
+  return new Uint8Array(Buffer.from(b64, 'base64'));
 }
 
 async function embedCovered(arg) {
