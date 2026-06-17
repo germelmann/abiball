@@ -696,25 +696,45 @@ class Main < Sinatra::Base
         rows.map { |r| { 'text' => r['text'].to_s, 'status' => r['status'], 'commenter_name' => r['commenter_name'].to_s } }
     end
 
-    # Estimate the rendered height of a text element in mm. pdfme wraps long lines, so we
-    # also count an extra line for every ~chars_per_line characters in a line.
+    # Estimate the rendered height of a text element in mm.
+    # Uses word-boundary-aware wrapping to match pdfme's actual line-break behavior.
+    # A conservative character-width factor of 0.6× em (vs. the "ideal average" of ~0.5)
+    # accounts for wide uppercase letters, German compound words, and proportional-font
+    # variance — erring on the side of more space rather than risking overlap.
     def estimate_text_height_mm(content, font_size_pt, line_height_factor, width_mm)
         return 0.0 if content.to_s.empty?
         line_h = font_size_pt * line_height_factor * PT_TO_MM
-        # Rough char width estimate: ~half the font size in pt, converted to mm.
-        avg_char_width_mm = font_size_pt * 0.5 * PT_TO_MM
+        avg_char_width_mm = font_size_pt * 0.6 * PT_TO_MM
         chars_per_line = [(width_mm.to_f / [avg_char_width_mm, 0.01].max).floor, 1].max
-        lines = content.to_s.split("\n").sum do |row|
-            row.empty? ? 1 : (row.length / chars_per_line.to_f).ceil
+        total_lines = content.to_s.split("\n").sum do |row|
+            next 1 if row.empty?
+            # Simulate word-boundary wrapping: add words one-by-one onto lines.
+            # This avoids under-counting when long words cause short words to strand
+            # on the next line despite the aggregate character count fitting in fewer lines.
+            words = row.split(/\s+/)
+            line_count = 1
+            line_chars = 0
+            words.each do |word|
+                wlen = word.length
+                if line_chars == 0
+                    line_chars = wlen
+                elsif line_chars + 1 + wlen <= chars_per_line
+                    line_chars += 1 + wlen
+                else
+                    line_count += 1
+                    line_chars = wlen
+                end
+            end
+            line_count
         end
-        [line_h * lines, line_h].max
+        [line_h * total_lines, line_h].max
     end
 
     def estimate_text_width_mm(content, font_size_pt)
-        content.to_s.length * font_size_pt * 0.5 * PT_TO_MM
+        content.to_s.length * font_size_pt * 0.6 * PT_TO_MM
     end
 
-    def make_block_text_schema(x, y, width, height, font_name, font_size, content, color, alignment, line_height)
+    def make_block_text_schema(x, y, width, height, font_name, font_size, content, color, alignment, line_height, bold: false)
         s = {
             'name' => "_blockchild_#{RandomTag.generate(8)}",
             'type' => 'text',
@@ -729,6 +749,7 @@ class Main < Sinatra::Base
             'readOnly' => true
         }
         s['fontName'] = font_name if font_name && !font_name.to_s.empty?
+        s['bold'] = true if bold
         s
     end
 
@@ -746,6 +767,10 @@ class Main < Sinatra::Base
         value_font = config['value_font_name'] || config['font_name'] || block['fontName']
         label_font = config['label_font_name'] || value_font
         color = block['fontColor'] || '#000000'
+        label_color = config['label_color'].to_s.empty? ? color : config['label_color'].to_s
+        value_color = config['value_color'].to_s.empty? ? color : config['value_color'].to_s
+        label_bold = config['label_bold'] == true
+        value_bold = config['value_bold'] == true
         alignment = block['alignment'] || 'left'
         show_labels = config['show_labels'] != false
         inline = config['label_inline'] == true
@@ -769,17 +794,17 @@ class Main < Sinatra::Base
                     label_h = estimate_text_height_mm(label_with_colon, font_size, line_height, width)
                     value_h = estimate_text_height_mm(value, font_size, line_height, width)
                     break if y + label_h + value_h > max_y + 0.5
-                    out << make_block_text_schema(x, y, width, label_h, label_font, font_size, label_with_colon, color, alignment, line_height)
+                    out << make_block_text_schema(x, y, width, label_h, label_font, font_size, label_with_colon, label_color, alignment, line_height, bold: label_bold)
                     y += label_h
-                    out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, color, alignment, line_height)
+                    out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, value_color, alignment, line_height, bold: value_bold)
                     y += value_h + entry_gap
                 else
                     value_w = width - label_w
                     row_h = [estimate_text_height_mm(label_text, font_size, line_height, label_w),
                              estimate_text_height_mm(value, font_size, line_height, value_w)].max
                     break if y + row_h > max_y + 0.5
-                    out << make_block_text_schema(x, y, label_w, row_h, label_font, font_size, label_text, color, alignment, line_height)
-                    out << make_block_text_schema(x + label_w, y, value_w, row_h, value_font, font_size, value, color, alignment, line_height)
+                    out << make_block_text_schema(x, y, label_w, row_h, label_font, font_size, label_text, label_color, alignment, line_height, bold: label_bold)
+                    out << make_block_text_schema(x + label_w, y, value_w, row_h, value_font, font_size, value, value_color, alignment, line_height, bold: value_bold)
                     y += row_h + entry_gap
                 end
             elsif show_labels
@@ -789,14 +814,14 @@ class Main < Sinatra::Base
                 label_h = estimate_text_height_mm(label_with_colon, font_size, line_height, width)
                 value_h = estimate_text_height_mm(value, font_size, line_height, width)
                 break if y + label_h + value_h > max_y + 0.5
-                out << make_block_text_schema(x, y, width, label_h, label_font, font_size, label_with_colon, color, alignment, line_height)
+                out << make_block_text_schema(x, y, width, label_h, label_font, font_size, label_with_colon, label_color, alignment, line_height, bold: label_bold)
                 y += label_h
-                out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, color, alignment, line_height)
+                out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, value_color, alignment, line_height, bold: value_bold)
                 y += value_h + entry_gap
             else
                 value_h = estimate_text_height_mm(value, font_size, line_height, width)
                 break if y + value_h > max_y + 0.5
-                out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, color, alignment, line_height)
+                out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, value_color, alignment, line_height, bold: value_bold)
                 y += value_h + entry_gap
             end
         end
@@ -1496,23 +1521,5 @@ class Main < Sinatra::Base
 
         log("Persönliche Jahrbuch-Vorlage für #{username} zurückgesetzt durch #{@session_user[:username]}")
         respond(success: true, message: "Auf das Standard-Design zurückgesetzt.")
-    end
-
-    # Inline PDF preview of the requesting user's own page (uses their personalisation if
-    # present). For previewing another user's page, yearbook_manage uses
-    # /api/yearbook/preview/:username.
-    get '/api/yearbook/my_template/preview' do
-        require_user_with_permission!("yearbook_create")
-        require_yearbook_accessible!
-        assert(yearbook_user_customization_enabled?, "Individualisierung ist deaktiviert")
-
-        username = @session_user[:username]
-        variant_set = load_yearbook_variant_set
-        jobs = build_yearbook_jobs_for_user(username, variant_set)
-        assert(!jobs.empty?, "Keine Vorlage verfügbar")
-
-        pdf_bytes = render_yearbook_pdf_jobs(jobs)
-        respond_raw_with_mimetype(pdf_bytes, 'application/pdf')
-        response.headers['Content-Disposition'] = "inline; filename=\"jahrbuch_meine_seite.pdf\""
     end
 end

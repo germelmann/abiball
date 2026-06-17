@@ -332,6 +332,7 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
                 name: field.name, type: 'image',
                 position: { x: 15, y: 15 }, width: 50, height: 50,
                 content: field.value || '',
+                objectFit: 'cover',
             });
         } else {
             pushToCurrentPage({
@@ -383,6 +384,7 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
                 name: safeName, type: 'image',
                 position: { x: 0, y: 0 }, width: 60, height: 40,
                 content: dataUrl,
+                objectFit: 'cover',
             });
             setStatus('Bild "' + asset.filename + '" hinzugefügt.');
         }).catch(function (e) {
@@ -502,13 +504,13 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
     }
 
     function preview() {
+        // Previewing the rendered page is reserved for yearbook managers editing a
+        // student's page; students don't get a PDF/preview of their own entry.
+        if (!targetUsername) return;
         save(function (ok) {
             if (!ok) { setStatus('Speichern fehlgeschlagen, Vorschau abgebrochen.', 'error'); return; }
             setStatus('');
-            const url = targetUsername
-                ? '/api/yearbook/preview/' + encodeURIComponent(targetUsername)
-                : '/api/yearbook/my_template/preview';
-            window.open(url, '_blank');
+            window.open('/api/yearbook/preview/' + encodeURIComponent(targetUsername), '_blank');
         });
     }
 
@@ -547,7 +549,13 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
 
     function attachToolbar() {
         document.getElementById('yb_save_btn').addEventListener('click', function () { save(); });
-        document.getElementById('yb_preview_btn').addEventListener('click', preview);
+        const previewBtn = document.getElementById('yb_preview_btn');
+        if (targetUsername) {
+            previewBtn.addEventListener('click', preview);
+        } else {
+            // Students cannot preview/export a PDF of their own entry.
+            previewBtn.remove();
+        }
         document.getElementById('yb_reset_btn').addEventListener('click', resetToDefault);
         document.getElementById('yb_background').addEventListener('change', function (e) {
             onBackgroundChanged(e.target.value || null);
