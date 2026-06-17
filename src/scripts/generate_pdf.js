@@ -18,7 +18,7 @@ const { PDFDocument } = require('pdf-lib');
 // A build marker lets us confirm at runtime that the *current* version of
 // this script is the one Ruby invoked (and not a stale copy still cached in
 // the running container). Bump the date when you touch this file.
-const BUILD_MARKER = 'yearbook-pdf-gen 2026-06-17.cover-debug-1';
+const BUILD_MARKER = 'yearbook-pdf-gen 2026-06-17.cover-rotate-2';
 const DEBUG_LOG_PATH = '/gen/log/yearbook_pdf_debug.log';
 const RUN_ID = crypto.randomBytes(4).toString('hex');
 
@@ -73,8 +73,9 @@ async function embedCovered(arg) {
   const {
     pushGraphicsState, popGraphicsState,
     moveTo, lineTo, closePath, clip, endPath,
+    concatTransformationMatrix,
   } = pdfLib;
-  for (const [k, v] of Object.entries({ pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath })) {
+  for (const [k, v] of Object.entries({ pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath, concatTransformationMatrix })) {
     if (typeof v !== 'function') {
       dbg(`${tag}: pdfLib.${k} is ${typeof v} — operator missing`);
       throw new Error(`pdfLib.${k} not a function`);
@@ -107,31 +108,46 @@ async function embedCovered(arg) {
   const pageHeight = page.getHeight();
   const boxW = mm2pt(schema.width);
   const boxH = mm2pt(schema.height);
-  const boxX = mm2pt(schema.position && schema.position.x);
-  const boxY = pageHeight - mm2pt(schema.position && schema.position.y) - boxH;
+  // Box centre in PDF coordinates (origin bottom-left). pdfme's UI position is the
+  // top-left corner in mm with a top-down Y axis.
+  const cx = mm2pt(schema.position && schema.position.x) + boxW / 2;
+  const cy = pageHeight - mm2pt(schema.position && schema.position.y) - boxH / 2;
 
-  // Scale so the image covers the box, then centre the overflow.
+  // Scale so the image covers the box (fill, never letterbox), then centre the overflow.
   const scale = Math.max(boxW / img.width, boxH / img.height);
   const drawW = img.width * scale;
   const drawH = img.height * scale;
-  const drawX = boxX + (boxW - drawW) / 2;
-  const drawY = boxY + (boxH - drawH) / 2;
 
   const opacity = typeof schema.opacity === 'number' ? schema.opacity : 1;
 
-  dbg(`${tag}: COVER applied — box=${boxW.toFixed(1)}x${boxH.toFixed(1)}pt img=${img.width}x${img.height}px scale=${scale.toFixed(3)} draw=${drawW.toFixed(1)}x${drawH.toFixed(1)}pt at (${drawX.toFixed(1)},${drawY.toFixed(1)}) opacity=${opacity}`);
+  // pdfme rotates clockwise in the UI; PDF rotates counter-clockwise, so the render
+  // angle is the negation (matching pdfme's own convertForPdfLayoutProps).
+  const rotateDeg = -Number(schema.rotate || 0);
+  const theta = (rotateDeg * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
 
+  dbg(`${tag}: COVER applied — box=${boxW.toFixed(1)}x${boxH.toFixed(1)}pt img=${img.width}x${img.height}px scale=${scale.toFixed(3)} draw=${drawW.toFixed(1)}x${drawH.toFixed(1)}pt centre=(${cx.toFixed(1)},${cy.toFixed(1)}) rotate=${rotateDeg} opacity=${opacity}`);
+
+  // Work in a coordinate frame centred on the box and rotated with it: the box and the
+  // cover-scaled image are both centred at the origin, so clipping to the box rectangle
+  // crops the image's overflow on all sides regardless of rotation.
+  //   device = point × R × T × CTM_old  ->  emit translate first, then rotate.
   page.pushOperators(
     pushGraphicsState(),
-    moveTo(boxX, boxY),
-    lineTo(boxX + boxW, boxY),
-    lineTo(boxX + boxW, boxY + boxH),
-    lineTo(boxX, boxY + boxH),
+    concatTransformationMatrix(1, 0, 0, 1, cx, cy),          // translate to box centre
+    concatTransformationMatrix(cos, sin, -sin, cos, 0, 0),   // rotate about that centre
+    moveTo(-boxW / 2, -boxH / 2),
+    lineTo(boxW / 2, -boxH / 2),
+    lineTo(boxW / 2, boxH / 2),
+    lineTo(-boxW / 2, boxH / 2),
     closePath(),
     clip(),
     endPath(),
   );
-  page.drawImage(img, { x: drawX, y: drawY, width: drawW, height: drawH, opacity });
+  // drawImage wraps itself in q…Q, so the clip and CTM set above stay in effect for it
+  // and are restored by our popGraphicsState. No rotate here — the CTM already rotates.
+  page.drawImage(img, { x: -drawW / 2, y: -drawH / 2, width: drawW, height: drawH, opacity });
   page.pushOperators(popGraphicsState());
 }
 
@@ -143,10 +159,6 @@ const coverImage = Object.assign({}, image, {
     const tag = `image#${imageCallCount}[name=${JSON.stringify(schema && schema.name)}, type=${JSON.stringify(schema && schema.type)}]`;
     const rotate = schema ? Number(schema.rotate || 0) : 0;
     dbg(`${tag}: pdf() called rotate=${rotate} pos=${JSON.stringify(schema && schema.position)} size=${schema && schema.width}x${schema && schema.height}mm objectFit=${JSON.stringify(schema && schema.objectFit)}`);
-    if (rotate) {
-      dbg(`${tag}: rotated -> falling back to stock contain renderer`);
-      return image.pdf(arg);
-    }
     try {
       return await embedCovered(arg);
     } catch (e) {
