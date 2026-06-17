@@ -6,9 +6,34 @@
 //
 // Legacy single-job payloads of the shape { template, inputs, fonts? } are also accepted.
 
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
 const { generate } = require('@pdfme/generator');
 const { text, image, line, rectangle, ellipse } = require('@pdfme/schemas');
 const { PDFDocument } = require('pdf-lib');
+
+// ---------- DEBUG LOG ---------------------------------------------------
+// A build marker lets us confirm at runtime that the *current* version of
+// this script is the one Ruby invoked (and not a stale copy still cached in
+// the running container). Bump the date when you touch this file.
+const BUILD_MARKER = 'yearbook-pdf-gen 2026-06-17.cover-debug-1';
+const DEBUG_LOG_PATH = '/gen/log/yearbook_pdf_debug.log';
+const RUN_ID = crypto.randomBytes(4).toString('hex');
+
+function dbg(line) {
+  const stamp = new Date().toISOString();
+  const msg = `[${stamp}] [${RUN_ID}] ${line}\n`;
+  try {
+    fs.mkdirSync(path.dirname(DEBUG_LOG_PATH), { recursive: true });
+    fs.appendFileSync(DEBUG_LOG_PATH, msg);
+  } catch (_) { /* log dir may be read-only — ignore */ }
+  // Also mirror to stderr so Ruby's Open3 capture sees it when something fails.
+  process.stderr.write(msg);
+}
+
+dbg(`startup: ${BUILD_MARKER}, node=${process.version}, script=${__filename}`);
 
 // pdfme's stock image plugin renders images "contain" (whole image fitted inside the
 // box, centred, leaving empty bars when the aspect ratios differ). The yearbook wants
@@ -27,19 +52,44 @@ function dataUrlToBytes(dataUrl) {
   return new Uint8Array(Buffer.from(b64, 'base64'));
 }
 
+function describeContent(s) {
+  if (s === undefined) return 'undefined';
+  if (s === null) return 'null';
+  if (typeof s !== 'string') return `non-string(${typeof s})`;
+  if (s === '') return 'empty-string';
+  return `string len=${s.length} prefix=${JSON.stringify(s.slice(0, 32))}`;
+}
+
 async function embedCovered(arg) {
   // Use the pdf-lib instance pdfme passes in (the @pdfme/pdf-lib fork): operators and
   // images must come from the same module that created `page`/`pdfDoc`.
   const { schema, value, pdfDoc, page, pdfLib, _cache } = arg;
+  const tag = `image[name=${JSON.stringify(schema && schema.name)}]`;
+
+  if (!pdfLib) {
+    dbg(`${tag}: arg.pdfLib is missing — pdfme version too old?`);
+    throw new Error('pdfLib missing in plugin arg');
+  }
   const {
     pushGraphicsState, popGraphicsState,
     moveTo, lineTo, closePath, clip, endPath,
   } = pdfLib;
+  for (const [k, v] of Object.entries({ pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath })) {
+    if (typeof v !== 'function') {
+      dbg(`${tag}: pdfLib.${k} is ${typeof v} — operator missing`);
+      throw new Error(`pdfLib.${k} not a function`);
+    }
+  }
 
   const content = (value !== undefined && value !== null && value !== '')
     ? value
     : (schema.content || '');
-  if (typeof content !== 'string' || !content.startsWith('data:')) return;
+  dbg(`${tag}: value=${describeContent(value)} schema.content=${describeContent(schema.content)} chose=${describeContent(content).slice(0, 80)}`);
+
+  if (typeof content !== 'string' || !content.startsWith('data:')) {
+    dbg(`${tag}: no data: URL — skipping (empty image placeholder)`);
+    return;
+  }
 
   // Embed once per document; the same uploaded photo can recur across pages.
   const cacheKey = 'cover:' + content;
@@ -47,15 +97,18 @@ async function embedCovered(arg) {
   if (!img) {
     const isPng = content.startsWith('data:image/png');
     const bytes = dataUrlToBytes(content);
+    dbg(`${tag}: embed ${isPng ? 'PNG' : 'JPG'} ${bytes.length}B (Uint8Array)`);
     img = isPng ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
     if (_cache) _cache.set(cacheKey, img);
+  } else {
+    dbg(`${tag}: image found in _cache`);
   }
 
   const pageHeight = page.getHeight();
   const boxW = mm2pt(schema.width);
   const boxH = mm2pt(schema.height);
-  const boxX = mm2pt(schema.position.x);
-  const boxY = pageHeight - mm2pt(schema.position.y) - boxH;
+  const boxX = mm2pt(schema.position && schema.position.x);
+  const boxY = pageHeight - mm2pt(schema.position && schema.position.y) - boxH;
 
   // Scale so the image covers the box, then centre the overflow.
   const scale = Math.max(boxW / img.width, boxH / img.height);
@@ -65,6 +118,8 @@ async function embedCovered(arg) {
   const drawY = boxY + (boxH - drawH) / 2;
 
   const opacity = typeof schema.opacity === 'number' ? schema.opacity : 1;
+
+  dbg(`${tag}: COVER applied — box=${boxW.toFixed(1)}x${boxH.toFixed(1)}pt img=${img.width}x${img.height}px scale=${scale.toFixed(3)} draw=${drawW.toFixed(1)}x${drawH.toFixed(1)}pt at (${drawX.toFixed(1)},${drawY.toFixed(1)}) opacity=${opacity}`);
 
   page.pushOperators(
     pushGraphicsState(),
@@ -80,18 +135,28 @@ async function embedCovered(arg) {
   page.pushOperators(popGraphicsState());
 }
 
+let imageCallCount = 0;
 const coverImage = Object.assign({}, image, {
   pdf: async (arg) => {
-    const rotate = arg && arg.schema ? Number(arg.schema.rotate || 0) : 0;
-    if (rotate) return image.pdf(arg);
+    imageCallCount += 1;
+    const schema = arg && arg.schema;
+    const tag = `image#${imageCallCount}[name=${JSON.stringify(schema && schema.name)}, type=${JSON.stringify(schema && schema.type)}]`;
+    const rotate = schema ? Number(schema.rotate || 0) : 0;
+    dbg(`${tag}: pdf() called rotate=${rotate} pos=${JSON.stringify(schema && schema.position)} size=${schema && schema.width}x${schema && schema.height}mm objectFit=${JSON.stringify(schema && schema.objectFit)}`);
+    if (rotate) {
+      dbg(`${tag}: rotated -> falling back to stock contain renderer`);
+      return image.pdf(arg);
+    }
     try {
       return await embedCovered(arg);
-    } catch (_) {
-      // Any decoding/embedding hiccup falls back to the stock renderer.
+    } catch (e) {
+      dbg(`${tag}: cover render THREW: ${(e && e.stack) || e} — falling back to stock contain renderer`);
       return image.pdf(arg);
     }
   },
 });
+
+dbg(`coverImage override installed (image.pdf=${typeof image.pdf}, coverImage.pdf=${typeof coverImage.pdf})`);
 
 function readStdin() {
   return new Promise((resolve, reject) => {
@@ -130,6 +195,37 @@ function normalizeJobs(payload) {
   throw new Error('payload contains neither "jobs" nor "template"');
 }
 
+// Snapshot the schema layout of a job for the debug log, without dumping the
+// (possibly multi-MB) image data URLs.
+function summarizeJob(job, idx) {
+  const pages = (job.template && job.template.schemas) || [];
+  const lines = [`job#${idx}: pages=${pages.length}`];
+  pages.forEach((page, pIdx) => {
+    if (!Array.isArray(page)) return;
+    page.forEach((entry, eIdx) => {
+      if (!entry || typeof entry !== 'object') return;
+      const name = entry.name;
+      const type = entry.type;
+      const ro = entry.readOnly;
+      const objFit = entry.objectFit;
+      const contentInfo = type === 'image'
+        ? describeContent(entry.content)
+        : (typeof entry.content === 'string' ? `text len=${entry.content.length}` : 'no-content');
+      lines.push(`  job#${idx}.page${pIdx}.entry${eIdx}: name=${JSON.stringify(name)} type=${JSON.stringify(type)} readOnly=${ro} objectFit=${JSON.stringify(objFit)} ${contentInfo}`);
+    });
+  });
+  const inputs = job.inputs || [];
+  inputs.forEach((inp, iIdx) => {
+    if (!inp || typeof inp !== 'object') return;
+    for (const k of Object.keys(inp)) {
+      const v = inp[k];
+      const info = typeof v === 'string' ? describeContent(v) : `non-string(${typeof v})`;
+      lines.push(`  job#${idx}.inputs[${iIdx}].${k}: ${info}`);
+    }
+  });
+  return lines.join('\n');
+}
+
 async function generateOne(job, options) {
   if (!job.template || !Array.isArray(job.template.schemas)) {
     throw new Error('job.template.schemas missing or invalid');
@@ -157,21 +253,34 @@ async function mergePdfs(pdfBufs) {
 (async () => {
   try {
     const raw = await readStdin();
+    dbg(`stdin received: ${raw.length} bytes`);
     const payload = JSON.parse(raw);
     const jobs = normalizeJobs(payload);
+    dbg(`payload parsed: ${jobs.length} job(s)`);
+    jobs.forEach((j, i) => dbg(summarizeJob(j, i)));
 
     const options = {};
     const font = buildFontRegistry(payload.fonts);
-    if (font) options.font = font;
+    if (font) {
+      options.font = font;
+      dbg(`fonts registered: ${Object.keys(font).join(', ')}`);
+    } else {
+      dbg('no fonts registered');
+    }
 
     const rendered = [];
-    for (const job of jobs) {
-      rendered.push(await generateOne(job, options));
+    for (let i = 0; i < jobs.length; i++) {
+      dbg(`generating job#${i}…`);
+      rendered.push(await generateOne(jobs[i], options));
+      dbg(`job#${i} done (image renders so far: ${imageCallCount})`);
     }
     const merged = await mergePdfs(rendered);
+    dbg(`merged ${rendered.length} PDF(s) -> ${merged.length}B; total image renders=${imageCallCount}`);
     process.stdout.write(Buffer.from(merged));
   } catch (err) {
-    process.stderr.write('pdfme-generate-error: ' + (err && err.stack ? err.stack : String(err)) + '\n');
+    const msg = 'pdfme-generate-error: ' + (err && err.stack ? err.stack : String(err));
+    dbg(msg);
+    process.stderr.write(msg + '\n');
     process.exit(1);
   }
 })();

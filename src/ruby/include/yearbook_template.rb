@@ -3,6 +3,7 @@ require 'chunky_png'
 require 'digest'
 require 'fileutils'
 require 'json'
+require 'time'
 require 'open3'
 require 'zlib'
 
@@ -1070,10 +1071,33 @@ class Main < Sinatra::Base
             'fonts' => yearbook_fonts_payload
         })
         env = { 'NODE_PATH' => YEARBOOK_PDFME_NODE_MODULES }
+        # DEBUG: record an entry marker so we can match Ruby-side context to the
+        # Node script's debug log. Mirror script stderr (which includes the build
+        # marker, per-image rendering decisions, etc.) into the same debug log
+        # whether the generation succeeds or fails.
+        debug_log_path = '/gen/log/yearbook_pdf_debug.log'
+        begin
+            FileUtils.mkdir_p(File.dirname(debug_log_path))
+            File.open(debug_log_path, 'a') do |f|
+                f.puts "[#{Time.now.utc.iso8601}] ruby: render_yearbook_pdf_jobs called, jobs=#{jobs.size}, script=#{YEARBOOK_PDFME_SCRIPT}, user=#{@session_user && @session_user[:username]}"
+            end
+        rescue
+        end
         stdout, stderr, status = Open3.capture3(
             env, 'node', YEARBOOK_PDFME_SCRIPT,
             stdin_data: payload, binmode: true
         )
+        begin
+            File.open(debug_log_path, 'a') do |f|
+                f.puts "[#{Time.now.utc.iso8601}] ruby: node exit=#{status.exitstatus} stdout=#{stdout.bytesize}B"
+                unless stderr.to_s.empty?
+                    f.puts "----- node stderr -----"
+                    f.puts stderr
+                    f.puts "----- end stderr -----"
+                end
+            end
+        rescue
+        end
         unless status.success?
             debug_error "pdfme generation failed: #{stderr}"
             assert(false, "PDF-Generierung fehlgeschlagen: #{stderr.to_s.lines.last.to_s.strip}")
