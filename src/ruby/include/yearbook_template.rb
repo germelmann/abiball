@@ -202,6 +202,7 @@ class Main < Sinatra::Base
         # Auto-append a blank Page 1 if a legacy variant only has the Steckbrief — the
         # admin can decorate it later.
         tpl['schemas'] << [] while tpl['schemas'].length < 2
+        normalize_image_object_fit!(tpl)
         # yearbook_blocks lives on the variant (not inside the template) so pdfme's
         # Designer never sees it and can't strip it during schema validation.
         blocks = v['yearbook_blocks'].is_a?(Hash) ? v['yearbook_blocks'] : {}
@@ -323,6 +324,7 @@ class Main < Sinatra::Base
                 tpl['basePdf']['padding'] = [0, 0, 0, 0]
             end
             tpl['schemas'] = [[]] unless tpl['schemas'].is_a?(Array) && !tpl['schemas'].empty?
+            normalize_image_object_fit!(tpl)
             bg = data['background_pdf'].to_s.strip
             bg = nil unless bg =~ /\A[a-zA-Z0-9._-]+\.pdf\z/i && yearbook_background_files.include?(bg)
             { 'template' => tpl, 'background_pdf' => bg, 'updated_at' => data['updated_at'] }
@@ -337,6 +339,7 @@ class Main < Sinatra::Base
         tpl = {}
         tpl['basePdf'] = YEARBOOK_DEFAULT_BASE_PDF
         tpl['schemas'] = (template['schemas'].is_a?(Array) && !template['schemas'].empty?) ? template['schemas'] : [[]]
+        normalize_image_object_fit!(tpl)
 
         bg = background_pdf.to_s.strip
         bg = nil unless bg =~ /\A[a-zA-Z0-9._-]+\.pdf\z/i && yearbook_background_files.include?(bg)
@@ -532,6 +535,21 @@ class Main < Sinatra::Base
             end
         end
         cloned
+    end
+
+    # Ensure every image schema fills its box (cropping, not letterboxing). pdfme defaults
+    # to "contain" when objectFit is missing, which leaves visible empty bars around images
+    # that don't match the box aspect ratio — students expect the full frame to be filled.
+    def normalize_image_object_fit!(template)
+        return template unless template.is_a?(Hash) && template['schemas'].is_a?(Array)
+        template['schemas'].each do |page|
+            next unless page.is_a?(Array)
+            page.each do |entry|
+                next unless entry.is_a?(Hash) && entry['type'] == 'image'
+                entry['objectFit'] = 'cover' unless entry['objectFit'].to_s == 'cover'
+            end
+        end
+        template
     end
 
     # Replace the sentinel/placeholder colour inside image elements that the admin opted in
@@ -850,9 +868,11 @@ class Main < Sinatra::Base
 
         font_size = (config['font_size'] || block['fontSize'] || 10).to_f
         line_height = (config['line_height'] || 1.4).to_f
-        entry_gap = (config['entry_gap_mm'] || 2).to_f
+        # Default the inter-comment gap to one line height, so consecutive comments are
+        # separated by exactly one blank line regardless of their length.
+        line_h_mm = font_size * line_height * PT_TO_MM
+        entry_gap = (config['entry_gap_mm'] || line_h_mm).to_f
         text_font = config['font_name'] || block['fontName']
-        author_font = config['author_font_name'] || text_font
         color = block['fontColor'] || '#000000'
         alignment = block['alignment'] || 'left'
         show_author = config['show_author'] != false
@@ -863,25 +883,22 @@ class Main < Sinatra::Base
             c = visible_comments[idx]
             text = c['text'].to_s.strip
             author = c['commenter_name'].to_s.strip
-            author_line = author.empty? ? '' : "— #{author}"
 
-            text_h = estimate_text_height_mm(text, font_size, line_height, width)
-            author_h = (show_author && !author_line.empty?) ? estimate_text_height_mm(author_line, font_size, line_height, width) : 0.0
+            # Render text and author as a single text block so pdfme places the author on
+            # the line directly after the comment body — no gap derived from a per-line
+            # height estimate of the body alone can creep in between them.
+            combined = (show_author && !author.empty?) ? "#{text}\n— #{author}" : text
+            combined_h = estimate_text_height_mm(combined, font_size, line_height, width)
 
             # If this comment doesn't fit and we've already emitted at least one, stop —
             # the caller will paginate. If we've emitted nothing and this single comment
             # is larger than the block, force-render it anyway so we never deadlock.
-            if y + text_h + author_h > max_y + 0.5
+            if y + combined_h > max_y + 0.5
                 break if idx > start_idx
             end
 
-            out << make_block_text_schema(x, y, width, text_h, text_font, font_size, text, color, alignment, line_height)
-            y += text_h
-            if show_author && !author_line.empty?
-                out << make_block_text_schema(x, y, width, author_h, author_font, font_size, author_line, color, alignment, line_height)
-                y += author_h
-            end
-            y += entry_gap
+            out << make_block_text_schema(x, y, width, combined_h, text_font, font_size, combined, color, alignment, line_height)
+            y += combined_h + entry_gap
             idx += 1
         end
         [out, idx]
