@@ -10,6 +10,87 @@ const { generate } = require('@pdfme/generator');
 const { text, image, line, rectangle, ellipse } = require('@pdfme/schemas');
 const { PDFDocument } = require('pdf-lib');
 
+// pdfme's stock image plugin renders images "contain" (whole image fitted inside the
+// box, centred, leaving empty bars when the aspect ratios differ). The yearbook wants
+// "cover": fill the entire box, cropping the overflow, never distorting. pdfme exposes
+// no objectFit option in the PDF render path, so we override the image plugin's `pdf`
+// renderer to scale-to-cover and clip to the box. Rotated images fall back to the
+// stock renderer (clipping a rotated box needs a transform we don't need in practice).
+const MM_TO_PT = 72 / 25.4;
+const mm2pt = (mm) => Number(mm) * MM_TO_PT;
+
+function dataUrlToBytes(dataUrl) {
+  const comma = dataUrl.indexOf(',');
+  const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  return Buffer.from(b64, 'base64');
+}
+
+async function embedCovered(arg) {
+  // Use the pdf-lib instance pdfme passes in (the @pdfme/pdf-lib fork): operators and
+  // images must come from the same module that created `page`/`pdfDoc`.
+  const { schema, value, pdfDoc, page, pdfLib, _cache } = arg;
+  const {
+    pushGraphicsState, popGraphicsState,
+    moveTo, lineTo, closePath, clip, endPath,
+  } = pdfLib;
+
+  const content = (value !== undefined && value !== null && value !== '')
+    ? value
+    : (schema.content || '');
+  if (typeof content !== 'string' || !content.startsWith('data:')) return;
+
+  // Embed once per document; the same uploaded photo can recur across pages.
+  const cacheKey = 'cover:' + content;
+  let img = _cache && _cache.get(cacheKey);
+  if (!img) {
+    const isPng = content.startsWith('data:image/png');
+    const bytes = dataUrlToBytes(content);
+    img = isPng ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
+    if (_cache) _cache.set(cacheKey, img);
+  }
+
+  const pageHeight = page.getHeight();
+  const boxW = mm2pt(schema.width);
+  const boxH = mm2pt(schema.height);
+  const boxX = mm2pt(schema.position.x);
+  const boxY = pageHeight - mm2pt(schema.position.y) - boxH;
+
+  // Scale so the image covers the box, then centre the overflow.
+  const scale = Math.max(boxW / img.width, boxH / img.height);
+  const drawW = img.width * scale;
+  const drawH = img.height * scale;
+  const drawX = boxX + (boxW - drawW) / 2;
+  const drawY = boxY + (boxH - drawH) / 2;
+
+  const opacity = typeof schema.opacity === 'number' ? schema.opacity : 1;
+
+  page.pushOperators(
+    pushGraphicsState(),
+    moveTo(boxX, boxY),
+    lineTo(boxX + boxW, boxY),
+    lineTo(boxX + boxW, boxY + boxH),
+    lineTo(boxX, boxY + boxH),
+    closePath(),
+    clip(),
+    endPath(),
+  );
+  page.drawImage(img, { x: drawX, y: drawY, width: drawW, height: drawH, opacity });
+  page.pushOperators(popGraphicsState());
+}
+
+const coverImage = Object.assign({}, image, {
+  pdf: async (arg) => {
+    const rotate = arg && arg.schema ? Number(arg.schema.rotate || 0) : 0;
+    if (rotate) return image.pdf(arg);
+    try {
+      return await embedCovered(arg);
+    } catch (_) {
+      // Any decoding/embedding hiccup falls back to the stock renderer.
+      return image.pdf(arg);
+    }
+  },
+});
+
 function readStdin() {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -55,7 +136,7 @@ async function generateOne(job, options) {
   return generate({
     template: job.template,
     inputs,
-    plugins: { text, image, line, rectangle, ellipse },
+    plugins: { text, image: coverImage, line, rectangle, ellipse },
     options,
   });
 }

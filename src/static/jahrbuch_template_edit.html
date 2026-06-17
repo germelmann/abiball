@@ -583,7 +583,6 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
                 name: safeName, type: 'image',
                 position: { x: 0, y: 0 }, width: 60, height: 40,
                 content: dataUrl,
-                objectFit: 'cover',
             });
             if (recolor) {
                 currentRecolorImages()[safeName] = true;
@@ -700,10 +699,6 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
             label_inline: false,
             label_font_name: labelFont,
             value_font_name: valueFont,
-            label_bold: false,
-            value_bold: false,
-            label_color: '',
-            value_color: '',
             font_size: 11,
             line_height: 1.4,
             entry_gap_mm: 1,
@@ -982,26 +977,9 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
 
         const fontRow = document.createElement('div');
         fontRow.className = 'row g-2 mt-2';
-        fontRow.appendChild(makeFontFormCol(6, 'Label-Schrift', 'label_font_name', cfg));
+        fontRow.appendChild(makeFontFormCol(6, 'Label-Schrift (üblicherweise fett)', 'label_font_name', cfg));
         fontRow.appendChild(makeFontFormCol(6, 'Wert-Schrift', 'value_font_name', cfg));
         wrap.appendChild(fontRow);
-
-        const boldRow = document.createElement('div');
-        boldRow.className = 'row g-2 mt-1';
-        const boldLabelCol = document.createElement('div');
-        boldLabelCol.className = 'col-md-6';
-        boldLabelCol.appendChild(makeFormCheckbox('Label fett', 'label_bold', cfg));
-        const boldValueCol = document.createElement('div');
-        boldValueCol.className = 'col-md-6';
-        boldValueCol.appendChild(makeFormCheckbox('Wert fett', 'value_bold', cfg));
-        boldRow.appendChild(boldLabelCol); boldRow.appendChild(boldValueCol);
-        wrap.appendChild(boldRow);
-
-        const colorRow = document.createElement('div');
-        colorRow.className = 'row g-2 mt-2';
-        colorRow.appendChild(makeColorFormCol(6, 'Label-Farbe', 'label_color', cfg));
-        colorRow.appendChild(makeColorFormCol(6, 'Wert-Farbe', 'value_color', cfg));
-        wrap.appendChild(colorRow);
 
         const sizeRow = document.createElement('div');
         sizeRow.className = 'row g-2 mt-2';
@@ -1089,45 +1067,6 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
         return col;
     }
 
-    function makeColorFormCol(cols, labelText, key, cfg) {
-        const col = document.createElement('div');
-        col.className = 'col-md-' + cols;
-        const lbl = document.createElement('label');
-        lbl.className = 'form-label small mb-1';
-        lbl.textContent = labelText;
-        col.appendChild(lbl);
-        const wrap = document.createElement('div');
-        wrap.className = 'd-flex align-items-center gap-2';
-        const inp = document.createElement('input');
-        inp.type = 'color';
-        inp.className = 'form-control form-control-sm form-control-color';
-        inp.style.width = '3rem';
-        inp.value = cfg[key] && cfg[key] !== '' ? cfg[key] : '#000000';
-        const reset = document.createElement('button');
-        reset.type = 'button';
-        reset.className = 'btn btn-sm btn-outline-secondary';
-        reset.title = 'Standardfarbe verwenden';
-        reset.textContent = '×';
-        const note = document.createElement('span');
-        note.className = 'small text-body-secondary';
-        note.textContent = cfg[key] && cfg[key] !== '' ? '' : '(Standard)';
-        function updateState() {
-            note.textContent = cfg[key] && cfg[key] !== '' ? '' : '(Standard)';
-        }
-        inp.addEventListener('input', function() {
-            cfg[key] = inp.value;
-            updateState();
-        });
-        reset.addEventListener('click', function() {
-            cfg[key] = '';
-            inp.value = '#000000';
-            updateState();
-        });
-        wrap.appendChild(inp); wrap.appendChild(reset); wrap.appendChild(note);
-        col.appendChild(wrap);
-        return col;
-    }
-
     function escapeForHtml(s) {
         return String(s).replace(/[&<>"']/g, function(c){
             return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c];
@@ -1159,8 +1098,7 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
         const y = position && typeof position.y === 'number' ? position.y : 10;
         if (field.type === 'image') {
             return { name: field.name, type: 'image',
-                     position: { x: x, y: y }, width: 60, height: 80, content: '',
-                     objectFit: 'cover' };
+                     position: { x: x, y: y }, width: 60, height: 80, content: '' };
         }
         // The bio-block needs much more height than a normal text field.
         const isBlock = (field.name === '__bio_block');
