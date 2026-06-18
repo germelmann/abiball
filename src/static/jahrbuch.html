@@ -243,6 +243,8 @@ let canManage = false;
 let canAdminComments = false;
 let readOnlyMode = false;
 const YB_CUSTOMIZE_ENABLED = #{yearbook_user_customization_enabled? ? 'true' : 'false'};
+// Designing a yearbook page (layout) is reserved for yearbook_manage users.
+const YB_CAN_MANAGE = #{user_has_permission?("yearbook_manage") ? 'true' : 'false'};
 
 (function() {
     const parts = window.location.pathname.replace(/^\/+/, '').split('/');
@@ -395,6 +397,8 @@ function updatePersonalizeCta() {
             cta.hide();
         }
     } else {
+        // Own page: only yearbook_manage users may design the layout.
+        if (!YB_CAN_MANAGE) { cta.hide(); return; }
         $('#personalize_link').attr('href', '/jahrbuch_personalize');
         cta.show();
     }

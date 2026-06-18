@@ -279,25 +279,25 @@ class Main < Sinatra::Base
         true
     end
 
-    # Page guard for the personalisation designer: needs login plus either the create
-    # (own page) or manage (someone else's page) permission.
+    # Page guard for the personalisation designer: designing a yearbook page (one's own
+    # or someone else's) is a layout task reserved for yearbook_manage users.
     def site_for_yearbook_personalize!
         unless user_logged_in?
             redirect "#{WEB_ROOT}/no_permission"
             return
         end
-        unless user_has_permission?("yearbook_create") || user_has_permission?("yearbook_manage")
+        unless user_has_permission?("yearbook_manage")
             redirect "#{WEB_ROOT}/no_permission"
         end
     end
 
-    # Resolve who a personalisation request targets and authorise it: editing your own
-    # page needs yearbook_create; editing someone else's needs yearbook_manage (enforced
-    # by resolve_target_username). Returns the effective username.
+    # Resolve who a personalisation request targets and authorise it. Designing pages is
+    # restricted to yearbook_manage users, whether they edit their own page (empty target)
+    # or someone else's (enforced by resolve_target_username). Returns the effective username.
     def authorize_personalize_target!(target_username)
         t = target_username.to_s.strip
         if t.empty?
-            require_user_with_permission!("yearbook_create")
+            require_user_with_permission!("yearbook_manage")
             return @session_user[:username]
         end
         resolve_target_username(t)

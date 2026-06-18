@@ -40,6 +40,47 @@
         </div>
     </div>
 
+    <!-- Account balance overview (shown when account is selected) -->
+    <div class="card mb-4 border-info" id="balance_card" style="display:none;">
+        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-bank"></i> Kontostand-Übersicht</h5>
+            <span id="balance_account_label" class="small"></span>
+        </div>
+        <div class="card-body">
+            <div class="row text-center g-3">
+                <div class="col-md-4">
+                    <div class="border rounded p-3 h-100">
+                        <div class="text-muted small mb-1">Gesamt eingegangen</div>
+                        <div class="fs-4 fw-bold" id="balance_expected_total">–</div>
+                        <div class="text-muted small" id="balance_expected_count"></div>
+                        <small class="text-muted">alle verbuchten Zahlungen, die diesem Konto zugeordnet sind</small>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="border rounded p-3 h-100 border-success">
+                        <div class="text-success small mb-1"><i class="bi bi-check-circle"></i> Geprüft</div>
+                        <div class="fs-4 fw-bold text-success" id="balance_verified_total">–</div>
+                        <div class="text-muted small" id="balance_verified_count"></div>
+                        <small class="text-muted">Zahlungen, die bei Kassenprüfung bestätigt wurden</small>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="border rounded p-3 h-100 border-warning">
+                        <div class="text-warning small mb-1"><i class="bi bi-hourglass-split"></i> Noch ungeprüft</div>
+                        <div class="fs-4 fw-bold text-warning" id="balance_unverified_total">–</div>
+                        <div class="text-muted small" id="balance_unverified_count"></div>
+                        <small class="text-muted">Zahlungen, die noch nicht abgeglichen wurden</small>
+                    </div>
+                </div>
+            </div>
+            <div class="alert alert-light border mt-3 mb-0 small">
+                <i class="bi bi-info-circle"></i>
+                <strong>Hinweis:</strong> „Gesamt eingegangen" zeigt alle Zahlungseingänge, die laut System auf dieses Konto gebucht wurden.
+                Dieser Betrag sollte mit dem aktuellen Kontoauszug übereinstimmen.
+            </div>
+        </div>
+    </div>
+
     <!-- Step 2: Audit walkthrough -->
     <div class="card mb-4" id="audit_card" style="display:none;">
         <div class="card-header d-flex justify-content-between align-items-center">
@@ -203,12 +244,43 @@ $(document).ready(function() {
     });
 
     $('#audit_bank_account_select').change(function() {
-        $('#start_audit_btn').prop('disabled', !$(this).val());
+        const id = $(this).val();
+        $('#start_audit_btn').prop('disabled', !id);
+        if (id) {
+            loadAccountBalance(id);
+        } else {
+            $('#balance_card').hide();
+        }
     });
 
     // Load all bank accounts by default
     loadBankAccountsForAudit();
 });
+
+function loadAccountBalance(bankAccountId) {
+    const eventId = $('#audit_event_select').val();
+    const params = { bank_account_id: bankAccountId };
+    if (eventId) params.event_id = eventId;
+
+    api_call('/api/audit_account_balance', params, function(data) {
+        if (!data.success) return;
+
+        const acc = data.account || {};
+        const label = [acc.account_name, acc.bank_name, acc.iban].filter(Boolean).join(' – ');
+        $('#balance_account_label').text(label);
+
+        $('#balance_expected_total').text(Number(data.expected_total).toFixed(2) + ' €');
+        $('#balance_expected_count').text(data.expected_count + ' Zahlung(en)');
+
+        $('#balance_verified_total').text(Number(data.verified_total).toFixed(2) + ' €');
+        $('#balance_verified_count').text(data.verified_count + ' Zahlung(en)');
+
+        $('#balance_unverified_total').text(Number(data.unverified_total).toFixed(2) + ' €');
+        $('#balance_unverified_count').text(data.unverified_count + ' Zahlung(en)');
+
+        $('#balance_card').show();
+    });
+}
 
 function loadEventsForAudit() {
     api_call('/api/get_events', {}, function(data) {
@@ -268,6 +340,7 @@ function startAudit() {
         auditState.skippedCount = 0;
 
         $('#setup_card').hide();
+        $('#balance_card').show();
         $('#audit_account_badge').text('Konto: ' + bankAccountName);
 
         if (auditState.payments.length === 0) {
@@ -354,6 +427,8 @@ function confirmAuditPayment() {
             ).show();
         }
 
+        // Refresh balance card to reflect newly verified payment
+        loadAccountBalance(auditState.bankAccountId);
         // Move on after a short delay so the user sees the result
         setTimeout(advanceAudit, data.matches ? 600 : 1500);
     });

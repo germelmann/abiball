@@ -1057,6 +1057,81 @@ class Main < Sinatra::Base
         respond(success: true)
     end
 
+    # Return expected and verified balance for a single bank account
+    post "/api/audit_account_balance" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:bank_account_id], optional_keys: [:event_id])
+
+        bank_account_id = data[:bank_account_id]
+        event_id        = data[:event_id]
+
+        event_filter = ""
+        params = { bank_account_id: bank_account_id }
+        if event_id && !event_id.to_s.empty?
+            event_filter = "AND e.id = $event_id"
+            params[:event_id] = event_id
+        end
+
+        # Verified payments: explicitly confirmed to belong to this account
+        verified = neo4j_query(<<~END_OF_QUERY, params)
+            MATCH (pay:Payment {verified: true, verified_account_id: $bank_account_id})
+            MATCH (o:TicketOrder)-[:HAS_PAYMENT]->(pay)
+            MATCH (o)-[:FOR]->(e:Event)
+            WHERE true #{event_filter}
+            RETURN
+                COUNT(pay)               AS verified_count,
+                SUM(pay.verified_amount) AS verified_total
+        END_OF_QUERY
+
+        # Expected payments: all payments from orders that directed transfers to this account
+        expected = neo4j_query(<<~END_OF_QUERY, params)
+            MATCH (b:BankAccount {id: $bank_account_id})
+            MATCH (pr:PaymentRequest)-[:USES_ACCOUNT]->(b)
+            MATCH (o:TicketOrder)-[:HAS_PAYMENT_REQUEST]->(pr)
+            MATCH (o)-[:FOR]->(e:Event)
+            MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+            WHERE true #{event_filter}
+            WITH DISTINCT pay
+            RETURN
+                COUNT(pay)      AS expected_count,
+                SUM(pay.amount) AS expected_total
+        END_OF_QUERY
+
+        # Unverified: payments associated to this account but not yet verified
+        unverified = neo4j_query(<<~END_OF_QUERY, params)
+            MATCH (b:BankAccount {id: $bank_account_id})
+            MATCH (pr:PaymentRequest)-[:USES_ACCOUNT]->(b)
+            MATCH (o:TicketOrder)-[:HAS_PAYMENT_REQUEST]->(pr)
+            MATCH (o)-[:FOR]->(e:Event)
+            MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+            WHERE (pay.verified IS NULL OR pay.verified = false)
+              #{event_filter}
+            WITH DISTINCT pay
+            RETURN
+                COUNT(pay)      AS unverified_count,
+                SUM(pay.amount) AS unverified_total
+        END_OF_QUERY
+
+        # Account meta (IBAN etc.)
+        account_info = neo4j_query(<<~END_OF_QUERY, { bank_account_id: bank_account_id })
+            MATCH (b:BankAccount {id: $bank_account_id})
+            RETURN b.account_name AS account_name,
+                   b.bank_name    AS bank_name,
+                   b.iban         AS iban
+        END_OF_QUERY
+
+        respond(
+            success:          true,
+            account:          account_info.first || {},
+            verified_count:   (verified.first&.dig('verified_count') || 0).to_i,
+            verified_total:   (verified.first&.dig('verified_total') || 0.0).to_f.round(2),
+            expected_count:   (expected.first&.dig('expected_count') || 0).to_i,
+            expected_total:   (expected.first&.dig('expected_total') || 0.0).to_f.round(2),
+            unverified_count: (unverified.first&.dig('unverified_count') || 0).to_i,
+            unverified_total: (unverified.first&.dig('unverified_total') || 0.0).to_f.round(2)
+        )
+    end
+
     # ===========================================
     # Payment Request Management Endpoints
     # ===========================================
@@ -2495,14 +2570,96 @@ class Main < Sinatra::Base
             'event_start_datetime' => order_data['event_start_datetime']
         }
         
-        # Generate individual ticket PDF
+        # Generate PDF (single ticket wrapped in 3-per-page layout)
         pdf_content = generate_ticket_pdf_content(order_info, participant)
-        
+
         respond_raw_with_mimetype_and_filename(
             pdf_content,
             'application/pdf',
             "Ticket_#{order_data['payment_reference']}_#{ticket_number}.pdf"
         )
+    end
+
+    # Download all tickets for an order as one PDF (3 tickets per A4 page)
+    get "/api/download_order_tickets/:order_id" do
+        require_user!
+
+        order_id = params[:order_id]
+        unless order_id && !order_id.empty?
+            respond(success: false, error: "Ungültige Parameter")
+            return
+        end
+
+        order_user_email = neo4j_query_expect_one(<<~END_OF_QUERY, {order_id: order_id})['user_email']
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder {id: $order_id})
+            RETURN u.email AS user_email
+        END_OF_QUERY
+
+        is_admin = user_has_permission?("manage_orders")
+        is_order_owner = @session_user[:email] == order_user_email
+
+        unless is_admin || is_order_owner
+            respond(success: false, error: "Keine Berechtigung für diese Bestellung")
+            return
+        end
+
+        unless is_admin || ALLOW_USER_TICKET_DOWNLOAD
+            respond(success: false, error: "Ticket-Download ist derzeit nicht verfügbar")
+            return
+        end
+
+        order_result = neo4j_query(<<~END_OF_QUERY, {order_id: order_id})
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder {id: $order_id})
+            MATCH (o)-[:INCLUDES]->(p:Participant)
+            MATCH (o)-[:FOR]->(e:Event)
+            RETURN o.id AS order_id,
+                   o.payment_reference AS payment_reference,
+                   o.status AS status,
+                   o.tickets_generated AS tickets_generated,
+                   e.start_datetime AS event_start_datetime,
+                   p.name AS participant_name,
+                   p.phone AS participant_phone,
+                   p.email AS participant_email,
+                   p.birthdate AS participant_birthdate,
+                   p.ticket_number AS participant_ticket_number
+            ORDER BY p.ticket_number ASC
+        END_OF_QUERY
+
+        if order_result.empty?
+            respond(success: false, error: "Bestellung nicht gefunden")
+            return
+        end
+
+        first = order_result.first
+        unless first['status'] == 'paid' || first['status'] == 'overpaid'
+            respond(success: false, error: "Tickets sind nur für bezahlte Bestellungen verfügbar")
+            return
+        end
+
+        unless first['tickets_generated']
+            respond(success: false, error: "Tickets wurden noch nicht freigegeben")
+            return
+        end
+
+        order_info = {
+            'order_id'             => first['order_id'],
+            'payment_reference'    => first['payment_reference'],
+            'event_start_datetime' => first['event_start_datetime']
+        }
+
+        participants = order_result.map do |row|
+            {
+                'name'          => row['participant_name'],
+                'phone'         => row['participant_phone'],
+                'email'         => row['participant_email'],
+                'birthdate'     => row['participant_birthdate'],
+                'ticket_number' => row['participant_ticket_number']
+            }
+        end
+
+        pdf_content = generate_order_tickets_pdf(order_info, participants)
+        filename = "Tickets_#{first['payment_reference']}.pdf"
+        respond_raw_with_mimetype_and_filename(pdf_content, 'application/pdf', filename)
     end
 
     # Quick payment search by reference
@@ -2759,125 +2916,263 @@ class Main < Sinatra::Base
         end.render
     end
 
-    # Generate individual ticket PDFs with QR codes and security features (only after approval)
-    def generate_ticket_pdf_content(order, participant)
-        # Generate unique security ID for this ticket PDF
-        security_id = SecureRandom.hex(8).upcase
-        
-        Prawn::Document.new(page_size: 'A4', margin: [50, 50, 50, 50]) do |pdf|
-            # Add watermark
-            pdf.transparent(0.1) do
-                pdf.rotate(45, origin: [pdf.bounds.width/2, pdf.bounds.height/2]) do
-                    pdf.draw_text "#{EVENT_NAME} - ORIGINAL TICKET", 
-                                  at: [pdf.bounds.width/2 - 120, pdf.bounds.height/2], 
-                                  size: 36, style: :bold
-                end
-            end
-            
-            # Title with security ID and age badge
-            pdf.text "#{EVENT_NAME} - Ticket", size: 24, style: :bold, align: :center
-            
-            # Calculate and display age badge if birthdate is available
-            if participant['birthdate'] && !participant['birthdate'].empty?
-                # Get reference date from event start or today
-                reference_date = nil
-                if order['event_start_datetime'] && !order['event_start_datetime'].empty?
-                    begin
-                        reference_date = DateTime.parse(order['event_start_datetime']).to_date
-                    rescue ArgumentError
-                        reference_date = Date.today
-                    end
-                else
-                    reference_date = Date.today
-                end
-                
-                age_category = get_age_category(participant['birthdate'], reference_date)
-                if age_category
-                    # Display age badge in header with high contrast
-                    pdf.fill_color '000000'  # Black
-                    pdf.stroke_color '000000'
-                    pdf.line_width 2
-                    
-                    # Create a box for the age badge
-                    badge_width = 50
-                    badge_height = 20
-                    badge_x = pdf.bounds.right - badge_width - 10
-                    badge_y = pdf.cursor - 10
-                    
-                    pdf.stroke_rectangle [badge_x, badge_y], badge_width, badge_height
-                    pdf.fill_rectangle [badge_x, badge_y], badge_width, badge_height
-                    
-                    # White text on black background for high contrast
-                    pdf.fill_color 'FFFFFF'
-                    pdf.text_box age_category,
-                        at: [badge_x, badge_y],
-                        width: badge_width,
-                        height: badge_height,
-                        align: :center,
-                        valign: :center,
-                        size: 12,
-                        style: :bold
-                    
-                    # Reset colors
-                    pdf.fill_color '000000'
-                    pdf.stroke_color '000000'
-                end
-            end
-            
-            pdf.text "Ticket-ID: #{security_id}", size: 10, align: :center, style: :italic
-            pdf.move_down 40
-            
-            # Generate unique QR data for this ticket
-            qr_data = {
-                order_id: order['order_id'],
-                ticket_number: participant['ticket_number'],
-                participant_name: participant['name'],
-                event: EVENT_NAME,
-                security_id: security_id,
-                verification_hash: Digest::SHA256.hexdigest("#{order['order_id']}-#{participant['ticket_number']}-#{security_id}")
-            }.to_json
-            
-            # Large QR code for ticket verification
-            pdf.text "Ticket QR-Code", size: 18, style: :bold, align: :center
-            pdf.move_down 20
-            pdf.print_qr_code(qr_data, extent: 170 , align: :center)
+    # Locate optional ticket artwork. If a single-ticket image exists it is used as the
+    # full-bleed background and only the dynamic fields (name, QR, age) are overlaid.
+    def ticket_background_image_path
+        base = File.expand_path(File.join(File.dirname(__FILE__), '..', '..', 'static', 'images'))
+        %w[ticket_background.png ticket_background.jpg abiball_ticket.png abiball_ticket.jpg].each do |name|
+            path = File.join(base, name)
+            return path if File.exist?(path)
+        end
+        nil
+    end
 
-            
-            pdf.move_down 100
-            
-            # Ticket information
-            pdf.text "Ticket-Informationen", size: 16, style: :bold, align: :center
-            pdf.move_down 15
-            
-            ticket_data = [
-                ['Ticket Nummer:', participant['ticket_number'].to_s],
-                ['Name:', participant['name']],
-                ['Telefon:', participant['phone'] || '-'],
-                ['E-Mail:', participant['email'] || '-'],
-                ['Event:', EVENT_NAME],
-                ['Bestellnummer:', order['payment_reference'] || '-'],
-                ['Status:', 'Gültig']
-            ]
-            
-            pdf.table(ticket_data, width: pdf.bounds.width, position: :center) do
-                row(0..-1).border_width = 1
-                column(0).font_style = :bold
-                column(0).width = 150
-                self.row_colors = ['FFFFFF', 'F7F7F7']
+    # Draw one "Abiball-Ticket" (burgundy & gold design) into the region whose top-left is
+    # [0, y_top] within the current page bounds. Three of these fit on an A4 page.
+    def draw_single_ticket(pdf, y_top, ticket_height, order, participant, security_id, reference_date)
+        w = pdf.bounds.width
+        h = ticket_height
+
+        # Palette (vintage burgundy / gold)
+        burgundy      = '5C0F18'
+        burgundy_dark = '2E060B'
+        gold          = 'C6A24C'
+        gold_light    = 'E6D6A8'
+        cream         = 'F1E8CF'
+
+        qr_data = {
+            order_id: order['order_id'],
+            ticket_number: participant['ticket_number'],
+            participant_name: participant['name'],
+            event: EVENT_NAME,
+            security_id: security_id,
+            verification_hash: Digest::SHA256.hexdigest("#{order['order_id']}-#{participant['ticket_number']}-#{security_id}")
+        }.to_json
+
+        age_category = if participant['birthdate'] && !participant['birthdate'].to_s.empty?
+            get_age_category(participant['birthdate'], reference_date)
+        end
+        age_label = age_category || '18+'
+        name      = participant['name'].to_s
+        org_label = defined?(TICKET_VERTICAL_LABEL) ? TICKET_VERTICAL_LABEL : EVENT_NAME
+        bg_image  = ticket_background_image_path
+
+        pdf.bounding_box([0, y_top], width: w, height: h) do
+            stub_w = w * 0.115
+            main_w = w - stub_w
+
+            if bg_image
+                begin
+                    pdf.image bg_image, at: [0, h], width: w, height: h
+                rescue StandardError
+                    bg_image = nil
+                end
             end
-            
-            pdf.move_down 30
-            
-            # Security footer for tickets
-            pdf.text "Sicherheitshinweise:", size: 12, style: :bold
-            pdf.text "• Dieses Ticket wurde nach Genehmigung durch die Veranstaltungsleitung erstellt", size: 9
-            pdf.text "• Ticket-ID: #{security_id} - Bei Verdacht auf Fälschung kontaktieren Sie den Support", size: 9
-            pdf.text "• Der QR-Code dient zur Verifizierung am Eingang und enthält verschlüsselte Daten", size: 9
-            pdf.text "• Dieses Ticket ist nur in Verbindung mit einem gültigen Ausweis gültig", size: 9
-            
-            # Footer
-            pdf.number_pages "Ticket <page> / <total>", at: [pdf.bounds.right - 50, 0], align: :right, size: 10
+
+            unless bg_image
+                # ---------- Vector recreation of the ticket artwork ----------
+                # Body + dark vignette edge
+                pdf.fill_color burgundy
+                pdf.fill_rounded_rectangle [0, h], w, h, 10
+                pdf.stroke_color burgundy_dark
+                pdf.line_width 5
+                pdf.stroke_rounded_rectangle [3, h - 3], w - 6, h - 6, 9
+
+                # Perforation separating main area from the stub
+                pdf.stroke_color gold
+                pdf.line_width 0.8
+                pdf.dash(2, space: 2)
+                pdf.stroke_vertical_line 8, h - 8, at: main_w
+                pdf.undash
+
+                # Gold double-line cartouche
+                cart_x   = main_w * 0.045
+                cart_w   = main_w * 0.91
+                cart_top = h - h * 0.08
+                cart_h   = h * 0.84
+                pdf.line_width 2
+                pdf.stroke_color gold
+                pdf.stroke_rounded_rectangle [cart_x, cart_top], cart_w, cart_h, 12
+                pdf.line_width 0.8
+                pdf.stroke_color gold_light
+                pdf.stroke_rounded_rectangle [cart_x + 5, cart_top - 5], cart_w - 10, cart_h - 10, 9
+
+                # Title
+                pdf.fill_color gold_light
+                pdf.font('Times-Roman', style: :bold_italic) do
+                    pdf.text_box 'Abiball-Ticket',
+                        at: [cart_x, cart_top - h * 0.05],
+                        width: cart_w, height: h * 0.22,
+                        size: h * 0.155, align: :center, valign: :top
+                end
+                # Event name (small, under the title)
+                pdf.fill_color gold
+                pdf.font('Times-Roman', style: :italic) do
+                    pdf.text_box EVENT_NAME.to_s,
+                        at: [cart_x, cart_top - h * 0.24],
+                        width: cart_w, height: h * 0.07,
+                        size: h * 0.06, align: :center, valign: :top
+                end
+
+                # "Für:" label (aligned with the name line)
+                pdf.fill_color gold_light
+                pdf.font('Times-Roman', style: :italic) do
+                    pdf.text_box 'Für:',
+                        at: [cart_x + cart_w * 0.14, cart_top - h * 0.32],
+                        width: cart_w * 0.16, height: h * 0.10,
+                        size: h * 0.085, valign: :center
+                end
+
+                # Vertical stub with the organiser / school name
+                pdf.line_width 1.2
+                pdf.stroke_color gold
+                pdf.stroke_rounded_rectangle [main_w + stub_w * 0.18, h - h * 0.08],
+                    stub_w * 0.64, h * 0.84, 6
+                pdf.fill_color gold_light
+                pdf.font('Times-Roman', style: :bold_italic) do
+                    pdf.rotate(90, origin: [main_w + stub_w * 0.5, h * 0.5]) do
+                        pdf.text_box org_label.to_s,
+                            at: [main_w + stub_w * 0.5 - h * 0.42, h * 0.5 + stub_w * 0.22],
+                            width: h * 0.84, height: stub_w * 0.5,
+                            size: [stub_w * 0.34, 13].min,
+                            align: :center, valign: :center, overflow: :shrink_to_fit
+                    end
+                end
+            end
+
+            # ---------- Dynamic fields (drawn in both modes) ----------
+            cart_x   = main_w * 0.045
+            cart_w   = main_w * 0.91
+            cart_top = h - h * 0.08
+            cart_bottom = cart_top - h * 0.84
+            # The ticket writing area is dark burgundy in both modes, so use light gold text.
+            name_color = gold_light
+
+            # Participant name on the "Für" line + underline
+            nx1 = cart_x + cart_w * 0.30
+            nx2 = cart_x + cart_w * 0.74
+            name_top = cart_top - h * 0.32
+            pdf.fill_color name_color
+            pdf.font('Times-Roman', style: :bold_italic) do
+                pdf.text_box name,
+                    at: [nx1, name_top],
+                    width: nx2 - nx1, height: h * 0.10,
+                    size: h * 0.085, align: :center, valign: :center,
+                    overflow: :shrink_to_fit
+            end
+            unless bg_image
+                pdf.stroke_color gold
+                pdf.line_width 1
+                pdf.stroke_horizontal_line nx1, nx2, at: name_top - h * 0.10
+            end
+
+            # Inner cartouche boundary references (inner line is 5pt inset from outer)
+            inner_left   = cart_x + 5
+            inner_right  = cart_x + cart_w - 5
+            inner_top    = cart_top - 5
+            inner_bottom = cart_bottom + 5
+            # Shared margin so age badge, QR code and info text keep the same distance
+            # from the inner cartouche border lines.
+            corner_margin = 5
+
+            # QR code: bottom-right corner, same margin as age badge
+            qr_side   = h * 0.34
+            qr_x    = inner_right - corner_margin - 5 - qr_side
+            qr_top  = inner_bottom + corner_margin + qr_side + 5
+            pdf.fill_color cream
+            pdf.fill_rounded_rectangle [qr_x - 5, qr_top + 5], qr_side + 10, qr_side + 10, 4
+            pdf.fill_color '000000'
+            pdf.bounding_box([qr_x, qr_top], width: qr_side, height: qr_side) do
+                pdf.print_qr_code(qr_data, extent: qr_side)
+            end
+
+            # Age badge: top-left corner with equal margin to inner borders
+            badge_w = [w * 0.085, 48].min
+            badge_h = h * 0.11
+            badge_x = inner_left + corner_margin
+            badge_y = inner_top - corner_margin
+            pdf.fill_color gold
+            pdf.fill_rounded_rectangle [badge_x, badge_y], badge_w, badge_h, 3
+            pdf.fill_color burgundy_dark
+            pdf.font('Helvetica', style: :bold) do
+                pdf.text_box age_label,
+                    at: [badge_x, badge_y], width: badge_w, height: badge_h,
+                    size: h * 0.06, align: :center, valign: :center
+            end
+
+            # Info / security micro-text: bottom-left corner, same margin as badge/QR
+            info_color  = bg_image ? 'F1E8CF' : gold
+            info_lines  = [
+                "Ticket-Nr.: #{participant['ticket_number']}",
+                "Bestellnr.: #{order['payment_reference'] || '-'}",
+                "Ticket-ID: #{security_id}"
+            ].join("\n")
+            info_size   = h * 0.038
+            info_h      = h * 0.18
+            info_bottom = inner_bottom + corner_margin
+            pdf.fill_color info_color
+            pdf.font('Helvetica') do
+                pdf.text_box info_lines,
+                    at: [inner_left + corner_margin, info_bottom + info_h],
+                    width: qr_x - inner_left - corner_margin - 8,
+                    height: info_h,
+                    size: info_size, leading: h * 0.010,
+                    valign: :bottom, overflow: :shrink_to_fit
+            end
+
+            # Design credit, centred just below the cartouche
+            pdf.fill_color info_color
+            pdf.font('Times-Roman', style: :italic) do
+                pdf.text_box 'Ticket-Design: Yuhan',
+                    at: [cart_x, cart_bottom - 1],
+                    width: cart_w, height: h * 0.055,
+                    size: h * 0.035, align: :center, valign: :center,
+                    overflow: :shrink_to_fit
+            end
+
+            pdf.fill_color '000000'
+            pdf.stroke_color '000000'
+        end
+    end
+
+    # Generate a single PDF with all tickets for an order – 3 tickets per A4 page
+    def generate_order_tickets_pdf(order, participants)
+        reference_date = if order['event_start_datetime'] && !order['event_start_datetime'].empty?
+            begin
+                DateTime.parse(order['event_start_datetime']).to_date
+            rescue ArgumentError
+                Date.today
+            end
+        else
+            Date.today
+        end
+
+        tickets_per_page = 3
+        ticket_gap = 6
+
+        Prawn::Document.new(page_size: 'A4', margin: [12, 18, 12, 18]) do |pdf|
+            ticket_height = (pdf.bounds.height - (tickets_per_page - 1) * ticket_gap) / tickets_per_page.to_f
+
+            participants.each_with_index do |participant, idx|
+                slot = idx % tickets_per_page
+                pdf.start_new_page if slot == 0 && idx > 0
+
+                security_id = SecureRandom.hex(8).upcase
+                y_top = pdf.bounds.top - slot * (ticket_height + ticket_gap)
+                draw_single_ticket(pdf, y_top, ticket_height, order, participant, security_id, reference_date)
+            end
+
+            # Page numbers
+            pdf.number_pages "Seite <page> / <total>",
+                at: [pdf.bounds.right - 60, 0],
+                align: :right,
+                size: 8
         end.render
+    end
+
+    # Legacy single-ticket PDF (kept for backwards compatibility)
+    def generate_ticket_pdf_content(order, participant)
+        generate_order_tickets_pdf(order, [participant])
     end
 
     # Send order confirmation email
@@ -3077,12 +3372,199 @@ class Main < Sinatra::Base
             
             # Footer
             pdf.move_down 30
-            pdf.text "Diese Liste wurde automatisch generiert und enthält nur bestätigte, bezahlte Teilnehmer.", 
+            pdf.text "Diese Liste wurde automatisch generiert und enthält nur bestätigte, bezahlte Teilnehmer.",
                      size: 10, style: :italic, align: :center
-            
+
             # Page numbers
             pdf.number_pages "Seite <page> von <total>", at: [pdf.bounds.right - 50, 0], align: :right, size: 10
         end.render
+    end
+
+    # Advanced guest list PDF with configurable columns and status filters
+    def generate_guest_list_pdf_advanced(event, participants, opts = {})
+        show_phone        = opts.fetch(:show_phone, true)
+        show_email        = opts.fetch(:show_email, true)
+        show_birthdate    = opts.fetch(:show_birthdate, false)
+        show_age_category = opts.fetch(:show_age_category, true)
+
+        event_date_str = if event['start_datetime'] && !event['start_datetime'].to_s.empty?
+            begin
+                DateTime.parse(event['start_datetime']).strftime('%d.%m.%Y %H:%M')
+            rescue ArgumentError
+                '-'
+            end
+        end
+
+        Prawn::Document.new(page_size: 'A4', margin: [40, 30, 40, 30]) do |pdf|
+            # Title
+            pdf.text "#{event['name']} – Gästeliste", size: 18, style: :bold, align: :center
+            pdf.move_down 6
+            pdf.text "Veranstaltungsort: #{event['location']}", size: 11, align: :center if event['location'] && !event['location'].to_s.empty?
+            pdf.text "Datum: #{event_date_str}", size: 11, align: :center if event_date_str
+            pdf.text "Erstellt am: #{Date.today.strftime('%d.%m.%Y')}", size: 9, align: :center, style: :italic
+            pdf.move_down 16
+
+            # Statistics
+            total = participants.length
+            paid_count    = participants.count { |p| ['paid', 'overpaid'].include?(p['order_status']) }
+            pending_count = participants.count { |p| !['paid', 'overpaid'].include?(p['order_status']) }
+
+            pdf.text "Teilnehmer gesamt: #{total}  |  bezahlt: #{paid_count}  |  ausstehend: #{pending_count}",
+                size: 10, align: :center
+            pdf.move_down 14
+
+            # Build dynamic columns
+            headers = ['Nr.', 'Bestellnr.', 'Name']
+            headers << 'Geburtsdatum'   if show_birthdate
+            headers << 'Alterskategorie' if show_age_category
+            headers << 'Telefon'        if show_phone
+            headers << 'E-Mail'         if show_email
+            headers << 'Status'
+            headers << 'Besteller'
+
+            # Calculate reference date for age category
+            reference_date = if event['start_datetime'] && !event['start_datetime'].to_s.empty?
+                begin
+                    DateTime.parse(event['start_datetime']).to_date
+                rescue ArgumentError
+                    Date.today
+                end
+            else
+                Date.today
+            end
+
+            if participants.any?
+                table_data = [headers]
+
+                participants.each_with_index do |p, idx|
+                    row_data = [
+                        (idx + 1).to_s,
+                        p['payment_reference'] || p['order_id'] || '-',
+                        p['participant_name'] || '-'
+                    ]
+                    if show_birthdate
+                        bd = p['participant_birthdate']
+                        row_data << (bd && !bd.empty? ? begin Date.parse(bd).strftime('%d.%m.%Y') rescue bd end : '-')
+                    end
+                    if show_age_category
+                        bd = p['participant_birthdate']
+                        cat = if bd && !bd.empty?
+                            cat_raw = get_age_category(bd, reference_date)
+                            cat_raw ? cat_raw : '18+'
+                        else
+                            'unbekannt'
+                        end
+                        row_data << cat
+                    end
+                    row_data << (p['participant_phone'] || '-') if show_phone
+                    row_data << (p['participant_email'] || '-') if show_email
+                    status_map = {
+                        'paid' => 'bezahlt', 'overpaid' => 'überbezahlt',
+                        'pending' => 'ausstehend', 'in_review' => 'in Prüfung',
+                        'partially_paid' => 'teilw. bezahlt', 'contact_required' => 'Kontakt nötig',
+                        'offline_payment' => 'Barzahlung'
+                    }
+                    row_data << (status_map[p['order_status']] || p['order_status'] || '-')
+                    row_data << (p['user_name'] || p['user_email'] || '-')
+                    table_data << row_data
+                end
+
+                # Dynamic column widths
+                available_width = pdf.bounds.width
+                fixed_cols = { 0 => 24, 1 => 62 }  # Nr., Bestellnr.
+                remaining = available_width - fixed_cols.values.sum
+                variable_count = headers.length - fixed_cols.length
+                default_w = (remaining / variable_count.to_f).round(1)
+
+                col_widths = headers.each_index.map do |i|
+                    fixed_cols[i] || default_w
+                end
+
+                num_rows = table_data.length
+                pdf.table table_data, {
+                    header: true,
+                    width: available_width,
+                    cell_style: { size: 8, padding: [3, 4, 3, 4] },
+                    column_widths: col_widths
+                } do
+                    row(0).font_style = :bold
+                    row(0).background_color = 'e8e8e8'
+                    cells.borders = [:top, :bottom, :left, :right]
+                    cells.border_width = 0.5
+                    row(0).border_width = 1
+                    (1..num_rows - 1).each do |r|
+                        rows(r).background_color = r.odd? ? 'FFFFFF' : 'F7F7F7'
+                    end
+                end
+            else
+                pdf.text "Keine Teilnehmer gefunden.", size: 11, style: :italic
+            end
+
+            pdf.move_down 20
+            pdf.text "Automatisch generiert am #{DateTime.now.strftime('%d.%m.%Y %H:%M')} Uhr.",
+                size: 8, style: :italic, align: :center
+            pdf.number_pages "Seite <page> von <total>",
+                at: [pdf.bounds.right - 60, 0], align: :right, size: 9
+        end.render
+    end
+
+    # Advanced guest list export (POST, supports filters and column selection)
+    post "/api/export_guest_list_pdf_advanced" do
+        require_user_with_permission!("view_users")
+        data = parse_request_data(
+            required_keys: [:event_id],
+            optional_keys: [:include_paid, :include_pending, :show_phone, :show_email,
+                            :show_birthdate, :show_age_category]
+        )
+
+        event_id       = data[:event_id]
+        include_paid    = data[:include_paid]    != false && data[:include_paid]    != 'false'
+        include_pending = data[:include_pending] == true  || data[:include_pending] == 'true'
+        show_phone        = data[:show_phone]        != false && data[:show_phone]        != 'false'
+        show_email        = data[:show_email]        != false && data[:show_email]        != 'false'
+        show_birthdate    = data[:show_birthdate]    == true  || data[:show_birthdate]    == 'true'
+        show_age_category = data[:show_age_category] != false && data[:show_age_category] != 'false'
+
+        statuses = []
+        statuses += ['paid', 'overpaid', 'offline_payment'] if include_paid
+        statuses += ['pending', 'in_review', 'contact_required', 'partially_paid'] if include_pending
+
+        if statuses.empty?
+            respond(success: false, error: "Mindestens einen Status (bezahlt oder ausstehend) auswählen")
+            return
+        end
+
+        event = neo4j_query_expect_one(<<~END_OF_QUERY, {event_id: event_id})
+            MATCH (e:Event {id: $event_id})
+            RETURN e.name AS name, e.location AS location, e.start_datetime AS start_datetime
+        END_OF_QUERY
+
+        participants = neo4j_query(<<~END_OF_QUERY, {event_id: event_id, statuses: statuses})
+            MATCH (e:Event {id: $event_id})<-[:FOR]-(o:TicketOrder)-[:INCLUDES]->(p:Participant)
+            MATCH (u:User)-[:PLACED]->(o)
+            WHERE o.status IN $statuses
+            RETURN p.name AS participant_name,
+                   p.phone AS participant_phone,
+                   p.email AS participant_email,
+                   p.birthdate AS participant_birthdate,
+                   p.ticket_number AS ticket_number,
+                   u.email AS user_email,
+                   u.name AS user_name,
+                   o.payment_reference AS payment_reference,
+                   o.id AS order_id,
+                   o.status AS order_status
+            ORDER BY p.name ASC
+        END_OF_QUERY
+
+        pdf_content = generate_guest_list_pdf_advanced(event, participants, {
+            show_phone:        show_phone,
+            show_email:        show_email,
+            show_birthdate:    show_birthdate,
+            show_age_category: show_age_category
+        })
+
+        filename = "Gaesteliste_#{event['name'].gsub(/[^a-zA-Z0-9]/, '_')}_#{Date.today.strftime('%Y%m%d')}.pdf"
+        respond_raw_with_mimetype_and_filename(pdf_content, 'application/pdf', filename)
     end
 
     # Check if ticket downloads are allowed for users

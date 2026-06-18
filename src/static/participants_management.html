@@ -7,6 +7,68 @@
         <a href="/order_management" class="btn btn-outline-info btn-sm">
             <i class="bi bi-list-check"></i> Bestellungsmanagement
         </a>
+        <button class="btn btn-outline-success btn-sm ms-2" data-bs-toggle="modal" data-bs-target="#guestListModal">
+            <i class="bi bi-file-earmark-pdf"></i> Gästeliste exportieren
+        </button>
+    </div>
+
+    <!-- Guest List Export Modal -->
+    <div class="modal fade" id="guestListModal" tabindex="-1" aria-labelledby="guestListModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="guestListModalLabel"><i class="bi bi-file-earmark-pdf"></i> Gästeliste als PDF exportieren</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="gl_event_select" class="form-label fw-bold">Event</label>
+                        <select class="form-select" id="gl_event_select">
+                            <option value="">– Event wählen –</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Bestellstatus einbeziehen</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="gl_include_paid" checked>
+                            <label class="form-check-label" for="gl_include_paid">Bezahlte Bestellungen</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="gl_include_pending">
+                            <label class="form-check-label" for="gl_include_pending">Ausstehende / pending Bestellungen</label>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Spalten</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="gl_show_age_category" checked>
+                            <label class="form-check-label" for="gl_show_age_category">Alterskategorie (&lt;14 / &lt;16 / &lt;18 / 18+)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="gl_show_birthdate">
+                            <label class="form-check-label" for="gl_show_birthdate">Geburtsdatum</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="gl_show_phone" checked>
+                            <label class="form-check-label" for="gl_show_phone">Telefonnummer</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="gl_show_email" checked>
+                            <label class="form-check-label" for="gl_show_email">E-Mail-Adresse</label>
+                        </div>
+                        <small class="text-muted">Bestellnummer und Name sind immer enthalten.</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                    <button type="button" class="btn btn-success" onclick="exportGuestListPdf()">
+                        <i class="bi bi-download"></i> PDF herunterladen
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Event Filter Dropdown -->
@@ -309,14 +371,71 @@
         });
     }
 
+    function exportGuestListPdf() {
+        const eventId = $('#gl_event_select').val();
+        if (!eventId) {
+            alert('Bitte zuerst ein Event auswählen.');
+            return;
+        }
+
+        const payload = {
+            event_id:          eventId,
+            include_paid:      $('#gl_include_paid').is(':checked'),
+            include_pending:   $('#gl_include_pending').is(':checked'),
+            show_age_category: $('#gl_show_age_category').is(':checked'),
+            show_birthdate:    $('#gl_show_birthdate').is(':checked'),
+            show_phone:        $('#gl_show_phone').is(':checked'),
+            show_email:        $('#gl_show_email').is(':checked')
+        };
+
+        // POST to get PDF – open result via a dynamic form submit to trigger download
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/api/export_guest_list_pdf_advanced';
+        form.target = '_blank';
+
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'data';
+        input.value = JSON.stringify(payload);
+        form.appendChild(input);
+
+        // Use fetch instead so we respect the existing API convention
+        fetch('/api/export_guest_list_pdf_advanced', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(function(response) {
+            if (!response.ok) {
+                return response.json().then(function(d) {
+                    throw new Error(d.error || 'Unbekannter Fehler');
+                });
+            }
+            return response.blob();
+        }).then(function(blob) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+            a.download = 'Gaesteliste_' + today + '.pdf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            bootstrap.Modal.getInstance(document.getElementById('guestListModal')).hide();
+        }).catch(function(err) {
+            alert('Fehler beim Exportieren: ' + err.message);
+        });
+    }
+
     $(document).ready(function() {
-        // Load events for filter dropdown
+        // Load events for filter dropdown (both the table filter and the guest list modal)
         api_call('/api/get_events', {}, function(data) {
             if (data.success && data.events) {
                 data.events.forEach(function(event) {
-                    $('#event_filter_select').append(
-                        $('<option>').val(event.id).text(event.name || event.id)
-                    );
+                    const opt = $('<option>').val(event.id).text(event.name || event.id);
+                    $('#event_filter_select').append(opt.clone());
+                    $('#gl_event_select').append(opt);
                 });
             }
             // Check for event_id in URL query string
@@ -324,6 +443,7 @@
             const eventIdParam = urlParams.get('event_id');
             if (eventIdParam) {
                 $('#event_filter_select').val(eventIdParam);
+                $('#gl_event_select').val(eventIdParam);
             }
             // Initial load
             refresh();

@@ -16,6 +16,13 @@ EVENT_NAME = 'Abiball 2024'
 EVENT_YEAR = 2024
 EVENT_LOCATION = 'Große Halle Berlin'
 
+# Text printed on the vertical gold stub of the Abiball ticket (e.g. the school name).
+# Falls auskommentiert/nicht gesetzt, wird EVENT_NAME verwendet.
+# Optional: Wird eine Bilddatei unter src/static/images/ticket_background.png
+# (oder .jpg) abgelegt, nutzt der Ticketdruck diese Grafik als Hintergrund eines
+# einzelnen Tickets; andernfalls wird das Bordeaux/Gold-Design vektorbasiert gezeichnet.
+TICKET_VERTICAL_LABEL = 'Gymnasium Steglitz'
+
 # Ticket Configuration
 MAX_TICKETS_GLOBAL = 200
 TICKET_PRICE_DEFAULT = 65.0

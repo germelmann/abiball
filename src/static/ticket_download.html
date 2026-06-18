@@ -26,8 +26,8 @@
     <!-- Tickets list -->
     <div id="tickets_container" style="display: none;">
         <p class="text-muted mb-4">
-            <i class="bi bi-info-circle"></i> 
-            Hier findest du all deine freigegebenen Tickets. Klicke auf "Ticket herunterladen" um ein einzelnes Ticket als PDF herunterzuladen.
+            <i class="bi bi-info-circle"></i>
+            Hier findest du all deine freigegebenen Tickets. Mit "Alle Tickets herunterladen" erhältst du ein PDF mit 3 Tickets pro Seite. Du kannst auch jedes Ticket einzeln herunterladen.
         </p>
         
         <div id="tickets_list">
@@ -100,9 +100,15 @@ function displayTickets(tickets) {
                             <strong>Bestellt am:</strong> ${orderDate}<br>
                             <strong>Anzahl Tickets:</strong> ${ticket.participants.length}
                         </div>
+                        <div class="col-md-6 text-md-end mt-2 mt-md-0">
+                            <button type="button" class="btn btn-primary"
+                                    onclick="downloadAllTickets('${ticket.order_id}', '${ticket.payment_reference}')">
+                                <i class="bi bi-file-earmark-pdf"></i> Alle Tickets herunterladen
+                            </button>
+                        </div>
                     </div>
-                    
-                    <h6 class="mb-3">Teilnehmer & Tickets:</h6>
+
+                    <h6 class="mb-3">Einzelne Tickets:</h6>
                     <div class="row" id="participants_${ticket.order_id}">
                         <!-- Participants will be added here -->
                     </div>
@@ -140,10 +146,19 @@ function displayTickets(tickets) {
 }
 
 function downloadTicket(orderId, ticketNumber) {
-    // Check if downloads are allowed first
     api_call('/api/ticket_download_settings', {}, function(data) {
         if (data.success && data.download_allowed) {
             window.open(`/api/download_ticket/${orderId}/${ticketNumber}`, '_blank');
+        } else {
+            showAlert('warning', 'Ticket-Downloads sind derzeit nicht verfügbar. Bitte wende dich an den Support.');
+        }
+    });
+}
+
+function downloadAllTickets(orderId, paymentRef) {
+    api_call('/api/ticket_download_settings', {}, function(data) {
+        if (data.success && data.download_allowed) {
+            window.open(`/api/download_order_tickets/${orderId}`, '_blank');
         } else {
             showAlert('warning', 'Ticket-Downloads sind derzeit nicht verfügbar. Bitte wende dich an den Support.');
         }
