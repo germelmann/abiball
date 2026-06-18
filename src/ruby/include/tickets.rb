@@ -857,7 +857,9 @@ class Main < Sinatra::Base
                    pay.verified_amount AS verified_amount,
                    pay.verified_by AS verified_by,
                    pay.verified_at AS verified_at,
+                   pay.verified_account_id AS verified_account_id,
                    pay.verification_matches AS verification_matches,
+                   pay.verification_note AS verification_note,
                    'payment' AS entry_type
             ORDER BY pay.timestamp DESC
         END_OF_QUERY
@@ -974,26 +976,36 @@ class Main < Sinatra::Base
         respond(success: true, payments: payments)
     end
 
-    # Mark a payment as verified (Kassenprüfung)
+    # Mark a payment as verified (Kassenprüfung) or correct an existing verification.
+    # bank_account_id is optional: when re-checking an already verified payment (e.g. to
+    # correct a wrongly recorded deviation) the account it was originally verified against
+    # is reused, so a payment never stays a deviation by accident – and vice versa.
     post "/api/audit_verify_payment" do
         require_user_with_permission!("manage_orders")
-        data = parse_request_data(required_keys: [:payment_id, :verified_amount, :bank_account_id],
-                                  optional_keys: [:note])
+        data = parse_request_data(required_keys: [:payment_id, :verified_amount],
+                                  optional_keys: [:bank_account_id, :note])
 
         payment_id = data[:payment_id]
         verified_amount = data[:verified_amount].to_f
-        bank_account_id = data[:bank_account_id]
         note = data[:note].to_s
         timestamp = Time.now.iso8601
 
         existing = neo4j_query(<<~END_OF_QUERY, {payment_id: payment_id})
             MATCH (pay:Payment {id: $payment_id})
-            RETURN pay.amount AS amount, pay.verified AS verified
+            RETURN pay.amount AS amount, pay.verified AS verified,
+                   pay.verified_account_id AS verified_account_id
         END_OF_QUERY
 
         if existing.empty?
             respond(success: false, error: "Zahlung nicht gefunden")
             return
+        end
+
+        # Fall back to the account the payment was previously verified against so a
+        # correction does not require selecting the bank account again.
+        bank_account_id = data[:bank_account_id]
+        if bank_account_id.nil? || bank_account_id.to_s.empty?
+            bank_account_id = existing.first['verified_account_id']
         end
 
         original_amount = existing.first['amount'].to_f
@@ -1083,29 +1095,36 @@ class Main < Sinatra::Base
                 SUM(pay.verified_amount) AS verified_total
         END_OF_QUERY
 
-        # Expected payments: all payments from orders that directed transfers to this account
+        # Expected payments: all payments from orders whose *most recently assigned*
+        # bank account is this one. When an order had several payment requests (e.g. the
+        # bank account was changed), only the latest assignment counts.
         expected = neo4j_query(<<~END_OF_QUERY, params)
-            MATCH (b:BankAccount {id: $bank_account_id})
-            MATCH (pr:PaymentRequest)-[:USES_ACCOUNT]->(b)
-            MATCH (o:TicketOrder)-[:HAS_PAYMENT_REQUEST]->(pr)
+            MATCH (o:TicketOrder)-[:HAS_PAYMENT_REQUEST]->(pr:PaymentRequest)-[:USES_ACCOUNT]->(b:BankAccount)
             MATCH (o)-[:FOR]->(e:Event)
-            MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
             WHERE true #{event_filter}
+            WITH o, b, pr
+            ORDER BY pr.created_at DESC
+            WITH o, HEAD(COLLECT(b.id)) AS current_account_id
+            WHERE current_account_id = $bank_account_id
+            MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
             WITH DISTINCT pay
             RETURN
                 COUNT(pay)      AS expected_count,
                 SUM(pay.amount) AS expected_total
         END_OF_QUERY
 
-        # Unverified: payments associated to this account but not yet verified
+        # Unverified: payments whose order's latest assigned account is this one and that
+        # have not been verified yet.
         unverified = neo4j_query(<<~END_OF_QUERY, params)
-            MATCH (b:BankAccount {id: $bank_account_id})
-            MATCH (pr:PaymentRequest)-[:USES_ACCOUNT]->(b)
-            MATCH (o:TicketOrder)-[:HAS_PAYMENT_REQUEST]->(pr)
+            MATCH (o:TicketOrder)-[:HAS_PAYMENT_REQUEST]->(pr:PaymentRequest)-[:USES_ACCOUNT]->(b:BankAccount)
             MATCH (o)-[:FOR]->(e:Event)
+            WHERE true #{event_filter}
+            WITH o, b, pr
+            ORDER BY pr.created_at DESC
+            WITH o, HEAD(COLLECT(b.id)) AS current_account_id
+            WHERE current_account_id = $bank_account_id
             MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
             WHERE (pay.verified IS NULL OR pay.verified = false)
-              #{event_filter}
             WITH DISTINCT pay
             RETURN
                 COUNT(pay)      AS unverified_count,
@@ -1129,6 +1148,79 @@ class Main < Sinatra::Base
             expected_total:   (expected.first&.dig('expected_total') || 0.0).to_f.round(2),
             unverified_count: (unverified.first&.dig('unverified_count') || 0).to_i,
             unverified_total: (unverified.first&.dig('unverified_total') || 0.0).to_f.round(2)
+        )
+    end
+
+    # Return the expected account balance for *all* orders of an event, across every bank
+    # account. Gives an overview of what should be on the accounts versus what has actually
+    # been received and verified.
+    post "/api/audit_event_balance" do
+        require_user_with_permission!("manage_orders")
+        data = parse_request_data(required_keys: [:event_id])
+
+        event_id = data[:event_id]
+
+        # How much is owed in total (sum of all order prices, excluding error records)
+        due = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
+            MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
+            WHERE COALESCE(o.status, '') <> 'error'
+            RETURN COUNT(DISTINCT o) AS order_count,
+                   SUM(o.total_price) AS total_due
+        END_OF_QUERY
+
+        # How much has actually been received / verified
+        received = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
+            MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
+            MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+            RETURN
+                COUNT(pay) AS received_count,
+                SUM(pay.amount) AS received_total,
+                SUM(CASE WHEN pay.verified = true THEN pay.verified_amount ELSE 0 END) AS verified_total,
+                SUM(CASE WHEN pay.verified = true THEN 1 ELSE 0 END) AS verified_count,
+                SUM(CASE WHEN (pay.verified IS NULL OR pay.verified = false) THEN pay.amount ELSE 0 END) AS unverified_total,
+                SUM(CASE WHEN (pay.verified IS NULL OR pay.verified = false) THEN 1 ELSE 0 END) AS unverified_count,
+                SUM(CASE WHEN pay.verified = true AND pay.verification_matches = false THEN 1 ELSE 0 END) AS deviation_count
+        END_OF_QUERY
+
+        # Per-account breakdown using the most recently assigned account of each order
+        per_account = neo4j_query(<<~END_OF_QUERY, {event_id: event_id})
+            MATCH (o:TicketOrder)-[:FOR]->(e:Event {id: $event_id})
+            MATCH (o)-[:HAS_PAYMENT_REQUEST]->(pr:PaymentRequest)-[:USES_ACCOUNT]->(b:BankAccount)
+            WITH o, b, pr
+            ORDER BY pr.created_at DESC
+            WITH o, HEAD(COLLECT(b)) AS bank
+            MATCH (o)-[:HAS_PAYMENT]->(pay:Payment)
+            RETURN bank.id AS account_id,
+                   bank.account_name AS account_name,
+                   bank.iban AS iban,
+                   COUNT(pay) AS payment_count,
+                   SUM(pay.amount) AS payment_total,
+                   SUM(CASE WHEN pay.verified = true THEN pay.verified_amount ELSE 0 END) AS verified_total
+            ORDER BY account_name
+        END_OF_QUERY
+
+        r = received.first || {}
+        respond(
+            success:          true,
+            order_count:      (due.first&.dig('order_count') || 0).to_i,
+            total_due:        (due.first&.dig('total_due') || 0.0).to_f.round(2),
+            received_count:   (r['received_count'] || 0).to_i,
+            received_total:   (r['received_total'] || 0.0).to_f.round(2),
+            verified_count:   (r['verified_count'] || 0).to_i,
+            verified_total:   (r['verified_total'] || 0.0).to_f.round(2),
+            unverified_count: (r['unverified_count'] || 0).to_i,
+            unverified_total: (r['unverified_total'] || 0.0).to_f.round(2),
+            deviation_count:  (r['deviation_count'] || 0).to_i,
+            accounts:         per_account.map { |a|
+                {
+                    account_id:     a['account_id'],
+                    account_name:   a['account_name'],
+                    iban:           a['iban'],
+                    payment_count:  (a['payment_count'] || 0).to_i,
+                    payment_total:  (a['payment_total'] || 0.0).to_f.round(2),
+                    verified_total: (a['verified_total'] || 0.0).to_f.round(2)
+                }
+            }
         )
     end
 

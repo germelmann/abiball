@@ -126,6 +126,42 @@
         </div>
     </div>
     
+    <!-- Correction modal -->
+    <div class="modal" id="correct_modal" tabindex="-1" role="dialog" style="z-index: 200000;">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-pencil-square"></i> Prüfung korrigieren</h5>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-2">
+                        Trage den Betrag laut Kontoauszug ein. Stimmt er mit dem gebuchten Betrag überein,
+                        gilt die Zahlung als geprüft – andernfalls als Abweichung. So lässt sich eine fälschlich
+                        als Abweichung markierte Zahlung korrigieren und umgekehrt.
+                    </p>
+                    <dl class="row small mb-2">
+                        <dt class="col-5">Gebuchter Betrag</dt><dd class="col-7" id="correct_booked_amount">-</dd>
+                        <dt class="col-5">Verwendungszweck</dt><dd class="col-7" id="correct_reference">-</dd>
+                    </dl>
+                    <label for="correct_amount_input" class="form-label"><strong>Betrag laut Kontoauszug (€)</strong></label>
+                    <input type="number" step="0.01" class="form-control" id="correct_amount_input" placeholder="0,00">
+                    <label for="correct_note_input" class="form-label mt-2">Notiz (optional)</label>
+                    <input type="text" class="form-control" id="correct_note_input" placeholder="z. B. Korrekturgrund">
+                    <div id="correct_compare_box" class="alert mt-2 mb-0" style="display:none;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary me-auto" onclick="resetVerification()">
+                        <i class="bi bi-x-circle"></i> Prüfung zurücksetzen
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="$('#correct_modal').modal('hide')">Abbrechen</button>
+                    <button type="button" class="btn btn-success" onclick="submitCorrection()">
+                        <i class="bi bi-check-circle"></i> Speichern
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Payments Table -->
     <div class='row'>
         <div class='col-md-12'>
@@ -301,6 +337,18 @@ function refreshPayments() {
                         });
                     actions.append(deleteBtn);
                 } else {
+                    // Correct / set the audit verification for this payment so a payment is
+                    // not stuck as a deviation (or wrongly as matching) after the audit.
+                    let correctBtn = $('<button>')
+                        .addClass('btn btn-sm btn-outline-primary me-1')
+                        .html('<i class="bi bi-pencil-square"></i>')
+                        .attr('title', 'Prüfung korrigieren')
+                        .click(function(e) {
+                            e.stopPropagation();
+                            openCorrectModal(payment);
+                        });
+                    actions.append(correctBtn);
+
                     let revertBtn = $('<button>')
                         .addClass('btn btn-sm btn-outline-danger')
                         .html('<i class="bi bi-arrow-counterclockwise"></i>')
@@ -418,6 +466,68 @@ function recordNewPayment() {
             });
         }
     );
+}
+
+let correctingPayment = null;
+
+function openCorrectModal(payment) {
+    correctingPayment = payment;
+    $('#correct_booked_amount').text(Number(payment.amount || 0).toFixed(2) + '€');
+    $('#correct_reference').text(payment.payment_reference || '-');
+    const prefill = payment.verified_amount != null ? Number(payment.verified_amount) : Number(payment.amount || 0);
+    $('#correct_amount_input').val(prefill.toFixed(2));
+    $('#correct_note_input').val(payment.verification_note || '');
+    $('#correct_compare_box').hide().removeClass('alert-success alert-warning').empty();
+    $('#correct_modal').modal('show');
+}
+
+function submitCorrection() {
+    if (!correctingPayment) return;
+    const raw = $('#correct_amount_input').val();
+    if (raw === '' || raw === null || isNaN(parseFloat(raw))) {
+        showTemplateModal('Fehler', 'Bitte gib den Betrag laut Kontoauszug ein.', 'OK', 'btn-secondary', '', '', function() {});
+        return;
+    }
+    const enteredAmount = parseFloat(raw);
+    const note = $('#correct_note_input').val();
+
+    api_call('/api/audit_verify_payment', {
+        payment_id: correctingPayment.id,
+        verified_amount: enteredAmount,
+        note: note
+    }, function(data) {
+        if (!data.success) {
+            showTemplateModal('Fehler', data.error || 'Konnte Prüfung nicht korrigieren.', 'OK', 'btn-secondary', '', '', function() {});
+            return;
+        }
+        const $box = $('#correct_compare_box');
+        $box.removeClass('alert-success alert-warning').empty();
+        if (data.matches) {
+            $box.addClass('alert-success').html('<i class="bi bi-check-circle"></i> Beträge stimmen überein – als geprüft markiert.').show();
+        } else {
+            $box.addClass('alert-warning').html(
+                `<i class="bi bi-exclamation-triangle"></i> Abweichung: Gebucht ${Number(data.original_amount).toFixed(2)}€, Auszug ${Number(data.verified_amount).toFixed(2)}€.`
+            ).show();
+        }
+        setTimeout(function() {
+            $('#correct_modal').modal('hide');
+            correctingPayment = null;
+            refreshPayments();
+        }, data.matches ? 700 : 1500);
+    });
+}
+
+function resetVerification() {
+    if (!correctingPayment) return;
+    api_call('/api/audit_unverify_payment', { payment_id: correctingPayment.id }, function(data) {
+        if (!data.success) {
+            showTemplateModal('Fehler', data.error || 'Konnte Prüfung nicht zurücksetzen.', 'OK', 'btn-secondary', '', '', function() {});
+            return;
+        }
+        $('#correct_modal').modal('hide');
+        correctingPayment = null;
+        refreshPayments();
+    });
 }
 
 function revertPayment(paymentId, amount, orderId) {
