@@ -18,7 +18,7 @@ const { PDFDocument } = require('pdf-lib');
 // A build marker lets us confirm at runtime that the *current* version of
 // this script is the one Ruby invoked (and not a stale copy still cached in
 // the running container). Bump the date when you touch this file.
-const BUILD_MARKER = 'yearbook-pdf-gen 2026-06-19.emoji-autoscale';
+const BUILD_MARKER = 'yearbook-pdf-gen 2026-06-19.emoji-perglyph';
 const DEBUG_LOG_PATH = '/gen/log/yearbook_pdf_debug.log';
 const RUN_ID = crypto.randomBytes(4).toString('hex');
 
@@ -34,6 +34,43 @@ function dbg(line) {
 }
 
 dbg(`startup: ${BUILD_MARKER}, node=${process.version}, script=${__filename}`);
+
+// ---------- pdfme internal text helpers (per-glyph emoji fallback) ----------
+// pdfme renders exactly ONE font per text field; its `fallback` font is only the
+// default when a schema has no fontName — it is NOT a per-glyph fallback. Emoji
+// codepoints absent from the admin body font therefore render as tofu (.notdef).
+// To fix that we replace pdfme's stock `text` plugin with our own pdf renderer
+// (customTextPdfRender below) that splits each line into runs and draws emoji
+// graphemes with NotoColorEmoji while keeping body text in the admin font.
+//
+// That renderer is a 1:1 port of pdfme's own text/pdfRender.js, so we reuse its
+// internal layout helpers (line breaking, metrics, colour/rotation math) to keep
+// pure-text output identical to the stock renderer. Those helpers live behind the
+// package "exports" map (only "." and "./utils" are public). We resolve the
+// package's main entry — an allowed export — then require the sibling files by
+// ABSOLUTE path, which bypasses the exports gate. If pdfme ever relocates these
+// files the require throws, we log it, and the plugin falls back to stock `text`
+// (no emoji fallback, but no crash). A future-proof alternative is to vendor the
+// helper functions (MIT) into a repo file and require that instead — a one-line swap.
+let pdfmeText = null; // populated on success; null disables per-glyph fallback
+try {
+  const schemasMain = require.resolve('@pdfme/schemas'); // ".": allowed by exports
+  const cjsSrc = path.dirname(schemasMain);              // .../dist/cjs/src
+  pdfmeText = {
+    helper: require(path.join(cjsSrc, 'text', 'helper.js')),
+    constants: require(path.join(cjsSrc, 'text', 'constants.js')),
+    sUtils: require(path.join(cjsSrc, 'utils.js')),
+    common: require('@pdfme/common'),
+  };
+  // Sanity-check that the helpers we rely on are actually present.
+  const need = ['getFontKitFont', 'splitTextToSize', 'widthOfTextAtSize', 'heightOfFontAtSize', 'getFontDescentInPt', 'calculateDynamicFontSize'];
+  const missing = need.filter((k) => typeof pdfmeText.helper[k] !== 'function');
+  if (missing.length) throw new Error(`missing helpers: ${missing.join(',')}`);
+  dbg('pdfme text helpers loaded — per-glyph emoji fallback enabled');
+} catch (e) {
+  pdfmeText = null;
+  dbg(`pdfme text helpers unavailable (${(e && e.message) || e}) — stock text renderer, emoji fallback DISABLED`);
+}
 
 // pdfme's stock image plugin renders images "contain" (whole image fitted inside the
 // box, centred, leaving empty bars when the aspect ratios differ). The yearbook wants
@@ -200,17 +237,22 @@ function buildFontRegistry(fontsPayload) {
   }
   if (Object.keys(registry).length === 0) return null;
 
-  // Promote NotoColorEmoji to the pdfme fallback font so emoji codepoints that
-  // are absent from admin-supplied fonts (e.g. Roboto) resolve to a visible glyph
-  // rather than a tofu box.  Any other fallback flag in the payload is cleared.
-  if (registry[EMOJI_FONT_NAME]) {
-    for (const n of Object.keys(registry)) registry[n].fallback = false;
+  // NotoColorEmoji is registered as an ordinary font (fallback:false). It must NOT be
+  // pdfme's fallback font: that fallback is only the *default* font for schemas without
+  // a fontName, so promoting the emoji font would render such fields entirely in emoji
+  // glyphs (Latin text -> tofu). Per-glyph emoji substitution is instead handled by our
+  // customTextPdfRender, which draws emoji graphemes with NotoColorEmoji while keeping
+  // body text in the admin font. pdfme still requires exactly one fallback font, so make
+  // sure a non-emoji body font carries the flag.
+  const bodyNames = Object.keys(registry).filter((n) => n !== EMOJI_FONT_NAME);
+  if (registry[EMOJI_FONT_NAME]) registry[EMOJI_FONT_NAME].fallback = false;
+  hasFallback = bodyNames.some((n) => registry[n].fallback);
+  if (!hasFallback && bodyNames.length > 0) {
+    registry[bodyNames[0]].fallback = true;
+  } else if (!hasFallback) {
+    // Only the emoji font is present (no admin body fonts) — it has to be the fallback.
     registry[EMOJI_FONT_NAME].fallback = true;
-    hasFallback = true;
-    dbg(`emoji fallback: promoting ${EMOJI_FONT_NAME} to fallback font`);
   }
-
-  if (!hasFallback) registry[Object.keys(registry)[0]].fallback = true;
   return registry;
 }
 
@@ -251,6 +293,215 @@ function summarizeJob(job, idx) {
   return lines.join('\n');
 }
 
+// ---------- per-glyph emoji fallback text renderer ----------------------------
+// A port of pdfme's text/pdfRender.js. The only change versus the stock renderer is
+// the per-line draw step: each line is split into runs that the admin/body font can
+// render vs. runs that need the emoji font, and each run is drawn with its own font.
+// All layout maths (line breaking, vertical alignment, baseline, colour, rotation)
+// are taken verbatim from the stock renderer so pure-text output stays unchanged.
+
+// One grapheme segmenter for the whole process (cheap to reuse, expensive to recreate).
+const GRAPHEME_SEGMENTER = (() => {
+  try { return new Intl.Segmenter(undefined, { granularity: 'grapheme' }); }
+  catch (_) { return null; }
+})();
+// Fallback when Intl.Segmenter is unavailable (small-ICU node): keep emoji codepoints,
+// trailing variation selectors (FE0E/FE0F), skin-tone modifiers (1F3FB-1F3FF), ZWJ (200D)
+// joins and flag regional-indicator (RI) pairs together as one cluster.
+const EMOJI_MOD = '[\\uFE0E\\uFE0F]?(?:[\\u{1F3FB}-\\u{1F3FF}])?';
+const EMOJI_GRAPHEME_RE = new RegExp(
+  `\\p{RI}\\p{RI}|\\p{Extended_Pictographic}${EMOJI_MOD}(?:\\u200D\\p{Extended_Pictographic}${EMOJI_MOD})*`,
+  'u',
+);
+
+function segmentGraphemes(str) {
+  if (GRAPHEME_SEGMENTER) {
+    const out = [];
+    for (const s of GRAPHEME_SEGMENTER.segment(str)) out.push(s.segment);
+    return out;
+  }
+  // Regex fallback: split out emoji clusters, leave the rest as single code points.
+  const out = [];
+  let i = 0;
+  while (i < str.length) {
+    EMOJI_GRAPHEME_RE.lastIndex = 0;
+    const rest = str.slice(i);
+    const m = EMOJI_GRAPHEME_RE.exec(rest);
+    if (m && m.index === 0) {
+      out.push(m[0]);
+      i += m[0].length;
+    } else {
+      const cp = str.codePointAt(i);
+      const ch = String.fromCodePoint(cp);
+      out.push(ch);
+      i += ch.length;
+    }
+  }
+  return out;
+}
+
+// The codepoint that decides which font draws a grapheme: the base character, ignoring
+// combining marks that have no standalone glyph (variation selectors, ZWJ, skin tones).
+function baseCodePoint(grapheme) {
+  for (const ch of grapheme) {
+    const cp = ch.codePointAt(0);
+    if (cp === 0x200d) continue;                       // ZWJ
+    if (cp >= 0xfe00 && cp <= 0xfe0f) continue;        // variation selectors
+    if (cp >= 0x1f3fb && cp <= 0x1f3ff) continue;      // skin-tone modifiers
+    return cp;
+  }
+  return grapheme.codePointAt(0);
+}
+
+// Split a line into [{ font: 'body'|'emoji', text }] runs by glyph coverage.
+function splitIntoRuns(lineStr, bodyFK, emojiFK) {
+  // Fast path: nothing outside Latin-1 can be an emoji — one body run, no segmentation.
+  if (!/[^\u0000-\u00FF]/.test(lineStr)) return [{ font: 'body', text: lineStr }];
+  const runs = [];
+  let cur = null;
+  for (const g of segmentGraphemes(lineStr)) {
+    const cp = baseCodePoint(g);
+    let kind = 'body';
+    if (!bodyFK.hasGlyphForCodePoint(cp) && emojiFK && emojiFK.hasGlyphForCodePoint(cp)) {
+      kind = 'emoji';
+    }
+    if (cur && cur.font === kind) cur.text += g;
+    else { cur = { font: kind, text: g }; runs.push(cur); }
+  }
+  return runs;
+}
+
+// Embed every registered font into this pdfDoc once, cached by pdfDoc (mirrors pdfme).
+async function embedAndGetFontObj(pdfDoc, font, _cache) {
+  if (_cache.has(pdfDoc)) return _cache.get(pdfDoc);
+  const names = Object.keys(font);
+  const values = await Promise.all(names.map((n) => pdfDoc.embedFont(font[n].data, {
+    subset: typeof font[n].subset === 'undefined' ? true : font[n].subset,
+  })));
+  const obj = names.reduce((acc, n, i) => Object.assign(acc, { [n]: values[i] }), {});
+  _cache.set(pdfDoc, obj);
+  return obj;
+}
+
+async function customTextPdfRender(arg) {
+  const { value, pdfDoc, pdfLib, page, options, schema, _cache } = arg;
+  if (!value) return;
+
+  const { helper, constants: C, sUtils, common } = pdfmeText;
+  const { font = common.getDefaultFont(), colorType } = options;
+  const bodyFontName = schema.fontName ? schema.fontName : common.getFallbackFontName(font);
+
+  // No emoji font in the registry -> nothing to fall back to; use the stock renderer.
+  if (!font[EMOJI_FONT_NAME]) return text.pdf(arg);
+  // Rotated text fields need per-run pivot maths we don't replicate; block text is never
+  // rotated in practice, so defer those rare cases to the stock single-font renderer.
+  if (Number(schema.rotate || 0) !== 0) return text.pdf(arg);
+
+  const [pdfFontObj, bodyFK, emojiFK] = await Promise.all([
+    embedAndGetFontObj(pdfDoc, font, _cache),
+    helper.getFontKitFont(schema.fontName, font, _cache),
+    helper.getFontKitFont(EMOJI_FONT_NAME, font, _cache),
+  ]);
+  const pdfBodyFont = pdfFontObj[bodyFontName];
+  const pdfEmojiFont = pdfFontObj[EMOJI_FONT_NAME];
+
+  // ----- font properties (verbatim from pdfme getFontProp) -----
+  const fontSize = schema.dynamicFontSize
+    ? helper.calculateDynamicFontSize({ textSchema: schema, fontKitFont: bodyFK, value })
+    : (schema.fontSize ?? C.DEFAULT_FONT_SIZE);
+  const color = sUtils.hex2PrintingColor(schema.fontColor || C.DEFAULT_FONT_COLOR, colorType);
+  const alignment = schema.alignment ?? C.DEFAULT_ALIGNMENT;
+  const verticalAlignment = schema.verticalAlignment ?? C.DEFAULT_VERTICAL_ALIGNMENT;
+  const lineHeight = schema.lineHeight ?? C.DEFAULT_LINE_HEIGHT;
+  const characterSpacing = schema.characterSpacing ?? C.DEFAULT_CHARACTER_SPACING;
+
+  // Scale emoji so their cap height matches the body font's, keeping them on the baseline.
+  const bodyAscentRatio = bodyFK.ascent / bodyFK.unitsPerEm;
+  const emojiAscentRatio = emojiFK.ascent / emojiFK.unitsPerEm;
+  const emojiSize = fontSize * (emojiAscentRatio > 0 ? bodyAscentRatio / emojiAscentRatio : 1);
+
+  const runWidth = (run) => (run.font === 'emoji'
+    ? helper.widthOfTextAtSize(run.text, emojiFK, emojiSize, characterSpacing)
+    : helper.widthOfTextAtSize(run.text, bodyFK, fontSize, characterSpacing));
+
+  // ----- layout (verbatim from pdfme pdfRender) -----
+  const pageHeight = page.getHeight();
+  const { width, height, rotate, position: { x, y }, opacity } =
+    sUtils.convertForPdfLayoutProps({ schema, pageHeight, applyRotateTranslate: false });
+
+  if (schema.backgroundColor) {
+    const bg = sUtils.hex2PrintingColor(schema.backgroundColor, colorType);
+    page.drawRectangle({ x, y, width, height, rotate, color: bg });
+  }
+
+  const firstLineTextHeight = helper.heightOfFontAtSize(bodyFK, fontSize);
+  const descent = helper.getFontDescentInPt(bodyFK, fontSize);
+  const halfLineHeightAdjustment = lineHeight === 0 ? 0 : ((lineHeight - 1) * fontSize) / 2;
+
+  const lines = helper.splitTextToSize({ value, characterSpacing, fontSize, fontKitFont: bodyFK, boxWidthInPt: width });
+
+  let yOffset = 0;
+  if (verticalAlignment === C.VERTICAL_ALIGN_TOP) {
+    yOffset = firstLineTextHeight + halfLineHeightAdjustment;
+  } else {
+    const otherLinesHeight = lineHeight * fontSize * (lines.length - 1);
+    if (verticalAlignment === C.VERTICAL_ALIGN_BOTTOM) {
+      yOffset = height - otherLinesHeight + descent - halfLineHeightAdjustment;
+    } else if (verticalAlignment === C.VERTICAL_ALIGN_MIDDLE) {
+      yOffset = (height - otherLinesHeight - firstLineTextHeight + descent) / 2 + firstLineTextHeight;
+    }
+  }
+
+  let emojiRuns = 0;
+  lines.forEach((rawLine, rowIndex) => {
+    const trimmed = rawLine.replace('\n', '');
+    if (trimmed === '') return; // empty line: advance a row, draw nothing
+    const runs = splitIntoRuns(trimmed, bodyFK, emojiFK);
+    const lineWidth = runs.reduce((w, r) => w + runWidth(r), 0);
+    const rowYOffset = lineHeight * fontSize * rowIndex;
+
+    let xCursor = x;
+    if (alignment === 'center') xCursor += (width - lineWidth) / 2;
+    else if (alignment === 'right') xCursor += width - lineWidth;
+    const yLine = pageHeight - common.mm2pt(schema.position.y) - yOffset - rowYOffset;
+
+    page.pushOperators(pdfLib.setCharacterSpacing(characterSpacing));
+    for (const run of runs) {
+      const isEmoji = run.font === 'emoji';
+      if (isEmoji) emojiRuns += 1;
+      page.drawText(run.text, {
+        x: xCursor,
+        y: yLine,
+        rotate,
+        size: isEmoji ? emojiSize : fontSize,
+        color,
+        lineHeight: lineHeight * fontSize,
+        font: isEmoji ? pdfEmojiFont : pdfBodyFont,
+        opacity,
+      });
+      xCursor += runWidth(run) + characterSpacing;
+    }
+  });
+
+  if (emojiRuns > 0) {
+    dbg(`text[name=${JSON.stringify(schema.name)}]: ${emojiRuns} emoji run(s) via ${EMOJI_FONT_NAME} (seg=${GRAPHEME_SEGMENTER ? 'Intl.Segmenter' : 'regex'}, emojiSize=${emojiSize.toFixed(1)})`);
+  }
+}
+
+// Use the per-glyph fallback renderer when the pdfme helpers loaded; otherwise stock text.
+const emojiText = pdfmeText
+  ? Object.assign({}, text, {
+      pdf: async (arg) => {
+        try {
+          return await customTextPdfRender(arg);
+        } catch (e) {
+          dbg(`customTextPdfRender THREW: ${(e && e.stack) || e} — falling back to stock text renderer`);
+          return text.pdf(arg);
+        }
+      },
+    })
+  : text;
+
 async function generateOne(job, options) {
   if (!job.template || !Array.isArray(job.template.schemas)) {
     throw new Error('job.template.schemas missing or invalid');
@@ -259,7 +510,7 @@ async function generateOne(job, options) {
   return generate({
     template: job.template,
     inputs,
-    plugins: { text, image: coverImage, line, rectangle, ellipse },
+    plugins: { text: emojiText, image: coverImage, line, rectangle, ellipse },
     options,
   });
 }

@@ -156,13 +156,18 @@ class Main < Sinatra::Base
         File.basename(filename, File.extname(filename))
     end
 
-    # Emoji fallback font, shipped to the PDF generator and promoted to pdfme's fallback
-    # font in generate_pdf.js. We deliberately do NOT use the system NotoColorEmoji.ttf:
+    # Emoji font, shipped to the PDF generator so emoji in comments/profile fields render
+    # as monochrome glyphs. We deliberately do NOT use the system NotoColorEmoji.ttf:
     # that is a CBDT/CBLC colour *bitmap* font with no `glyf` outlines, and pdf-lib/fontkit
     # cannot embed bitmap-colour fonts — emoji silently rendered as nothing. The committed
     # NotoColorEmoji-Regular.ttf carries `glyf` outlines, which pdf-lib embeds and renders
     # as monochrome emoji glyphs. It lives outside YEARBOOK_FONTS_DIR on purpose so it never
     # shows up as a selectable body font in the designer's font picker.
+    #
+    # pdfme renders exactly one font per text field and has no per-glyph fallback, so simply
+    # registering this font does NOT make emoji appear inside admin-font text. generate_pdf.js
+    # replaces pdfme's text plugin with a renderer that splits each line into runs and draws
+    # emoji graphemes with this font while keeping body text in the admin font.
     YEARBOOK_EMOJI_FONT_PATH = '/src/static/include/fonts/NotoColorEmoji-Regular.ttf'
     YEARBOOK_EMOJI_FONT_NAME = 'NotoColorEmoji'
 
@@ -170,15 +175,15 @@ class Main < Sinatra::Base
     # is the fallback — pdfme requires exactly one font with fallback=true. If no admin
     # fonts are present we return an empty hash; the Node script then leaves
     # options.font undefined and pdfme falls back to its bundled Roboto.
-    # NotoColorEmoji is always appended so emoji characters render correctly; the Node
-    # script promotes it to fallback so pdfme resolves emoji codepoints against it.
+    # NotoColorEmoji is always appended (as an ordinary, non-fallback font) so the Node
+    # script's per-glyph renderer can draw emoji with it.
     def yearbook_fonts_payload
         files = yearbook_font_files
         # When no admin fonts are configured, return an empty hash so the Node script
         # leaves options.font undefined and pdfme falls back to its bundled Roboto — which
         # correctly covers Latin/German text.  We only inject NotoColorEmoji when at least
-        # one admin font is present, guaranteeing that the Latin glyphs come from that font
-        # while emoji fall back to NotoColorEmoji (promoted to fallback in the Node script).
+        # one admin font is present; emoji then render via the Node script's per-glyph
+        # fallback renderer while Latin glyphs come from the explicitly-named admin font.
         return {} if files.empty?
         h = files.each_with_object({}) do |filename, acc|
             name = yearbook_font_name_for(filename)
@@ -189,10 +194,10 @@ class Main < Sinatra::Base
                 'fallback' => acc.empty?
             }
         end
-        # Append the system emoji font so emoji in comments and profile fields render as
-        # recognisable glyphs. The Node script promotes NotoColorEmoji to pdfme's fallback
-        # font, so any codepoint not in the admin font resolves here instead of showing a
-        # tofu box.  Latin/German text stays covered by the explicitly-named admin fonts.
+        # Append the emoji font as an ordinary font (fallback:false). generate_pdf.js draws
+        # emoji graphemes with it per-glyph; it must NOT become pdfme's fallback font (that is
+        # only the default for fields without a fontName, which would render such fields all in
+        # emoji glyphs). Latin/German text stays covered by the explicitly-named admin fonts.
         if File.file?(YEARBOOK_EMOJI_FONT_PATH)
             h[YEARBOOK_EMOJI_FONT_NAME] = {
                 'data' => Base64.strict_encode64(File.binread(YEARBOOK_EMOJI_FONT_PATH)),
