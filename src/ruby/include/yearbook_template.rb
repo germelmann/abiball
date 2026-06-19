@@ -156,22 +156,50 @@ class Main < Sinatra::Base
         File.basename(filename, File.extname(filename))
     end
 
+    # Emoji fallback font, shipped to the PDF generator and promoted to pdfme's fallback
+    # font in generate_pdf.js. We deliberately do NOT use the system NotoColorEmoji.ttf:
+    # that is a CBDT/CBLC colour *bitmap* font with no `glyf` outlines, and pdf-lib/fontkit
+    # cannot embed bitmap-colour fonts — emoji silently rendered as nothing. The committed
+    # NotoColorEmoji-Regular.ttf carries `glyf` outlines, which pdf-lib embeds and renders
+    # as monochrome emoji glyphs. It lives outside YEARBOOK_FONTS_DIR on purpose so it never
+    # shows up as a selectable body font in the designer's font picker.
+    YEARBOOK_EMOJI_FONT_PATH = '/src/static/include/fonts/NotoColorEmoji-Regular.ttf'
+    YEARBOOK_EMOJI_FONT_NAME = 'NotoColorEmoji'
+
     # Build { fontName => base64-of-binary } for shipping to Node. The first font (sorted)
     # is the fallback — pdfme requires exactly one font with fallback=true. If no admin
     # fonts are present we return an empty hash; the Node script then leaves
     # options.font undefined and pdfme falls back to its bundled Roboto.
+    # NotoColorEmoji is always appended so emoji characters render correctly; the Node
+    # script promotes it to fallback so pdfme resolves emoji codepoints against it.
     def yearbook_fonts_payload
         files = yearbook_font_files
+        # When no admin fonts are configured, return an empty hash so the Node script
+        # leaves options.font undefined and pdfme falls back to its bundled Roboto — which
+        # correctly covers Latin/German text.  We only inject NotoColorEmoji when at least
+        # one admin font is present, guaranteeing that the Latin glyphs come from that font
+        # while emoji fall back to NotoColorEmoji (promoted to fallback in the Node script).
         return {} if files.empty?
-        files.each_with_object({}) do |filename, h|
+        h = files.each_with_object({}) do |filename, acc|
             name = yearbook_font_name_for(filename)
             path = File.join(YEARBOOK_FONTS_DIR, filename)
             next unless File.file?(path)
-            h[name] = {
+            acc[name] = {
                 'data' => Base64.strict_encode64(File.binread(path)),
-                'fallback' => (h.empty?)
+                'fallback' => acc.empty?
             }
         end
+        # Append the system emoji font so emoji in comments and profile fields render as
+        # recognisable glyphs. The Node script promotes NotoColorEmoji to pdfme's fallback
+        # font, so any codepoint not in the admin font resolves here instead of showing a
+        # tofu box.  Latin/German text stays covered by the explicitly-named admin fonts.
+        if File.file?(YEARBOOK_EMOJI_FONT_PATH)
+            h[YEARBOOK_EMOJI_FONT_NAME] = {
+                'data' => Base64.strict_encode64(File.binread(YEARBOOK_EMOJI_FONT_PATH)),
+                'fallback' => false
+            }
+        end
+        h
     end
 
     # ----- variant set (one yearbook page can have many template variants) ------
@@ -645,8 +673,12 @@ class Main < Sinatra::Base
     #       # comments-kind:
     #       "include_pending": false,
     #       "show_author": true,
+    #       "font_name": "Roboto-Regular",   # comment text font
+    #       "text_color": "#000000",          # comment text color (falls back to block fontColor)
+    #       "text_bold": false,
     #       "author_font_name": "Roboto-Bold",
-    #       "font_name": "Roboto-Regular",
+    #       "author_color": "#555555",        # author line color (falls back to text_color)
+    #       "author_bold": false,
     #       # both kinds:
     #       "font_size": 11,
     #       "line_height": 1.4,
@@ -717,13 +749,14 @@ class Main < Sinatra::Base
 
     # Estimate the rendered height of a text element in mm.
     # Uses word-boundary-aware wrapping to match pdfme's actual line-break behavior.
-    # A conservative character-width factor of 0.6× em (vs. the "ideal average" of ~0.5)
-    # accounts for wide uppercase letters, German compound words, and proportional-font
-    # variance — erring on the side of more space rather than risking overlap.
+    # The 0.52× factor matches Roboto's actual average character width for mixed German
+    # text more closely than the older 0.6 value, which over-estimated and caused
+    # spurious blank lines between comments.  A 0.5mm tolerance in callers catches the
+    # rare under-estimate for wide-character sequences.
     def estimate_text_height_mm(content, font_size_pt, line_height_factor, width_mm)
         return 0.0 if content.to_s.empty?
         line_h = font_size_pt * line_height_factor * PT_TO_MM
-        avg_char_width_mm = font_size_pt * 0.6 * PT_TO_MM
+        avg_char_width_mm = font_size_pt * 0.52 * PT_TO_MM
         chars_per_line = [(width_mm.to_f / [avg_char_width_mm, 0.01].max).floor, 1].max
         total_lines = content.to_s.split("\n").sum do |row|
             next 1 if row.empty?
@@ -750,7 +783,7 @@ class Main < Sinatra::Base
     end
 
     def estimate_text_width_mm(content, font_size_pt)
-        content.to_s.length * font_size_pt * 0.6 * PT_TO_MM
+        content.to_s.length * font_size_pt * 0.52 * PT_TO_MM
     end
 
     def make_block_text_schema(x, y, width, height, font_name, font_size, content, color, alignment, line_height, bold: false)
@@ -859,6 +892,8 @@ class Main < Sinatra::Base
 
     # Render as many comments as fit, starting from `start_idx` in the already-filtered list.
     # Returns [emitted_schemas, end_idx] so the caller can decide whether to paginate.
+    # Comment text and author name are emitted as separate schemas so each can carry its
+    # own font name, color, and bold flag — mirroring the label/value split in render_fields_block.
     def render_comments_block(block, config, visible_comments, start_idx = 0)
         out = []
         pos = block['position'] || { 'x' => 0, 'y' => 0 }
@@ -869,14 +904,21 @@ class Main < Sinatra::Base
 
         font_size = (config['font_size'] || block['fontSize'] || 10).to_f
         line_height = (config['line_height'] || 1.4).to_f
-        # Default the inter-comment gap to one line height, so consecutive comments are
-        # separated by exactly one blank line regardless of their length.
         line_h_mm = font_size * line_height * PT_TO_MM
         entry_gap = (config['entry_gap_mm'] || line_h_mm).to_f
-        text_font = config['font_name'] || block['fontName']
-        color = block['fontColor'] || '#000000'
         alignment = block['alignment'] || 'left'
         show_author = config['show_author'] != false
+
+        # Comment text styling (analogous to "value" in a fields block)
+        text_font = config['font_name'] || block['fontName']
+        base_color = block['fontColor'] || '#000000'
+        text_color = config['text_color'].to_s.empty? ? base_color : config['text_color'].to_s
+        text_bold = config['text_bold'] == true
+
+        # Author name styling (analogous to "label" in a fields block)
+        author_font = config['author_font_name'] || text_font
+        author_color = config['author_color'].to_s.empty? ? text_color : config['author_color'].to_s
+        author_bold = config['author_bold'] == true
 
         idx = start_idx
         y = y_start
@@ -884,31 +926,57 @@ class Main < Sinatra::Base
             c = visible_comments[idx]
             text = c['text'].to_s.strip
             author = c['commenter_name'].to_s.strip
+            author_str = (show_author && !author.empty?) ? "— #{author}" : nil
 
-            # Render text and author as a single text block so pdfme places the author on
-            # the line directly after the comment body — no gap derived from a per-line
-            # height estimate of the body alone can creep in between them.
-            combined = (show_author && !author.empty?) ? "#{text}\n— #{author}" : text
-            combined_h = estimate_text_height_mm(combined, font_size, line_height, width)
+            text_h = estimate_text_height_mm(text, font_size, line_height, width)
+            author_h = author_str ? estimate_text_height_mm(author_str, font_size, line_height, width) : 0.0
+            total_h = text_h + author_h
 
             # If this comment doesn't fit and we've already emitted at least one, stop —
             # the caller will paginate. If we've emitted nothing and this single comment
             # is larger than the block, force-render it anyway so we never deadlock.
-            if y + combined_h > max_y + 0.5
+            if y + total_h > max_y + 0.5
                 break if idx > start_idx
             end
 
-            out << make_block_text_schema(x, y, width, combined_h, text_font, font_size, combined, color, alignment, line_height)
-            y += combined_h + entry_gap
+            out << make_block_text_schema(x, y, width, text_h, text_font, font_size, text, text_color, alignment, line_height, bold: text_bold)
+            y += text_h
+            if author_str
+                out << make_block_text_schema(x, y, width, author_h, author_font, font_size, author_str, author_color, alignment, line_height, bold: author_bold)
+                y += author_h
+            end
+            y += entry_gap
             idx += 1
         end
         [out, idx]
     end
 
+    # Like render_comments_block but tries progressively smaller font sizes until all
+    # remaining comments (from start_idx to end) fit inside the block. This enforces the
+    # two-page-per-person constraint: instead of duplicating the comments page, we shrink
+    # the text so every comment fits in the one available page.
+    # The font size is reduced in 0.5pt steps down to a minimum of YEARBOOK_COMMENTS_MIN_FONT_PT.
+    YEARBOOK_COMMENTS_MIN_FONT_PT = 5.0
+
+    def render_comments_block_autoscale(block, config, visible_comments, start_idx = 0)
+        base_font = (config['font_size'] || block['fontSize'] || 10).to_f
+        font = base_font
+        while font >= YEARBOOK_COMMENTS_MIN_FONT_PT
+            scaled_config = config.merge('font_size' => font.round(1))
+            emitted, end_idx = render_comments_block(block, scaled_config, visible_comments, start_idx)
+            return [emitted, end_idx] if end_idx >= visible_comments.length
+            font -= 0.5
+        end
+        # At minimum font size accept whatever fits.
+        render_comments_block(block, config.merge('font_size' => YEARBOOK_COMMENTS_MIN_FONT_PT), visible_comments, start_idx)
+    end
+
     # Expand block placeholders on a single page. Returns [new_page_schemas, end_idx]
     # where end_idx is the next index into visible_comments after this page consumed its
     # share — the page builder uses that to paginate the comments-overflow page.
-    def expand_page_blocks(page_schemas, blocks_config, profile, answers, visible_comments, comments_start_idx)
+    # When fit_all_comments is true the comments block auto-scales to fit all remaining
+    # comments rather than stopping at the block boundary.
+    def expand_page_blocks(page_schemas, blocks_config, profile, answers, visible_comments, comments_start_idx, fit_all_comments: false)
         return [page_schemas, comments_start_idx] unless blocks_config.is_a?(Hash) && !blocks_config.empty?
 
         new_page = []
@@ -920,7 +988,11 @@ class Main < Sinatra::Base
                 when 'fields'
                     new_page.concat(render_fields_block(entry, cfg, profile, answers))
                 when 'comments'
-                    emitted, next_idx = render_comments_block(entry, cfg, visible_comments, end_idx)
+                    if fit_all_comments
+                        emitted, next_idx = render_comments_block_autoscale(entry, cfg, visible_comments, end_idx)
+                    else
+                        emitted, next_idx = render_comments_block(entry, cfg, visible_comments, end_idx)
+                    end
                     new_page.concat(emitted)
                     end_idx = next_idx
                 end
@@ -1191,33 +1263,25 @@ class Main < Sinatra::Base
         any_include_pending = blocks_config.values.any? { |c| c.is_a?(Hash) && c['kind'] == 'comments' && c['include_pending'] }
         visible_comments = visible_comments_for_block(comments, any_include_pending)
 
+        # The last page acts as the comments page. Instead of duplicating it to fit
+        # overflow, we auto-scale the comment font so all comments fit in exactly one
+        # page — enforcing the two-page-per-person (Steckbrief + Kommentare) layout.
         last_idx = pages.length - 1
         pages.each_with_index do |page_schemas, page_idx|
             is_last = (page_idx == last_idx)
-            iterations = 0
-            loop do
-                iterations += 1
-                expanded_page, next_comments_idx = expand_page_blocks(
-                    page_schemas, blocks_config, profile, answers, visible_comments, comments_idx
-                )
-                page_template = base_template.dup
-                page_template['schemas'] = [expanded_page]
-                force_static_schemas_readonly!(page_template, catalog_names)
-                inputs = build_yearbook_inputs_for_user(username, page_template)
-                jobs << { 'template' => page_template, 'inputs' => inputs } if inputs
+            fit_all = is_last && page_has_comments_block?(page_schemas, blocks_config)
 
-                comments_idx = next_comments_idx if next_comments_idx > comments_idx
+            expanded_page, next_comments_idx = expand_page_blocks(
+                page_schemas, blocks_config, profile, answers, visible_comments, comments_idx,
+                fit_all_comments: fit_all
+            )
+            page_template = base_template.dup
+            page_template['schemas'] = [expanded_page]
+            force_static_schemas_readonly!(page_template, catalog_names)
+            inputs = build_yearbook_inputs_for_user(username, page_template)
+            jobs << { 'template' => page_template, 'inputs' => inputs } if inputs
 
-                if is_last && page_has_comments_block?(page_schemas, blocks_config)
-                    # Spill the last page as many times as needed to consume remaining comments.
-                    break if comments_idx >= visible_comments.length
-                    # Safety brake: if a single iteration made no progress AND we've looped
-                    # several times, bail out so we don't hang the request.
-                    break if iterations > 50
-                else
-                    break
-                end
-            end
+            comments_idx = next_comments_idx if next_comments_idx > comments_idx
         end
 
         jobs

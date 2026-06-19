@@ -717,8 +717,12 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
             kind: 'comments',
             include_pending: false,
             show_author: true,
-            author_font_name: authorFont,
             font_name: textFont,
+            text_bold: false,
+            text_color: '',
+            author_font_name: authorFont,
+            author_bold: false,
+            author_color: '',
             font_size: 10,
             line_height: 1.4,
             entry_gap_mm: 2,
@@ -1030,6 +1034,23 @@ import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
         fontRow.appendChild(makeFontFormCol(6, 'Schrift Kommentartext', 'font_name', cfg));
         fontRow.appendChild(makeFontFormCol(6, 'Schrift Absender (üblicherweise fett)', 'author_font_name', cfg));
         wrap.appendChild(fontRow);
+
+        const boldRow = document.createElement('div');
+        boldRow.className = 'row g-2 mt-1';
+        const boldTextCol = document.createElement('div');
+        boldTextCol.className = 'col-md-6';
+        boldTextCol.appendChild(makeFormCheckbox('Kommentartext fett', 'text_bold', cfg));
+        const boldAuthorCol = document.createElement('div');
+        boldAuthorCol.className = 'col-md-6';
+        boldAuthorCol.appendChild(makeFormCheckbox('Absender fett', 'author_bold', cfg));
+        boldRow.appendChild(boldTextCol); boldRow.appendChild(boldAuthorCol);
+        wrap.appendChild(boldRow);
+
+        const colorRow = document.createElement('div');
+        colorRow.className = 'row g-2 mt-2';
+        colorRow.appendChild(makeColorFormCol(6, 'Farbe Kommentartext', 'text_color', cfg));
+        colorRow.appendChild(makeColorFormCol(6, 'Farbe Absender', 'author_color', cfg));
+        wrap.appendChild(colorRow);
 
         const sizeRow = document.createElement('div');
         sizeRow.className = 'row g-2 mt-2';

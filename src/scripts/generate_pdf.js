@@ -18,7 +18,7 @@ const { PDFDocument } = require('pdf-lib');
 // A build marker lets us confirm at runtime that the *current* version of
 // this script is the one Ruby invoked (and not a stale copy still cached in
 // the running container). Bump the date when you touch this file.
-const BUILD_MARKER = 'yearbook-pdf-gen 2026-06-17.cover-rotate-2';
+const BUILD_MARKER = 'yearbook-pdf-gen 2026-06-19.emoji-autoscale';
 const DEBUG_LOG_PATH = '/gen/log/yearbook_pdf_debug.log';
 const RUN_ID = crypto.randomBytes(4).toString('hex');
 
@@ -180,6 +180,8 @@ function readStdin() {
   });
 }
 
+const EMOJI_FONT_NAME = 'NotoColorEmoji';
+
 function buildFontRegistry(fontsPayload) {
   if (!fontsPayload || typeof fontsPayload !== 'object') return null;
   const names = Object.keys(fontsPayload);
@@ -197,6 +199,17 @@ function buildFontRegistry(fontsPayload) {
     if (entry.fallback) hasFallback = true;
   }
   if (Object.keys(registry).length === 0) return null;
+
+  // Promote NotoColorEmoji to the pdfme fallback font so emoji codepoints that
+  // are absent from admin-supplied fonts (e.g. Roboto) resolve to a visible glyph
+  // rather than a tofu box.  Any other fallback flag in the payload is cleared.
+  if (registry[EMOJI_FONT_NAME]) {
+    for (const n of Object.keys(registry)) registry[n].fallback = false;
+    registry[EMOJI_FONT_NAME].fallback = true;
+    hasFallback = true;
+    dbg(`emoji fallback: promoting ${EMOJI_FONT_NAME} to fallback font`);
+  }
+
   if (!hasFallback) registry[Object.keys(registry)[0]].fallback = true;
   return registry;
 }
