@@ -477,6 +477,7 @@ class Main < Sinatra::Base
         catalog_names = yearbook_template_field_catalog.map { |f| f['name'] }
         pages = base_template['schemas'] || []
         return [] if pages.empty?
+        pages = cap_yearbook_pages(pages)
 
         jobs = []
         pages.each do |page_schemas|
@@ -1215,14 +1216,26 @@ class Main < Sinatra::Base
         template
     end
 
+    # Hard cap on the number of pages a single student's yearbook entry may occupy.
+    YEARBOOK_MAX_PAGES_PER_USER = 2
+
+    # Enforce the two-page-per-person layout (Steckbrief + one comments page). If a template
+    # defines more pages, keep the first page (the Steckbrief) and the last page (the comments
+    # page the builder auto-scales) and drop everything in between.
+    def cap_yearbook_pages(pages)
+        return pages if pages.length <= YEARBOOK_MAX_PAGES_PER_USER
+        [pages.first, pages.last]
+    end
+
     # Build one or more pdfme jobs for a user. Returns an array of {template, inputs}.
     #
+    # Every student gets at most two pages (YEARBOOK_MAX_PAGES_PER_USER):
     # Page 0 = Steckbrief, rendered exactly once.
-    # Pages 1..N-1 = additional pages (typically comment pages). The LAST page acts as
-    # the comments-overflow template: it is duplicated as many times as needed to fit
-    # all of the student's comments. If the student has no comments but the last page
-    # has a comments block, the page is still rendered once (so every student gets at
-    # least one comment page).
+    # The LAST page = the comments page. It is NOT duplicated to fit overflow; instead the
+    # comment font is auto-scaled so all of the student's comments fit on this single page.
+    # Templates that define more than two pages are capped (see cap_yearbook_pages): the first
+    # (Steckbrief) and last (comments) page are kept, the rest are dropped. If the student has
+    # no comments but the last page has a comments block, the page is still rendered once.
     def build_yearbook_jobs_for_user(username, variant_set)
         # A personalised template (if the student customised their page) takes precedence
         # over the global variant selection.
@@ -1258,6 +1271,7 @@ class Main < Sinatra::Base
 
         pages = base_template['schemas'] || []
         return [] if pages.empty?
+        pages = cap_yearbook_pages(pages)
 
         jobs = []
         comments_idx = 0
