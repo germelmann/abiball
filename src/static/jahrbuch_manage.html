@@ -65,6 +65,10 @@
                                 title="Allen Schüler:innen ohne festgelegte Farbe eine zufällige Palette-Farbe zuweisen">
                             <i class="bi bi-shuffle"></i> Zufallsfarben für offene
                         </button>
+                        <button type="button" class="btn btn-outline-secondary" id="randomize_all_colors_btn" style="display:none;"
+                                title="Allen Schüler:innen eine zufällige Palette-Farbe zuweisen – auch bereits gesetzte werden überschrieben">
+                            <i class="bi bi-shuffle"></i> Zufallsfarben für alle
+                        </button>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-hover" id="profiles_table">
@@ -148,9 +152,9 @@ $(document).ready(function() {
         window.location.href = '/api/yearbook/export_survey_images';
     });
 
-    $('#randomize_colors_btn').on('click', function() {
-        const btn = $(this).prop('disabled', true);
-        api_call('/api/yearbook/accent_color/randomize_unset', {}, function(resp) {
+    function randomizeColors(btn, includeSet) {
+        btn.prop('disabled', true);
+        api_call('/api/yearbook/accent_color/randomize_unset', includeSet ? { include_set: true } : {}, function(resp) {
             btn.prop('disabled', false);
             if (resp && resp.success) {
                 Object.assign(accentColors, resp.assigned || {});
@@ -160,6 +164,20 @@ $(document).ready(function() {
                 show_error_message('Zufallsfarben konnten nicht zugewiesen werden.');
             }
         }, function() { btn.prop('disabled', false); show_error_message('Zufallsfarben konnten nicht zugewiesen werden.'); });
+    }
+
+    $('#randomize_colors_btn').on('click', function() {
+        randomizeColors($(this), false);
+    });
+
+    $('#randomize_all_colors_btn').on('click', function() {
+        const btn = $(this);
+        showTemplateModal(
+            'Zufallsfarben für alle',
+            'Allen Schüler:innen wird eine zufällige Palette-Farbe zugewiesen. <strong>Bereits gesetzte Farben werden dabei überschrieben.</strong> Fortfahren?',
+            'Überschreiben', 'btn-warning',
+            'Abbrechen', 'btn-secondary',
+            function() { randomizeColors(btn, true); });
     });
 
     $('#delete_all_btn').on('click', function() {
@@ -260,8 +278,10 @@ function renderManageView() {
     const hasUploadQuestions = manageQuestions.some(function(q) { return q.type === 'upload'; });
     $('#export_survey_images_btn').toggle(hasUploadQuestions);
 
-    // The random-fill button only does anything for yearbook_manage users with a palette.
-    $('#randomize_colors_btn').toggle(canManageTemplates && accentPalette.length > 0);
+    // The random-fill buttons only do anything for yearbook_manage users with a palette.
+    const canRandomize = canManageTemplates && accentPalette.length > 0;
+    $('#randomize_colors_btn').toggle(canRandomize);
+    $('#randomize_all_colors_btn').toggle(canRandomize);
 }
 
 function renderManageProfiles() {

@@ -1330,11 +1330,18 @@ class Main < Sinatra::Base
         require_yearbook_accessible!
         require_user_with_permission!("yearbook_manage")
 
+        # When include_set is true, every yearbook user is re-randomised (overwriting colours
+        # that were already chosen). Otherwise only users without a valid colour are touched.
+        data = parse_request_data(optional_keys: [:include_set])
+        include_set = [true, 'true', 1, '1'].include?(data[:include_set])
+
         palette = yearbook_accent_palette
+        color_filter = include_set ? '' :
+            "AND (u.yearbook_accent_color IS NULL OR NOT u.yearbook_accent_color =~ '#[0-9A-Fa-f]{6}')"
         rows = neo4j_query(<<~END_OF_QUERY)
             MATCH (u:User)
             WHERE ((u)-[:HAS_YEARBOOK_PROFILE]->() OR (u)-[:HAS_YEARBOOK_ENTRY]->())
-              AND (u.yearbook_accent_color IS NULL OR NOT u.yearbook_accent_color =~ '#[0-9A-Fa-f]{6}')
+              #{color_filter}
             RETURN u.username AS username
         END_OF_QUERY
         assigned = {}
