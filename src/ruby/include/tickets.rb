@@ -3566,11 +3566,18 @@ class Main < Sinatra::Base
                 fixed_cols = { 0 => 24, 1 => 62 }  # Nr., Bestellnr.
                 remaining = available_width - fixed_cols.values.sum
                 variable_count = headers.length - fixed_cols.length
-                default_w = (remaining / variable_count.to_f).round(1)
+                default_w = remaining / variable_count.to_f
 
                 col_widths = headers.each_index.map do |i|
                     fixed_cols[i] || default_w
                 end
+
+                # Compensate for floating point rounding so the column widths
+                # sum exactly to available_width. Otherwise Prawn may raise
+                # CannotFit when the total is marginally larger than the table.
+                width_diff = available_width - col_widths.sum
+                last_variable_index = headers.each_index.to_a.reverse.find { |i| !fixed_cols.key?(i) }
+                col_widths[last_variable_index] += width_diff if last_variable_index
 
                 num_rows = table_data.length
                 pdf.table table_data, {
