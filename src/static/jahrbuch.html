@@ -65,19 +65,6 @@
                     </p>
                     <div class="alert alert-info py-2 mb-3" id="yearbook_name_hint" style="display:none;"></div>
 
-                    <div id="personalize_cta" style="display:none;"
-                        class="alert alert-primary d-flex justify-content-between align-items-center flex-wrap gap-2 py-2 mb-3">
-                        <div>
-                            <i class="bi bi-vector-pen"></i> <strong id="personalize_cta_title">Eigene Jahrbuchseite gestalten</strong>
-                            <div class="small" id="personalize_cta_desc">
-                                Übernimm das vorgegebene Design und passe es individuell an – verschiebe Felder oder füge eigene Elemente hinzu.
-                            </div>
-                        </div>
-                        <a id="personalize_link" href="/jahrbuch_personalize" class="btn btn-sm btn-primary">
-                            <i class="bi bi-pencil-square"></i> Seite gestalten
-                        </a>
-                    </div>
-
                     <div id="profile_fields_container"></div>
 
                     <!-- Akzentfarbe ist eine Designentscheidung — nur yearbook_manage darf sie setzen,
@@ -86,17 +73,14 @@
                         <hr>
                         <div class="d-flex align-items-center gap-3 flex-wrap">
                             <div class="flex-shrink-0">
-                                <label for="accent_color_input" class="form-label mb-0">
+                                <label class="form-label mb-0">
                                     <i class="bi bi-droplet-half"></i> <strong>Akzentfarbe</strong>
                                 </label>
                                 <div class="text-body-secondary small">
-                                    Wird in der Jahrbuch-Vorlage als Hintergrund-/Akzentfarbe der Schüler:innen-Seite verwendet.
+                                    Wird in der Jahrbuch-Vorlage als Hintergrund-/Akzentfarbe der Schüler:innen-Seite verwendet. Wähle eine Farbe aus der Palette.
                                 </div>
                             </div>
-                            <input type="color" class="form-control form-control-color" id="accent_color_input" value="#0d6efd" title="Akzentfarbe wählen">
-                            <button type="button" class="btn btn-sm btn-outline-secondary" id="accent_color_reset" title="Auf Standard zurücksetzen">
-                                <i class="bi bi-arrow-counterclockwise"></i> Standard
-                            </button>
+                            <div id="accent_color_swatches" class="d-flex flex-wrap gap-2 align-items-center"></div>
                             <span class="small text-body-secondary" id="accent_color_status"></span>
                         </div>
                     </div>
@@ -242,9 +226,9 @@ let viewUsername = null;
 let canManage = false;
 let canAdminComments = false;
 let readOnlyMode = false;
-const YB_CUSTOMIZE_ENABLED = #{yearbook_user_customization_enabled? ? 'true' : 'false'};
-// Designing a yearbook page (layout) is reserved for yearbook_manage users.
-const YB_CAN_MANAGE = #{user_has_permission?("yearbook_manage") ? 'true' : 'false'};
+// Students may pick their own accent colour (from the palette) only when enabled.
+const YB_COLOR_CHOICE_ENABLED = #{yearbook_user_color_choice_enabled? ? 'true' : 'false'};
+const YB_ACCENT_PALETTE = #{JSON.generate(yearbook_accent_palette)};
 
 (function() {
     const parts = window.location.pathname.replace(/^\/+/, '').split('/');
@@ -361,7 +345,7 @@ function loadViewEntry() {
         $('#yearbook_content').show();
         renderProfileFields();
         renderQuestions();
-        updatePersonalizeCta();
+        loadAccentColor();
     }, function() {
         $('#entry_load_error_msg').text('Fehler beim Laden des Eintrags.');
         $('#entry_load_error').show();
@@ -373,38 +357,13 @@ function renderYearbook() {
     renderQuestions();
     updateYearbookNameHint();
     loadAccentColor();
-    updatePersonalizeCta();
     // Load comments in background to update badge (personal mode only)
     if (!viewUsername) {
         loadReceivedCommentsBadge();
     }
 }
 
-// ─────────────────── Seite gestalten (Personalisierung) ───────────────────
-
-function updatePersonalizeCta() {
-    const cta = $('#personalize_cta');
-    if (!YB_CUSTOMIZE_ENABLED) { cta.hide(); return; }
-
-    if (viewUsername) {
-        // Manage mode: a yearbook_manage user may design another student's page.
-        if (canManage) {
-            $('#personalize_cta_title').text('Jahrbuchseite gestalten');
-            $('#personalize_cta_desc').text('Passe das Seitenlayout dieser Schüler:in individuell an.');
-            $('#personalize_link').attr('href', '/jahrbuch_personalize?user=' + encodeURIComponent(viewUsername));
-            cta.show();
-        } else {
-            cta.hide();
-        }
-    } else {
-        // Own page: only yearbook_manage users may design the layout.
-        if (!YB_CAN_MANAGE) { cta.hide(); return; }
-        $('#personalize_link').attr('href', '/jahrbuch_personalize');
-        cta.show();
-    }
-}
-
-// ─────────────────── Akzentfarbe ───────────────────
+// ─────────────────── Akzentfarbe (Palette) ───────────────────
 
 let defaultAccentColor = '#0d6efd';
 
@@ -416,29 +375,54 @@ function setAccentStatus(text, kind) {
                      kind === 'ok'    ? 'var(--bs-success)' : '';
 }
 
+// 'manage' = yearbook_manage editing another student's entry; 'self' = own page with
+// student colour choice enabled; null = picker hidden.
+function accentColorMode() {
+    if (viewUsername) return canManage ? 'manage' : null;
+    return YB_COLOR_CHOICE_ENABLED ? 'self' : null;
+}
+
+function renderAccentSwatches(current) {
+    const wrap = document.getElementById('accent_color_swatches');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    const cur = (current || '').toLowerCase();
+    (YB_ACCENT_PALETTE || []).forEach(function(color) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn p-0 border';
+        btn.style.cssText = 'width:28px;height:28px;border-radius:50%;background:' + color + ';';
+        btn.style.outline = (cur === color.toLowerCase()) ? '3px solid var(--bs-body-color)' : 'none';
+        btn.style.outlineOffset = '1px';
+        btn.title = color;
+        btn.addEventListener('click', function() { saveAccentColor(color); });
+        wrap.appendChild(btn);
+    });
+}
+
 function loadAccentColor() {
     const row = document.getElementById('accent_color_row');
-    // Only yearbook_manage users editing another student's entry should see the picker.
-    // Students no longer pick their own accent — it is a design decision of the yearbook team.
-    const showPicker = !!(viewUsername && canManage);
-    if (row) row.style.display = showPicker ? '' : 'none';
-    if (!showPicker) return;
+    const mode = accentColorMode();
+    if (row) row.style.display = mode ? '' : 'none';
+    if (!mode) return;
 
-    const params = { target_username: viewUsername };
+    const params = (mode === 'manage') ? { target_username: viewUsername } : {};
     api_call('/api/yearbook/accent_color/get', params, function(data) {
         if (!data || !data.success) return;
         defaultAccentColor = data.default_color || defaultAccentColor;
-        const input = document.getElementById('accent_color_input');
-        if (input) input.value = data.color || defaultAccentColor;
+        renderAccentSwatches(data.color || defaultAccentColor);
     });
 }
 
 function saveAccentColor(color) {
-    if (!viewUsername || !canManage) return;
-    const params = { color: color, target_username: viewUsername };
+    const mode = accentColorMode();
+    if (!mode) return;
+    const url = (mode === 'manage') ? '/api/yearbook/accent_color/set' : '/api/yearbook/accent_color/set_own';
+    const params = (mode === 'manage') ? { color: color, target_username: viewUsername } : { color: color };
     setAccentStatus('Speichere…');
-    api_call('/api/yearbook/accent_color/set', params, function(data) {
+    api_call(url, params, function(data) {
         if (data && data.success) {
+            renderAccentSwatches(color);
             setAccentStatus('Gespeichert', 'ok');
             setTimeout(function() { setAccentStatus(''); }, 1500);
         } else {
@@ -446,16 +430,6 @@ function saveAccentColor(color) {
         }
     });
 }
-
-$(document).on('change', '#accent_color_input', function() {
-    saveAccentColor(this.value);
-});
-$(document).on('click', '#accent_color_reset', function() {
-    const input = document.getElementById('accent_color_input');
-    if (!input || input.disabled) return;
-    input.value = defaultAccentColor;
-    saveAccentColor(defaultAccentColor);
-});
 
 
 // ─────────────────── Steckbrief ───────────────────

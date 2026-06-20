@@ -65,11 +65,15 @@ YEARBOOK_END_AT = nil    # e.g. '2026-06-30T23:59:59' or nil for no end restrict
 # Set to true to show the "Alle Einträge löschen" button in jahrbuch_manage.
 YEARBOOK_ALLOW_DELETE_ALL = false
 
-# Allow students to individualise their own yearbook page: they open the same designer,
-# pre-filled with their data on top of the design they would otherwise receive, and can
-# move things around or add their own elements. Set to false to keep everyone on the
-# global variant design only.
-YEARBOOK_USER_CUSTOMIZATION_ENABLED = true
+# Accent-colour palette for yearbook pages. yearbook_manage users assign one of these
+# colours to each student; students may pick one themselves only if
+# YEARBOOK_USER_COLOR_CHOICE_ENABLED is true. Each entry must be a #RRGGBB hex string.
+YEARBOOK_ACCENT_PALETTE = ['#0d6efd', '#6f42c1', '#d63384', '#dc3545', '#fd7e14',
+                           '#198754', '#20c997', '#0dcaf0', '#ffc107', '#6c757d']
+
+# Allow students to choose their own accent colour (from YEARBOOK_ACCENT_PALETTE) on their
+# own yearbook page. Set to false to let only yearbook_manage users assign colours.
+YEARBOOK_USER_COLOR_CHOICE_ENABLED = false
 
 YEARBOOK_QUESTIONS = [
     # Non-anonymous question (namentlich):

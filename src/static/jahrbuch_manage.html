@@ -59,8 +59,12 @@
                     <span class="badge bg-primary" id="profiles_count">0</span>
                 </div>
                 <div class="card-body">
-                    <div class="mb-3">
-                        <input type="text" class="form-control" id="profiles_search" placeholder="Suchen...">
+                    <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+                        <input type="text" class="form-control" id="profiles_search" placeholder="Suchen..." style="max-width: 320px;">
+                        <button type="button" class="btn btn-outline-secondary" id="randomize_colors_btn" style="display:none;"
+                                title="Allen Schüler:innen ohne festgelegte Farbe eine zufällige Palette-Farbe zuweisen">
+                            <i class="bi bi-shuffle"></i> Zufallsfarben für offene
+                        </button>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-hover" id="profiles_table">
@@ -124,6 +128,7 @@ let allUserAnswers = {};
 let allProfiles = [];
 let accentColors = {};        // username -> "#rrggbb"
 let defaultAccentColor = '#0d6efd';
+let accentPalette = [];        // ["#rrggbb", ...] assignable accent colours
 let attributedAnonymous = {};
 let allowDeleteAll = false;
 let isManage = false;
@@ -131,10 +136,8 @@ let isManage = false;
 // Template-management state (populated from /template/assignments, which only
 // succeeds for yearbook_manage users).
 let canManageTemplates = false;
-let customizationEnabled = false;
 let templateVariants = [];     // [{id, name, photo_count}]
 let userVariantMap = {};       // username -> pinned variant_id ("" = auto)
-let userHasCustom = {};        // username -> bool (has a personalised page)
 
 $(document).ready(function() {
     loadManageData();
@@ -143,6 +146,20 @@ $(document).ready(function() {
     $('#export_csv_btn').on('click', function() { exportData('csv'); });
     $('#export_survey_images_btn').on('click', function() {
         window.location.href = '/api/yearbook/export_survey_images';
+    });
+
+    $('#randomize_colors_btn').on('click', function() {
+        const btn = $(this).prop('disabled', true);
+        api_call('/api/yearbook/accent_color/randomize_unset', {}, function(resp) {
+            btn.prop('disabled', false);
+            if (resp && resp.success) {
+                Object.assign(accentColors, resp.assigned || {});
+                show_success_message((resp.count || 0) + ' Farbe(n) zufällig zugewiesen.');
+                renderManageView();
+            } else {
+                show_error_message('Zufallsfarben konnten nicht zugewiesen werden.');
+            }
+        }, function() { btn.prop('disabled', false); show_error_message('Zufallsfarben konnten nicht zugewiesen werden.'); });
     });
 
     $('#delete_all_btn').on('click', function() {
@@ -204,16 +221,16 @@ function loadManageData() {
                     if (colorData && colorData.success) {
                         accentColors = colorData.colors || {};
                         defaultAccentColor = colorData.default_color || defaultAccentColor;
+                        accentPalette = colorData.palette || accentPalette;
                     }
-                    // Variant assignments + personalisation flags (yearbook_manage only).
+                    // Variant assignments (yearbook_manage only).
                     api_call('/api/yearbook/template/assignments', {}, function(assignData) {
                         if (assignData && assignData.success) {
                             canManageTemplates = true;
                             templateVariants = assignData.variants || [];
-                            customizationEnabled = !!assignData.customization_enabled;
+                            accentPalette = assignData.palette || accentPalette;
                             (assignData.users || []).forEach(function(u) {
                                 userVariantMap[u.username] = u.variant_id || '';
-                                userHasCustom[u.username] = !!u.has_custom;
                             });
                         }
                         renderManageView();
@@ -242,6 +259,9 @@ function renderManageView() {
     // Show the bulk image download only when there is at least one upload-type question.
     const hasUploadQuestions = manageQuestions.some(function(q) { return q.type === 'upload'; });
     $('#export_survey_images_btn').toggle(hasUploadQuestions);
+
+    // The random-fill button only does anything for yearbook_manage users with a palette.
+    $('#randomize_colors_btn').toggle(canManageTemplates && accentPalette.length > 0);
 }
 
 function renderManageProfiles() {
@@ -297,10 +317,6 @@ function renderManageProfiles() {
                 vsel.append($('<option>').val(v.id).text((v.name || 'Unbenannt') + pc));
             });
             vsel.val(userVariantMap[profile.username] || '');
-            if (userHasCustom[profile.username]) {
-                vsel.prop('disabled', true)
-                    .attr('title', 'Diese Schüler:in hat eine individuell gestaltete Seite – die Vorlagenauswahl wird dann nicht verwendet.');
-            }
             vsel.on('change', function() {
                 const vid = this.value;
                 api_call('/api/yearbook/template/set_user_variant',
@@ -316,21 +332,32 @@ function renderManageProfiles() {
         }
         tr.append(variantCell);
 
-        // Accent colour swatch — yearbook_manage can edit inline, yearbook_view sees read-only.
+        // Accent colour — yearbook_manage picks from the palette, yearbook_view sees read-only.
         const accentCell = $('<td>');
-        const accentInput = $('<input type="color" class="form-control form-control-color form-control-sm" style="width: 44px; height: 28px; padding: 2px;">')
-            .val(accentColors[profile.username] || defaultAccentColor)
+        const cur = accentColors[profile.username] || defaultAccentColor;
+        const sel = $('<select class="form-select form-select-sm" style="width:auto; min-width:72px;">')
             .attr('title', 'Akzentfarbe für ' + (profile.name || profile.username));
-        if (!canManageTemplates) accentInput.prop('disabled', true);
-        accentInput.on('change', function() {
+        // Show the stored colour even if it predates the palette, so it isn't silently changed.
+        if (!accentPalette.some(function(c) { return c.toLowerCase() === cur.toLowerCase(); })) {
+            sel.append($('<option>').val(cur).text(cur + ' (alt)').css({ background: cur, color: '#fff' }));
+        }
+        accentPalette.forEach(function(c) {
+            sel.append($('<option>').val(c).text(c).css({ background: c, color: '#fff' }));
+        });
+        sel.val(cur).css({ background: cur, color: '#fff' });
+        if (!canManageTemplates) sel.prop('disabled', true);
+        sel.on('change', function() {
             const newColor = this.value;
             api_call('/api/yearbook/accent_color/set',
                 { color: newColor, target_username: profile.username },
                 function(resp) {
-                    if (resp && resp.success) accentColors[profile.username] = newColor;
+                    if (resp && resp.success) {
+                        accentColors[profile.username] = newColor;
+                        sel.css({ background: newColor, color: '#fff' });
+                    }
                 });
         });
-        accentCell.append(accentInput);
+        accentCell.append(sel);
         tr.append(accentCell);
 
         const actions = $('<td class="d-flex gap-1 flex-wrap">');
@@ -342,18 +369,6 @@ function renderManageProfiles() {
         actions.append(viewBtn);
 
         if (canManageTemplates) {
-            // Individuelle Seite gestalten (Personalisierung).
-            if (customizationEnabled) {
-                const hasCustom = !!userHasCustom[profile.username];
-                const customBtn = $('<button type="button" class="btn btn-sm">')
-                    .addClass(hasCustom ? 'btn-success' : 'btn-outline-success')
-                    .html('<i class="bi bi-vector-pen"></i>')
-                    .attr('title', hasCustom ? 'Individuelle Seite bearbeiten (bereits angepasst)' : 'Individuelle Seite gestalten')
-                    .on('click', function() {
-                        window.location.href = '/jahrbuch_personalize?user=' + encodeURIComponent(profile.username);
-                    });
-                actions.append(customBtn);
-            }
             // PDF-Vorschau der gerenderten Seite.
             const previewBtn = $('<button type="button" class="btn btn-sm btn-outline-secondary">')
                 .html('<i class="bi bi-file-earmark-pdf"></i>')
