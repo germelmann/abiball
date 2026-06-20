@@ -3,6 +3,7 @@ require 'chunky_png'
 require 'digest'
 require 'fileutils'
 require 'json'
+require 'prawn'
 require 'time'
 require 'open3'
 require 'zlib'
@@ -788,18 +789,51 @@ class Main < Sinatra::Base
         rows.map { |r| { 'text' => r['text'].to_s, 'status' => r['status'], 'commenter_name' => r['commenter_name'].to_s } }
     end
 
-    # Estimate the rendered height of a text element in mm.
-    # Uses word-boundary-aware wrapping to match pdfme's actual line-break behavior.
-    # The 0.52× factor matches Roboto's actual average character width for mixed German
-    # text more closely than the older 0.6 value, which over-estimated and caused
-    # spurious blank lines between comments.  A 0.5mm tolerance in callers catches the
-    # rare under-estimate for wide-character sequences.
-    def estimate_text_height_mm(content, font_size_pt, line_height_factor, width_mm)
+    # Measure the rendered height of a text element in mm using real font metrics.
+    #
+    # We load the actual TTF/OTF via Prawn (already a project dependency) and let it
+    # wrap the text to the box width with true glyph advances, then count the lines.
+    # Height is lines * fontSize * lineHeight, matching exactly how generate_pdf.js
+    # stacks lines (rowYOffset = lineHeight * fontSize * rowIndex). This replaces the
+    # old average-character-width guess (a fixed 0.52 factor) which could not match
+    # pdfme's wrapping and so left comments either gapped apart (over-estimate) or
+    # overlapping (under-estimate).
+    #
+    # Strings the measuring font can't represent (e.g. emoji, or a CFF-outline OTF
+    # Prawn won't parse) make Prawn raise; we catch that and fall back to the old
+    # character-width heuristic for those rare cases.
+    def estimate_text_height_mm(content, font_size_pt, line_height_factor, width_mm, font_name: nil)
         return 0.0 if content.to_s.empty?
         line_h = font_size_pt * line_height_factor * PT_TO_MM
+        lines = prawn_line_count(content.to_s, font_size_pt, width_mm, font_name) ||
+                heuristic_line_count(content.to_s, font_size_pt, width_mm)
+        [line_h * lines, line_h].max
+    end
+
+    # Count how many lines `content` wraps into at `width_mm` using the real font.
+    # Returns nil when the string/font can't be measured so the caller falls back.
+    def prawn_line_count(content, font_size_pt, width_mm, font_name)
+        width_pt = width_mm.to_f / PT_TO_MM
+        return 1 if width_pt <= 0
+        doc = yearbook_prawn_doc
+        doc.font(yearbook_prawn_register_font(doc, font_name), size: font_size_pt)
+        single = doc.font.height
+        return nil if single <= 0
+        # height_of wraps at word boundaries using actual advances and honours "\n".
+        # With zero leading the box height is lines * single, so dividing recovers the
+        # line count regardless of our own lineHeight factor (applied by the caller).
+        total = doc.height_of(content, width: width_pt)
+        [(total / single).round, 1].max
+    rescue StandardError
+        nil
+    end
+
+    # The character-width heuristic kept as a fallback for strings Prawn can't measure.
+    # Uses word-boundary-aware wrapping with a 0.52× average-character-width factor.
+    def heuristic_line_count(content, font_size_pt, width_mm)
         avg_char_width_mm = font_size_pt * 0.52 * PT_TO_MM
         chars_per_line = [(width_mm.to_f / [avg_char_width_mm, 0.01].max).floor, 1].max
-        total_lines = content.to_s.split("\n").sum do |row|
+        content.split("\n").sum do |row|
             next 1 if row.empty?
             # Simulate word-boundary wrapping: add words one-by-one onto lines.
             # This avoids under-counting when long words cause short words to strand
@@ -820,7 +854,38 @@ class Main < Sinatra::Base
             end
             line_count
         end
-        [line_h * total_lines, line_h].max
+    end
+
+    # Reusable Prawn document used purely as a text-measurement engine (never written
+    # to disk). It keeps its one default page because Prawn needs a current page for
+    # font selection; height_of only measures and draws nothing.
+    def yearbook_prawn_doc
+        @yearbook_prawn_doc ||= Prawn::Document.new(margin: 0)
+    end
+
+    # Register the font named like a pdfme font ("Roboto-Regular") on the measuring
+    # document and return the family name to pass to doc.font. Falls back to Prawn's
+    # built-in Helvetica (Latin-1 AFM) when no matching file exists.
+    def yearbook_prawn_register_font(doc, font_name)
+        path = yearbook_prawn_font_path(font_name)
+        return 'Helvetica' unless path
+        family = yearbook_font_name_for(File.basename(path))
+        doc.font_families.update(family => { normal: path }) unless doc.font_families.key?(family)
+        family
+    end
+
+    # Map a pdfme font name to a font file on disk, mirroring the render-time fallback:
+    # the named admin font if present, otherwise the first admin font alphabetically
+    # (which yearbook_fonts_payload marks as pdfme's fallback). Memoised per name;
+    # nil means "no file — use the built-in".
+    def yearbook_prawn_font_path(font_name)
+        @yearbook_prawn_font_paths ||= {}
+        key = font_name.to_s
+        return @yearbook_prawn_font_paths[key] if @yearbook_prawn_font_paths.key?(key)
+        files = yearbook_font_files
+        match = key.empty? ? nil : files.find { |f| yearbook_font_name_for(f) == key }
+        match ||= files.first
+        @yearbook_prawn_font_paths[key] = match ? File.join(YEARBOOK_FONTS_DIR, match) : nil
     end
 
     def estimate_text_width_mm(content, font_size_pt)
@@ -884,8 +949,8 @@ class Main < Sinatra::Base
                 # block, drop back to two stacked lines.
                 if label_w >= width - 5
                     label_with_colon = "#{label}:"
-                    label_h = estimate_text_height_mm(label_with_colon, font_size, line_height, width)
-                    value_h = estimate_text_height_mm(value, font_size, line_height, width)
+                    label_h = estimate_text_height_mm(label_with_colon, font_size, line_height, width, font_name: label_font)
+                    value_h = estimate_text_height_mm(value, font_size, line_height, width, font_name: value_font)
                     break if y + label_h + value_h > max_y + 0.5
                     out << make_block_text_schema(x, y, width, label_h, label_font, font_size, label_with_colon, label_color, alignment, line_height, bold: label_bold)
                     y += label_h
@@ -893,8 +958,8 @@ class Main < Sinatra::Base
                     y += value_h + entry_gap
                 else
                     value_w = width - label_w
-                    row_h = [estimate_text_height_mm(label_text, font_size, line_height, label_w),
-                             estimate_text_height_mm(value, font_size, line_height, value_w)].max
+                    row_h = [estimate_text_height_mm(label_text, font_size, line_height, label_w, font_name: label_font),
+                             estimate_text_height_mm(value, font_size, line_height, value_w, font_name: value_font)].max
                     break if y + row_h > max_y + 0.5
                     out << make_block_text_schema(x, y, label_w, row_h, label_font, font_size, label_text, label_color, alignment, line_height, bold: label_bold)
                     out << make_block_text_schema(x + label_w, y, value_w, row_h, value_font, font_size, value, value_color, alignment, line_height, bold: value_bold)
@@ -904,15 +969,15 @@ class Main < Sinatra::Base
                 # Label on its own line above the value. Label ends with a colon so the
                 # visual relationship to its answer stays clear.
                 label_with_colon = "#{label}:"
-                label_h = estimate_text_height_mm(label_with_colon, font_size, line_height, width)
-                value_h = estimate_text_height_mm(value, font_size, line_height, width)
+                label_h = estimate_text_height_mm(label_with_colon, font_size, line_height, width, font_name: label_font)
+                value_h = estimate_text_height_mm(value, font_size, line_height, width, font_name: value_font)
                 break if y + label_h + value_h > max_y + 0.5
                 out << make_block_text_schema(x, y, width, label_h, label_font, font_size, label_with_colon, label_color, alignment, line_height, bold: label_bold)
                 y += label_h
                 out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, value_color, alignment, line_height, bold: value_bold)
                 y += value_h + entry_gap
             else
-                value_h = estimate_text_height_mm(value, font_size, line_height, width)
+                value_h = estimate_text_height_mm(value, font_size, line_height, width, font_name: value_font)
                 break if y + value_h > max_y + 0.5
                 out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, value_color, alignment, line_height, bold: value_bold)
                 y += value_h + entry_gap
@@ -969,8 +1034,8 @@ class Main < Sinatra::Base
             author = c['commenter_name'].to_s.strip
             author_str = (show_author && !author.empty?) ? "— #{author}" : nil
 
-            text_h = estimate_text_height_mm(text, font_size, line_height, width)
-            author_h = author_str ? estimate_text_height_mm(author_str, font_size, line_height, width) : 0.0
+            text_h = estimate_text_height_mm(text, font_size, line_height, width, font_name: text_font)
+            author_h = author_str ? estimate_text_height_mm(author_str, font_size, line_height, width, font_name: author_font) : 0.0
             total_h = text_h + author_h
 
             # If this comment doesn't fit and we've already emitted at least one, stop —
