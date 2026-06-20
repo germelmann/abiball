@@ -856,6 +856,12 @@ class Main < Sinatra::Base
             @yearbook_entry_username = yb_username
         end
 
+        if path =~ /^\/jahrbuch_entry_edit\/(.+)$/
+            yb_username = $1
+            path = '/jahrbuch_entry_edit.html'
+            @yearbook_entry_username = yb_username
+        end
+
         if path =~ /^\/jahrbuch_entry\/(.+)$/
             yb_username = $1
             path = '/jahrbuch_entry.html'

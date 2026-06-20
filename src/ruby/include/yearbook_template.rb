@@ -299,6 +299,93 @@ class Main < Sinatra::Base
         end
     end
 
+    # ----- per-user manual override (hand-edited entry) -------------------
+    #
+    # A yearbook_manage user can open a student's completed entry in the editor,
+    # tweak it (move an image, drop a line, …) and save the result as a manual
+    # override. Once saved, the entry is rendered verbatim from this override,
+    # independent of the variant design, and the student's own data is frozen
+    # (see yearbook_user_locked? enforcement in yearbook.rb). The override can be
+    # reset, which re-enables auto-generation from the variant design.
+    #
+    # The override template is stored on disk (it inlines images as data URLs and
+    # can be several MB); a boolean flag on the User node mirrors its existence so
+    # locking and overview queries don't have to touch the filesystem per user.
+    YEARBOOK_OVERRIDE_DIR = '/raw/yearbook_overrides'
+
+    # Filesystem-safe, collision-free path for a user's override (usernames may
+    # contain @ . + - which we don't want in a filename).
+    def yearbook_override_path(username)
+        File.join(YEARBOOK_OVERRIDE_DIR, "#{Digest::SHA256.hexdigest(username.to_s)}.json")
+    end
+
+    def yearbook_user_has_override?(username)
+        File.exist?(yearbook_override_path(username))
+    end
+
+    # True if the user's entry has been manually finalised (the DB flag is the
+    # authoritative source for locking; it is kept in sync with the override file).
+    def yearbook_user_locked?(username)
+        r = neo4j_query(<<~END_OF_QUERY, {username: username}).first
+            MATCH (u:User {username: $username})
+            RETURN COALESCE(u.yearbook_manual_override, false) AS v
+        END_OF_QUERY
+        r ? (r['v'] == true) : false
+    end
+
+    # Load the stored override template (the bare pdfme template hash), or nil.
+    def load_yearbook_override(username)
+        path = yearbook_override_path(username)
+        return nil unless File.exist?(path)
+        begin
+            data = JSON.parse(File.read(path))
+            tpl = data.is_a?(Hash) ? data['template'] : nil
+            tpl.is_a?(Hash) ? tpl : nil
+        rescue => e
+            debug_error "Failed to read yearbook override for #{username}: #{e.message}"
+            nil
+        end
+    end
+
+    # Build a single, fully-resolved pdfme template for one user: run the normal
+    # variant-based job builder, then bake each job's inputs into the schema
+    # `content` so the result is self-contained (renders with empty inputs). Pages
+    # from all jobs are concatenated into one multi-page template. This is what the
+    # per-user editor opens when no override exists yet.
+    def build_resolved_template_for_user(username, variant_set)
+        jobs = build_yearbook_jobs_for_user(username, variant_set)
+        return nil if jobs.empty?
+
+        base_pdf = jobs.first['template']['basePdf'] || YEARBOOK_DEFAULT_BASE_PDF
+        pages = []
+        jobs.each do |job|
+            tpl = job['template']
+            inputs_page = (job['inputs'] && job['inputs'][0]) || {}
+            (tpl['schemas'] || []).each do |page|
+                next unless page.is_a?(Array)
+                baked = page.map do |entry|
+                    next entry unless entry.is_a?(Hash)
+                    e = entry.dup
+                    name = e['name']
+                    # Bake the resolved value (text or image data URL) into the element.
+                    # Bake even empty values: at render the override forces every element
+                    # readOnly, so an un-baked catalog field would otherwise show its
+                    # design-time placeholder label instead of the (empty) real value.
+                    if name.is_a?(String) && inputs_page.key?(name)
+                        e['content'] = inputs_page[name].to_s
+                    end
+                    # Make every element editable/movable in the designer. The render
+                    # path forces readOnly again so the baked content is used verbatim.
+                    e['readOnly'] = false
+                    e
+                end
+                pages << baked
+            end
+        end
+        pages = [[]] if pages.empty?
+        { 'basePdf' => base_pdf, 'schemas' => pages }
+    end
+
     # ----- per-user state stored on the User node -------------------------
 
     def yearbook_photo_count_for_user(username)
@@ -1066,6 +1153,17 @@ class Main < Sinatra::Base
     # (Steckbrief) and last (comments) page are kept, the rest are dropped. If the student has
     # no comments but the last page has a comments block, the page is still rendered once.
     def build_yearbook_jobs_for_user(username, variant_set)
+        # Manual override: a manager has hand-edited this user's page. Render it
+        # verbatim, independent of the variant design. All schemas are forced
+        # readOnly so their baked content is used (inputs are empty).
+        override = load_yearbook_override(username)
+        if override
+            tpl = JSON.parse(JSON.dump(override))
+            tpl['basePdf'] ||= YEARBOOK_DEFAULT_BASE_PDF
+            force_static_schemas_readonly!(tpl, [])
+            return [{ 'template' => tpl, 'inputs' => [{}] }]
+        end
+
         variant = pick_yearbook_variant_for_user(username, variant_set)
         return [] unless variant
 
@@ -1210,7 +1308,8 @@ class Main < Sinatra::Base
                    COALESCE(s.name, u.name) AS display_name,
                    photo_count,
                    u.yearbook_template_variant AS variant_id,
-                   u.yearbook_accent_color AS accent_color
+                   u.yearbook_accent_color AS accent_color,
+                   COALESCE(u.yearbook_manual_override, false) AS manual_override
             ORDER BY display_name
         END_OF_QUERY
         users = rows.map { |r| {
@@ -1218,7 +1317,8 @@ class Main < Sinatra::Base
             display_name: r['display_name'],
             photo_count: r['photo_count'].to_i,
             variant_id: r['variant_id'],
-            accent_color: r['accent_color'] || YEARBOOK_DEFAULT_ACCENT_COLOR
+            accent_color: r['accent_color'] || YEARBOOK_DEFAULT_ACCENT_COLOR,
+            manual_override: r['manual_override'] == true
         } }
 
         variant_set = load_yearbook_variant_set
@@ -1430,6 +1530,98 @@ class Main < Sinatra::Base
         END_OF_QUERY
         users = results.map { |r| { username: r['username'], display_name: r['display_name'] } }
         respond(success: true, users: users)
+    end
+
+    # ----- per-user manual override editor routes --------------------------
+
+    # Load the template for the per-user entry editor. Returns the saved manual
+    # override if one exists, otherwise a freshly-resolved template baked from the
+    # user's data + assigned variant (so the editor always opens pre-filled).
+    post '/api/yearbook/override/get' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        data = parse_request_data(required_keys: [:target_username])
+        username = data[:target_username].to_s.strip
+        assert(username =~ YEARBOOK_USERNAME_FORMAT, "Ungültiger Benutzername")
+
+        user_info = neo4j_query(<<~END_OF_QUERY, {username: username}).first
+            MATCH (u:User {username: $username})
+            OPTIONAL MATCH (u)-[:IS_SCHUELER]->(s:Schueler)
+            RETURN u.username AS username, COALESCE(s.name, u.name) AS display_name
+        END_OF_QUERY
+        assert(user_info, "Benutzer nicht gefunden")
+
+        has_override = yearbook_user_has_override?(username)
+        template = has_override ? load_yearbook_override(username) : nil
+        if template.nil?
+            variant_set = load_yearbook_variant_set
+            template = build_resolved_template_for_user(username, variant_set)
+            assert(template, "Für diese Person ist keine Vorlage verfügbar.")
+            has_override = false
+        end
+
+        respond(success: true,
+                template: template,
+                has_override: has_override,
+                username: user_info['username'],
+                display_name: user_info['display_name'])
+    end
+
+    # Save a manual override for a user. Locks the user's own data editing and makes
+    # the entry independent of the variant design.
+    post '/api/yearbook/override/save' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        # The edited template inlines images as data URLs and can grow several MB.
+        data = parse_request_data(
+            required_keys: [:target_username, :template],
+            max_body_length: 50_000_000,
+            max_string_length: 50_000_000
+        )
+        username = data[:target_username].to_s.strip
+        assert(username =~ YEARBOOK_USERNAME_FORMAT, "Ungültiger Benutzername")
+        template = data[:template]
+        assert(template.is_a?(Hash) && template['schemas'].is_a?(Array), "Ungültige Vorlage")
+
+        user_exists = neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username}) RETURN u.username AS username
+        END_OF_QUERY
+        assert(!user_exists.empty?, "Benutzer nicht gefunden")
+
+        template['basePdf'] ||= YEARBOOK_DEFAULT_BASE_PDF
+        payload = { 'username' => username, 'updated_at' => yearbook_timestamp, 'template' => template }
+
+        FileUtils.mkdir_p(YEARBOOK_OVERRIDE_DIR)
+        File.write(yearbook_override_path(username), JSON.pretty_generate(payload))
+
+        neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username}) SET u.yearbook_manual_override = true
+        END_OF_QUERY
+
+        log("Jahrbuch-Eintrag von #{username} manuell überschrieben durch #{@session_user[:username]}")
+        respond(success: true, message: "Manuelles Design gespeichert. Der Eintrag ist jetzt gesperrt.")
+    end
+
+    # Remove the manual override → the entry is auto-generated from the variant
+    # design again and the user may edit their data once more.
+    post '/api/yearbook/override/reset' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        data = parse_request_data(required_keys: [:target_username])
+        username = data[:target_username].to_s.strip
+        assert(username =~ YEARBOOK_USERNAME_FORMAT, "Ungültiger Benutzername")
+
+        path = yearbook_override_path(username)
+        File.delete(path) if File.exist?(path)
+        neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username}) REMOVE u.yearbook_manual_override
+        END_OF_QUERY
+
+        log("Manuelles Jahrbuch-Design für #{username} zurückgesetzt durch #{@session_user[:username]}")
+        respond(success: true, message: "Auf automatisches Design zurückgesetzt. Der Eintrag ist wieder freigegeben.")
     end
 
 end

@@ -65,6 +65,13 @@ YEARBOOK_END_AT = nil    # e.g. '2026-06-30T23:59:59' or nil for no end restrict
 # Set to true to show the "Alle Einträge löschen" button in jahrbuch_manage.
 YEARBOOK_ALLOW_DELETE_ALL = false
 
+# Freeze survey answering for normal users (e.g. once the survey phase is over).
+# When true, students can no longer change their survey answers / answer-uploads;
+# yearbook_manage users are exempt so they can still maintain entries. This is a
+# global switch, independent of the per-entry manual override (which freezes a
+# single student's Steckbrief and comment moderation).
+YEARBOOK_SURVEYS_LOCKED = false
+
 # Accent-colour palette for yearbook pages. yearbook_manage users assign one of these
 # colours to each student; students may pick one themselves only if
 # YEARBOOK_USER_COLOR_CHOICE_ENABLED is true. Each entry must be a #RRGGBB hex string.

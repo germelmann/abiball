@@ -1,0 +1,423 @@
+#{site_for_user_with_permission!("yearbook_manage")}
+
+<style>
+    .yb-designer-layout {
+        display: flex;
+        gap: 12px;
+        align-items: stretch;
+        height: calc(100vh - 130px);
+        padding: 0 12px 12px 12px;
+    }
+    .yb-sidebar {
+        width: 290px;
+        flex: 0 0 290px;
+        overflow-y: auto;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 6px;
+        padding: 10px;
+        background: var(--bs-tertiary-bg);
+    }
+    .yb-canvas {
+        flex: 1 1 auto;
+        min-width: 0;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 6px;
+        background: #fff;
+        overflow: hidden;
+        position: relative;
+    }
+    .yb-designer-mount { width: 100%; height: 100%; }
+    .yb-field-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-bottom: 6px;
+        padding: 6px 8px;
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color-translucent);
+        border-radius: 4px;
+    }
+    .yb-field-row .yb-label {
+        flex: 1 1 auto; min-width: 0; overflow: hidden;
+        text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem;
+    }
+    .yb-toolbar {
+        display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--bs-border-color-translucent);
+    }
+    .yb-toolbar .yb-sep { width: 1px; align-self: stretch; background: var(--bs-border-color); margin: 0 4px; }
+    .yb-status { font-size: 0.85rem; color: var(--bs-secondary-color); }
+    .yb-variant-bar { background: var(--bs-tertiary-bg); }
+</style>
+
+<div class="yb-toolbar yb-variant-bar">
+    <a href="/jahrbuch_manage" class="btn btn-outline-secondary btn-sm" title="Zurück zur Verwaltung">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h1 class="mb-0 me-2" style="font-size: 1.2rem;">
+        <i class="bi bi-pencil-square"></i> Eintrag bearbeiten
+    </h1>
+    <span class="yb-sep"></span>
+    <span id="yb_entry_title" class="fw-semibold"></span>
+    <span class="badge bg-secondary" id="yb_override_badge" style="display:none;" title="Dieser Eintrag wird unabhängig vom Hauptdesign gedruckt.">
+        <i class="bi bi-lock-fill"></i> Manuelles Design aktiv
+    </span>
+    <span class="badge bg-light text-dark border" id="yb_auto_badge" style="display:none;" title="Aus dem Hauptdesign generiert.">
+        <i class="bi bi-magic"></i> Aus Hauptdesign generiert
+    </span>
+</div>
+
+<div class="yb-toolbar">
+    <button type="button" class="btn btn-primary" id="yb_save_btn" disabled>
+        <i class="bi bi-save"></i> Als manuelles Design speichern
+    </button>
+    <button type="button" class="btn btn-outline-danger" id="yb_reset_btn" style="display:none;">
+        <i class="bi bi-arrow-counterclockwise"></i> Auf Hauptdesign zurücksetzen
+    </button>
+    <span class="yb-sep"></span>
+    <button type="button" class="btn btn-outline-secondary" id="yb_preview_btn" disabled>
+        <i class="bi bi-file-earmark-pdf"></i> PDF-Vorschau
+    </button>
+    <span class="yb-status ms-auto" id="yb_status"></span>
+</div>
+
+<div class="yb-designer-layout">
+    <div class="yb-sidebar">
+        <div class="alert alert-info py-2 small">
+            <i class="bi bi-info-circle"></i> Alle Daten dieser Person (Steckbrief, Antworten, Bilder
+            und Kommentare) sind hier bereits eingesetzt. Du kannst Elemente verschieben,
+            bearbeiten oder löschen. Beim Speichern wird dieser Eintrag <strong>unabhängig
+            vom Hauptdesign</strong> gedruckt und die Daten der Person werden gesperrt.
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label small mb-1"><i class="bi bi-file-earmark"></i> Aktive Seite (Ziel beim Einfügen)</label>
+            <select class="form-select form-select-sm" id="yb_target_page"></select>
+        </div>
+
+        <h6 class="mt-2 mb-2"><i class="bi bi-images"></i> Bilder / Assets</h6>
+        <div class="text-body-secondary small mb-2">
+            Dateien aus <code>src/static/include/yearbook_assets/</code> auf die aktive Seite einfügen.
+        </div>
+        <div id="yb_asset_list">
+            <div class="text-body-secondary small">—</div>
+        </div>
+
+        <h6 class="mt-4 mb-2"><i class="bi bi-fonts"></i> Schriftarten</h6>
+        <div class="text-body-secondary small" id="yb_font_summary">—</div>
+    </div>
+    <div class="yb-canvas">
+        <div id="yb_designer" class="yb-designer-mount"></div>
+    </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "@pdfme/ui":      "https://esm.sh/@pdfme/ui@5?bundle",
+    "@pdfme/schemas": "https://esm.sh/@pdfme/schemas@5",
+    "@pdfme/common":  "https://esm.sh/@pdfme/common@5"
+  }
+}
+</script>
+
+<script type="module">
+import { Designer } from '@pdfme/ui';
+import { text, image, line, rectangle, ellipse } from '@pdfme/schemas';
+
+(function () {
+    'use strict';
+
+    let designer = null;
+    let availableAssets = [];
+    let availableFonts = [];
+    let pdfmeFontRegistry = null;
+    let assetCounter = 0;
+    let hasOverride = false;
+    let targetUsername = null;
+
+    (function () {
+        const parts = window.location.pathname.replace(/^\/+/, '').split('/');
+        if (parts[0] === 'jahrbuch_entry_edit' && parts.length >= 2 && parts[1]) {
+            targetUsername = decodeURIComponent(parts[1]);
+        }
+    })();
+
+    function setStatus(text, kind) {
+        const el = document.getElementById('yb_status');
+        if (!el) return;
+        el.textContent = text || '';
+        el.style.color = kind === 'error' ? 'var(--bs-danger)' :
+                         kind === 'ok'    ? 'var(--bs-success)' : '';
+    }
+
+    function pdfmePlugins() { return { text, image, line, rectangle, ellipse }; }
+
+    function ensureDefaultTemplate() {
+        return { basePdf: { width: 210, height: 297, padding: [0, 0, 0, 0] }, schemas: [[]] };
+    }
+
+    function updateOverrideBadges() {
+        document.getElementById('yb_override_badge').style.display = hasOverride ? '' : 'none';
+        document.getElementById('yb_auto_badge').style.display = hasOverride ? 'none' : '';
+        document.getElementById('yb_reset_btn').style.display = hasOverride ? '' : 'none';
+    }
+
+    // ---------- font loading (needed so designer text renders in the admin fonts) ----------
+
+    function loadFontsIntoBrowser(fonts) {
+        availableFonts = fonts || [];
+        const registry = {};
+        return Promise.all(availableFonts.map(function (f, idx) {
+            return fetch(f.url).then(function (res) {
+                if (!res.ok) throw new Error('font fetch failed: ' + f.url);
+                return res.arrayBuffer();
+            }).then(function (buf) {
+                registry[f.name] = { data: buf, fallback: (idx === 0) };
+                try {
+                    const face = new FontFace(f.name, buf);
+                    return face.load().then(function (loaded) { document.fonts.add(loaded); });
+                } catch (_) { /* no-op */ }
+            }).catch(function (e) {
+                console.warn('[entry editor] Schriftart fehlgeschlagen:', f, e);
+            });
+        })).then(function () {
+            if (Object.keys(registry).length > 0) {
+                pdfmeFontRegistry = registry;
+                document.getElementById('yb_font_summary').innerHTML =
+                    'Geladene Schriftarten: ' +
+                    availableFonts.map(function (f) { return '<code>' + f.name + '</code>'; }).join(', ');
+            } else {
+                document.getElementById('yb_font_summary').textContent = 'Keine eigenen Schriftarten konfiguriert.';
+            }
+        });
+    }
+
+    // ---------- asset placement --------------------------------------------
+
+    function fetchAsDataUrl(url) {
+        return fetch(url).then(function (r) {
+            if (!r.ok) throw new Error('asset fetch failed: ' + url);
+            return r.blob();
+        }).then(function (blob) {
+            return new Promise(function (resolve, reject) {
+                const reader = new FileReader();
+                reader.onloadend = function () { resolve(reader.result); };
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        });
+    }
+
+    function activeTargetPageIndex() {
+        const sel = document.getElementById('yb_target_page');
+        if (!sel) return 0;
+        const v = parseInt(sel.value, 10);
+        return isFinite(v) && v >= 0 ? v : 0;
+    }
+
+    function pushToCurrentPage(entry) {
+        if (!designer) return;
+        const tpl = designer.getTemplate();
+        const schemas = (tpl.schemas && tpl.schemas.length > 0) ? tpl.schemas.slice() : [[]];
+        const targetIdx = Math.min(activeTargetPageIndex(), schemas.length - 1);
+        while (schemas.length <= targetIdx) schemas.push([]);
+        const page = Array.isArray(schemas[targetIdx]) ? schemas[targetIdx].slice() : [];
+        page.push(entry);
+        schemas[targetIdx] = page;
+        designer.updateTemplate(Object.assign({}, tpl, { schemas: schemas }));
+    }
+
+    function addAssetToTemplate(asset) {
+        if (!designer) return;
+        setStatus('Lade Bild …');
+        fetchAsDataUrl(asset.url).then(function (dataUrl) {
+            assetCounter += 1;
+            const safeName = ('_asset_' + assetCounter + '_' + asset.filename).replace(/[^A-Za-z0-9_.-]/g, '_');
+            pushToCurrentPage({
+                name: safeName, type: 'image',
+                position: { x: 0, y: 0 }, width: 60, height: 40,
+                content: dataUrl, objectFit: 'cover',
+            });
+            setStatus('Bild "' + asset.filename + '" hinzugefügt.');
+        }).catch(function (e) {
+            setStatus('Bild konnte nicht geladen werden: ' + e.message, 'error');
+        });
+    }
+
+    function renderAssetList() {
+        const wrap = document.getElementById('yb_asset_list');
+        wrap.innerHTML = '';
+        if (!availableAssets.length) {
+            wrap.innerHTML = '<div class="text-body-secondary small">Keine Bilder vorhanden.</div>';
+            return;
+        }
+        availableAssets.forEach(function (a) {
+            const row = document.createElement('div');
+            row.className = 'yb-field-row';
+            const thumb = document.createElement('img');
+            thumb.src = a.url; thumb.alt = a.filename;
+            thumb.style.cssText = 'width:32px;height:32px;object-fit:contain;background:#fff;border:1px solid var(--bs-border-color-translucent);border-radius:2px;';
+            const label = document.createElement('div');
+            label.className = 'yb-label';
+            label.textContent = a.filename; label.title = a.filename;
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-outline-primary';
+            btn.innerHTML = '<i class="bi bi-plus"></i>';
+            btn.title = 'Auf Seite einfügen';
+            btn.addEventListener('click', function () { addAssetToTemplate(a); });
+            row.appendChild(thumb); row.appendChild(label); row.appendChild(btn);
+            wrap.appendChild(row);
+        });
+    }
+
+    // ---------- designer mount ---------------------------------------------
+
+    function buildDesigner(template) {
+        if (!Designer) {
+            setStatus('pdfme konnte nicht geladen werden.', 'error');
+            return;
+        }
+        const mount = document.getElementById('yb_designer');
+        if (designer) { try { designer.destroy(); } catch (_) {} }
+        mount.innerHTML = '';
+        const options = { lang: 'en' };
+        if (pdfmeFontRegistry) options.font = pdfmeFontRegistry;
+        designer = new Designer({
+            domContainer: mount,
+            template: template,
+            plugins: pdfmePlugins(),
+            options: options,
+        });
+        renderTargetPageSelect(template);
+        document.getElementById('yb_save_btn').disabled = false;
+        document.getElementById('yb_preview_btn').disabled = false;
+    }
+
+    function renderTargetPageSelect(template) {
+        const sel = document.getElementById('yb_target_page');
+        if (!sel) return;
+        const previous = sel.value;
+        const pages = (template && template.schemas) ? template.schemas.length : 1;
+        sel.innerHTML = '';
+        for (let i = 0; i < pages; i++) {
+            const opt = document.createElement('option');
+            opt.value = String(i);
+            opt.textContent = 'Seite ' + (i + 1);
+            sel.appendChild(opt);
+        }
+        const restored = parseInt(previous, 10);
+        sel.value = (isFinite(restored) && restored >= 0 && restored < pages) ? String(restored) : '0';
+    }
+
+    // ---------- data loading -----------------------------------------------
+
+    function loadFields() {
+        return new Promise(function (resolve) {
+            api_call('/api/yearbook/template/fields', {}, function (data) {
+                if (data && data.success) {
+                    availableAssets = data.assets || [];
+                    loadFontsIntoBrowser(data.fonts || []).then(resolve, resolve);
+                } else { resolve(); }
+            }, function () { resolve(); });
+        });
+    }
+
+    function loadEntryTemplate() {
+        return new Promise(function (resolve, reject) {
+            api_call('/api/yearbook/override/get', { target_username: targetUsername }, function (data) {
+                if (!data || !data.success) return reject(data && data.error);
+                hasOverride = !!data.has_override;
+                document.getElementById('yb_entry_title').textContent =
+                    (data.display_name || targetUsername) + ' (' + (data.username || targetUsername) + ')';
+                updateOverrideBadges();
+                resolve(data.template || ensureDefaultTemplate());
+            }, function () { reject('Netzwerkfehler'); });
+        });
+    }
+
+    // ---------- actions ----------------------------------------------------
+
+    function save() {
+        if (!designer) return;
+        const template = designer.getTemplate();
+        setStatus('Speichere …');
+        document.getElementById('yb_save_btn').disabled = true;
+        api_call('/api/yearbook/override/save',
+                 { target_username: targetUsername, template: template }, function (data) {
+            document.getElementById('yb_save_btn').disabled = false;
+            if (data && data.success) {
+                hasOverride = true;
+                updateOverrideBadges();
+                setStatus('Gespeichert (' + new Date().toLocaleTimeString() + '). Eintrag ist jetzt gesperrt.', 'ok');
+            } else {
+                setStatus('Fehler beim Speichern: ' + ((data && data.error) || 'unbekannt'), 'error');
+            }
+        }, function () {
+            document.getElementById('yb_save_btn').disabled = false;
+            setStatus('Netzwerkfehler beim Speichern.', 'error');
+        });
+    }
+
+    function reset() {
+        showTemplateModal(
+            'Auf Hauptdesign zurücksetzen',
+            'Das manuelle Design wird gelöscht. Der Eintrag wird wieder automatisch aus dem ' +
+            'Hauptdesign generiert und die Person kann ihre Daten wieder bearbeiten. Fortfahren?',
+            'Zurücksetzen', 'btn-danger',
+            'Abbrechen', 'btn-secondary',
+            function () {
+                setStatus('Setze zurück …');
+                api_call('/api/yearbook/override/reset', { target_username: targetUsername }, function (data) {
+                    if (data && data.success) {
+                        hasOverride = false;
+                        updateOverrideBadges();
+                        setStatus('Zurückgesetzt. Lade neu generierte Vorschau …', 'ok');
+                        loadEntryTemplate().then(buildDesigner).catch(function (err) {
+                            setStatus('Neu laden fehlgeschlagen: ' + (err || ''), 'error');
+                        });
+                    } else {
+                        setStatus('Fehler beim Zurücksetzen: ' + ((data && data.error) || 'unbekannt'), 'error');
+                    }
+                }, function () { setStatus('Netzwerkfehler beim Zurücksetzen.', 'error'); });
+            }
+        );
+    }
+
+    function preview() {
+        // Persist current edits first so the PDF reflects them, then open the render.
+        if (!designer) return;
+        const template = designer.getTemplate();
+        setStatus('Speichere vor Vorschau …');
+        api_call('/api/yearbook/override/save',
+                 { target_username: targetUsername, template: template }, function (data) {
+            if (data && data.success) {
+                hasOverride = true;
+                updateOverrideBadges();
+                setStatus('');
+                window.open('/api/yearbook/preview/' + encodeURIComponent(targetUsername), '_blank');
+            } else {
+                setStatus('Speichern fehlgeschlagen, Vorschau abgebrochen.', 'error');
+            }
+        }, function () { setStatus('Netzwerkfehler.', 'error'); });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        if (!targetUsername) {
+            setStatus('Kein Benutzer angegeben.', 'error');
+            return;
+        }
+        document.getElementById('yb_save_btn').addEventListener('click', save);
+        document.getElementById('yb_reset_btn').addEventListener('click', reset);
+        document.getElementById('yb_preview_btn').addEventListener('click', preview);
+
+        loadFields().then(function () {
+            renderAssetList();
+            return loadEntryTemplate();
+        }).then(buildDesigner).catch(function (err) {
+            setStatus('Initialisierung fehlgeschlagen: ' + (err || ''), 'error');
+        });
+    });
+})();
+</script>

@@ -142,6 +142,7 @@ let isManage = false;
 let canManageTemplates = false;
 let templateVariants = [];     // [{id, name, photo_count}]
 let userVariantMap = {};       // username -> pinned variant_id ("" = auto)
+let userOverrideMap = {};      // username -> bool (entry manually finalised / locked)
 
 $(document).ready(function() {
     loadManageData();
@@ -249,6 +250,7 @@ function loadManageData() {
                             accentPalette = assignData.palette || accentPalette;
                             (assignData.users || []).forEach(function(u) {
                                 userVariantMap[u.username] = u.variant_id || '';
+                                userOverrideMap[u.username] = !!u.manual_override;
                             });
                         }
                         renderManageView();
@@ -290,7 +292,12 @@ function renderManageProfiles() {
 
     allProfiles.forEach(function(profile) {
         const tr = $('<tr>');
-        tr.append($('<td>').text(profile.name || '-'));
+        const nameCell = $('<td>').text(profile.name || '-');
+        if (userOverrideMap[profile.username]) {
+            nameCell.append(' ').append($('<span class="badge bg-secondary" title="Eintrag wurde manuell im Editor finalisiert und ist gesperrt.">')
+                .html('<i class="bi bi-lock-fill"></i> Finalisiert'));
+        }
+        tr.append(nameCell);
         tr.append($('<td>').text(profile.username));
 
         let filledCount = 0;
@@ -389,6 +396,14 @@ function renderManageProfiles() {
         actions.append(viewBtn);
 
         if (canManageTemplates) {
+            // Im Editor öffnen: Eintrag mit Design ansehen / manuell überarbeiten.
+            const editBtn = $('<button type="button" class="btn btn-sm btn-outline-primary">')
+                .html('<i class="bi bi-pencil-square"></i>')
+                .attr('title', 'Im Editor bearbeiten (Design überarbeiten)')
+                .on('click', function() { window.location.href = '/jahrbuch_entry_edit/' + encodeURIComponent(profile.username); });
+            if (userOverrideMap[profile.username]) editBtn.removeClass('btn-outline-primary').addClass('btn-primary');
+            actions.append(editBtn);
+
             // PDF-Vorschau der gerenderten Seite.
             const previewBtn = $('<button type="button" class="btn btn-sm btn-outline-secondary">')
                 .html('<i class="bi bi-file-earmark-pdf"></i>')

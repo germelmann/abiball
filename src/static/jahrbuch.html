@@ -30,6 +30,16 @@
         </div>
     </div>
 
+    <!-- Shown when this user's entry has been manually finalised (locked) by a manager -->
+    <div id="entry_locked_banner" style="display:none;" class="alert alert-secondary mb-4">
+        <i class="bi bi-lock-fill"></i>
+        <strong>Dein Jahrbuch-Eintrag wurde finalisiert.</strong>
+        Dein Steckbrief und die Annahme/Ablehnung von Kommentaren sind gesperrt,
+        weil dein Eintrag manuell für den Druck aufbereitet wurde.
+        Falls noch etwas geändert werden muss, schreibe bitte eine
+        <a href="#{get_support_mailto("data_change")}">Mail an das Abikomitee</a>.
+    </div>
+
     <ul class="nav nav-tabs mb-4" id="yearbookTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="profile-tab" data-bs-toggle="tab" data-bs-target="#profile-section"
@@ -100,6 +110,9 @@
                     <p class="text-body-secondary mb-3">
                         Beantworte die folgenden Fragen. Namentliche Antworten sind deinem Profil zugeordnet; anonyme Antworten werden nicht mit deinem Namen gespeichert.
                     </p>
+                    <div id="surveys_locked_note" class="alert alert-secondary py-2" style="display:none;">
+                        <i class="bi bi-lock-fill"></i> Die Umfragen sind derzeit gesperrt und können nicht mehr geändert werden.
+                    </div>
                     <div id="questions_container"></div>
                     <div id="no_questions_msg" class="text-body-secondary" style="display: none;">
                         <i class="bi bi-info-circle"></i> Keine Umfragen vorhanden.
@@ -226,6 +239,11 @@ let viewUsername = null;
 let canManage = false;
 let canAdminComments = false;
 let readOnlyMode = false;
+// Own-mode locks. lockProfile/lockComments come from a per-entry manual override;
+// lockSurveys comes from the global YEARBOOK_SURVEYS_LOCKED switch.
+let lockProfile = false;
+let lockSurveys = false;
+let lockComments = false;
 // Students may pick their own accent colour (from the palette) only when enabled.
 const YB_COLOR_CHOICE_ENABLED = #{yearbook_user_color_choice_enabled? ? 'true' : 'false'};
 const YB_ACCENT_PALETTE = #{JSON.generate(yearbook_accent_palette)};
@@ -259,6 +277,11 @@ function loadYearbookData() {
         if (data.success) {
             yearbookQuestions = data.questions;
             yearbookProfileFields = data.profile_fields;
+            lockProfile = !!data.locked;
+            lockComments = !!data.locked;
+            lockSurveys = !!data.surveys_locked;
+            $('#entry_locked_banner').toggle(lockProfile);
+            $('#surveys_locked_note').toggle(lockSurveys);
             configLoaded = true;
             $('#yearbook_content').show();
             checkAllLoaded();
@@ -309,6 +332,22 @@ function loadViewEntry() {
         canManage = data.can_manage || false;
         canAdminComments = data.can_admin_comments || false;
         readOnlyMode = !data.is_own && !canManage;
+
+        // A manually finalised entry is frozen: disable field editing even for managers and
+        // point them to the entry editor (where the override can be reset).
+        if (data.locked) {
+            lockProfile = true;
+            lockSurveys = true;
+            lockComments = true;
+            if (canManage) {
+                $('#entry_locked_banner').html(
+                    '<i class="bi bi-lock-fill"></i> <strong>Dieser Eintrag wurde manuell finalisiert.</strong> ' +
+                    'Die Daten sind gesperrt und werden unabhängig vom Hauptdesign gedruckt. ' +
+                    'Zum Überarbeiten oder Zurücksetzen den ' +
+                    '<a href="/jahrbuch_entry_edit/' + encodeURIComponent(viewUsername) + '">Editor öffnen</a>.'
+                ).show();
+            }
+        }
 
         // Update UI for view mode
         $('#view_mode_banner').show();
@@ -379,6 +418,8 @@ function setAccentStatus(text, kind) {
 // student colour choice enabled; null = picker hidden.
 function accentColorMode() {
     if (viewUsername) return canManage ? 'manage' : null;
+    // A finalised (locked) own entry no longer reacts to colour changes.
+    if (lockProfile) return null;
     return YB_COLOR_CHOICE_ENABLED ? 'self' : null;
 }
 
@@ -444,7 +485,7 @@ function renderProfileFields() {
             return;
         }
         const value = myProfile[field.id] || '';
-        const disabledAttr = readOnlyMode ? ' disabled' : '';
+        const disabledAttr = (readOnlyMode || lockProfile) ? ' disabled' : '';
         let inputEl;
         if (field.type === 'textarea') {
             inputEl = '<textarea class="form-control yearbook-profile-field" id="yb_profile_' +
@@ -461,7 +502,7 @@ function renderProfileFields() {
         );
     });
 
-    if (!readOnlyMode) {
+    if (!readOnlyMode && !lockProfile) {
         container.find('.yearbook-profile-field').on('input change', function() {
             if (profileSaveTimer) clearTimeout(profileSaveTimer);
             profileSaveTimer = setTimeout(function() { saveProfile(); }, 800);
@@ -516,9 +557,11 @@ function renderUploadField(fieldConfig, context) {
     const statusEl = $('<span class="save-indicator ms-2">');
     wrapper.append(statusEl);
 
+    // Own-mode lock for this upload's context (profile → manual override; answer → survey switch).
+    const ctxLocked = (context === 'profile') ? lockProfile : lockSurveys;
     // Upload button shown in personal mode OR when admin is viewing another user's entry
-    const canUpload = !viewUsername || canManage;
-    const canDelete = !readOnlyMode;
+    const canUpload = (!viewUsername || canManage) && !ctxLocked;
+    const canDelete = !readOnlyMode && !ctxLocked;
 
     const addBtnRow = $('<div class="mt-1">');
     const fileInput = $('<input type="file" class="d-none">').attr('id', 'upload_input_' + fieldId);
@@ -630,7 +673,7 @@ function renderQuestionInput(question, existingAnswer) {
     const wrapper = $('<div>');
     const qId = 'yb_q_' + question.id;
     const saveStatus = $('<span class="save-indicator ms-2">');
-    const disabled = readOnlyMode;
+    const disabled = readOnlyMode || lockSurveys;
 
     if (question.type === 'text') {
         const input = $('<input type="text" class="form-control">').attr('id', qId).attr('maxlength', '2000').val(existingAnswer);
@@ -913,7 +956,7 @@ function loadReceivedComments() {
             // Action buttons
             const btnRow = $('<div class="d-flex gap-2 flex-wrap">');
 
-            if (isPending) {
+            if (isPending && !lockComments) {
                 const approveBtn = $('<button type="button" class="btn btn-sm btn-success">')
                     .html('<i class="bi bi-check-lg"></i> Annehmen');
                 approveBtn.on('click', function() {
@@ -931,7 +974,7 @@ function loadReceivedComments() {
                 btnRow.append(approveBtn);
             }
 
-            if (!isRemoved) {
+            if (!isRemoved && !lockComments) {
                 const removeBtn = $('<button type="button" class="btn btn-sm btn-outline-danger">')
                     .html('<i class="bi bi-x-lg"></i> Entfernen');
                 removeBtn.on('click', function() {

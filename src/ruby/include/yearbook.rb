@@ -44,6 +44,18 @@ class Main < Sinatra::Base
         defined?(YEARBOOK_ALLOW_DELETE_ALL) && YEARBOOK_ALLOW_DELETE_ALL
     end
 
+    # Global switch (credentials) that freezes survey answering for normal users.
+    # yearbook_manage users are exempt so they can still maintain entries.
+    def yearbook_surveys_locked?
+        defined?(YEARBOOK_SURVEYS_LOCKED) && YEARBOOK_SURVEYS_LOCKED
+    end
+
+    # True if the survey answering is locked for the current session user (i.e. the
+    # global switch is on and the user is not a yearbook manager).
+    def yearbook_surveys_locked_for_current_user?
+        yearbook_surveys_locked? && !user_has_permission?("yearbook_manage")
+    end
+
     def yearbook_schueler
         return [] unless defined?(SCHUELER)
         SCHUELER
@@ -336,6 +348,12 @@ class Main < Sinatra::Base
             MATCH (u:User {username: $username})-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)
             DETACH DELETE c
         END_OF_QUERY
+        # Drop any manual override (file + lock flag) so a fresh entry isn't frozen.
+        override_path = yearbook_override_path(username)
+        File.delete(override_path) if File.exist?(override_path)
+        neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username}) REMOVE u.yearbook_manual_override
+        END_OF_QUERY
         # Note: comments received on the user's Schueler node are not deleted here;
         # the IS_SCHUELER assignment remains intact.
     end
@@ -371,7 +389,11 @@ class Main < Sinatra::Base
             success: true,
             questions: questions_config,
             profile_fields: profile_fields_config,
-            allow_delete_all: yearbook_allow_delete_all?
+            allow_delete_all: yearbook_allow_delete_all?,
+            # Per-entry manual override: the user's own Steckbrief + comment moderation
+            # are frozen. Surveys are governed separately by the global switch below.
+            locked: yearbook_user_locked?(@session_user[:username]),
+            surveys_locked: yearbook_surveys_locked_for_current_user?
         )
     end
 
@@ -414,6 +436,7 @@ class Main < Sinatra::Base
         question_id = data[:question_id].to_s.strip
         answer = data[:answer]
         username = resolve_target_username(data[:target_username])
+        assert(!yearbook_surveys_locked_for_current_user?, "Die Umfragen sind derzeit gesperrt.")
         question = yearbook_questions.find { |q| q[:id] == question_id }
 
         assert(!question.nil?, "Frage nicht gefunden")
@@ -453,6 +476,7 @@ class Main < Sinatra::Base
         fields = data[:fields]
         assert(fields.is_a?(Hash), "Ungültige Felder")
         username = resolve_target_username(data[:target_username])
+        assert(!yearbook_user_locked?(username), "Der Eintrag wurde manuell finalisiert und ist gesperrt.")
 
         save_yearbook_profile(username, fields)
 
@@ -475,6 +499,12 @@ class Main < Sinatra::Base
         assert(['profile', 'answer'].include?(context), "Ungültiger Kontext")
 
         username = resolve_target_username(raw_target.empty? ? nil : raw_target)
+
+        if context == 'profile'
+            assert(!yearbook_user_locked?(username), "Der Eintrag wurde manuell finalisiert und ist gesperrt.")
+        else
+            assert(!yearbook_surveys_locked_for_current_user?, "Die Umfragen sind derzeit gesperrt.")
+        end
 
         field_config = if context == 'profile'
             yearbook_profile_fields.find { |f| f[:id] == field_id }
@@ -579,6 +609,11 @@ class Main < Sinatra::Base
         original_filename = result.first['filename']
         can_delete = (@session_user[:username] == owner_username) || user_has_permission?("yearbook_manage")
         assert(can_delete, "Keine Berechtigung")
+        if result.first['context'] == 'profile'
+            assert(!yearbook_user_locked?(owner_username), "Der Eintrag wurde manuell finalisiert und ist gesperrt.")
+        else
+            assert(!yearbook_surveys_locked_for_current_user?, "Die Umfragen sind derzeit gesperrt.")
+        end
         unless can_access_user_anonymous_upload?(owner_username, result.first['context'], result.first['field_id'])
             assert(false, "Keine Berechtigung für anonymen Upload anderer Benutzer")
         end
@@ -738,7 +773,10 @@ class Main < Sinatra::Base
             can_admin_comments: admin_logged_in?,
             is_own: is_own,
             schueler: schueler,
-            my_sent_comment: my_sent_comment
+            my_sent_comment: my_sent_comment,
+            # Entry manually finalised: data is frozen. Managers should use the entry
+            # editor (and reset the override there) instead of editing fields here.
+            locked: yearbook_user_locked?(target_username)
         )
     end
 
@@ -772,6 +810,10 @@ class Main < Sinatra::Base
         neo4j_query("MATCH (y:YearbookEntry) DETACH DELETE y")
         neo4j_query("MATCH (yp:YearbookProfile) DETACH DELETE yp")
         neo4j_query("MATCH (c:YearbookComment) DETACH DELETE c")
+
+        # Clear all manual overrides (files + lock flags).
+        FileUtils.rm_rf(YEARBOOK_OVERRIDE_DIR)
+        neo4j_query("MATCH (u:User) REMOVE u.yearbook_manual_override")
 
         log("Alle Jahrbuch-Einträge gelöscht durch #{@session_user[:username]}")
         respond(success: true, message: "Alle Einträge gelöscht")
@@ -1126,6 +1168,11 @@ class Main < Sinatra::Base
 
         username = @session_user[:username]
 
+        # A frozen (manually finalised) entry's owner may no longer moderate comments;
+        # real admins still can.
+        assert(admin_logged_in? || !yearbook_user_locked?(username),
+               "Dein Eintrag wurde manuell finalisiert und ist gesperrt.")
+
         result = if admin_logged_in?
             neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id})
                 MATCH (c:YearbookComment {id: $comment_id})
@@ -1156,6 +1203,11 @@ class Main < Sinatra::Base
         comment_id = data[:comment_id].to_s.strip
 
         username = @session_user[:username]
+
+        # A frozen (manually finalised) entry's owner may no longer moderate comments;
+        # real admins still can.
+        assert(admin_logged_in? || !yearbook_user_locked?(username),
+               "Dein Eintrag wurde manuell finalisiert und ist gesperrt.")
 
         result = if admin_logged_in?
             neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id})
