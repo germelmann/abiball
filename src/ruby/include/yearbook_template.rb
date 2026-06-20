@@ -1200,6 +1200,59 @@ class Main < Sinatra::Base
         stdout.force_encoding('ASCII-8BIT')
     end
 
+    # Shared low-level Node invocation used by the file-based export helpers below.
+    # Mirrors render_yearbook_pdf_jobs' logging but never holds the PDF bytes (the
+    # Node script writes the output file itself when payload['out'] is set).
+    def run_yearbook_pdf_node(payload, ctx)
+        env = { 'NODE_PATH' => YEARBOOK_PDFME_NODE_MODULES }
+        debug_log_path = '/gen/log/yearbook_pdf_debug.log'
+        begin
+            FileUtils.mkdir_p(File.dirname(debug_log_path))
+            File.open(debug_log_path, 'a') { |f| f.puts "[#{Time.now.utc.iso8601}] ruby: pdf-node #{ctx}" }
+        rescue
+        end
+        _stdout, stderr, status = Open3.capture3(
+            env, 'node', YEARBOOK_PDFME_SCRIPT, stdin_data: payload, binmode: true
+        )
+        begin
+            File.open(debug_log_path, 'a') do |f|
+                f.puts "[#{Time.now.utc.iso8601}] ruby: node exit=#{status.exitstatus} (#{ctx})"
+                unless stderr.to_s.empty?
+                    f.puts "----- node stderr -----"; f.puts stderr; f.puts "----- end stderr -----"
+                end
+            end
+        rescue
+        end
+        unless status.success?
+            debug_error "pdfme node failed (#{ctx}): #{stderr}"
+            assert(false, "PDF-Node fehlgeschlagen: #{stderr.to_s.lines.last.to_s.strip}")
+        end
+        status
+    end
+
+    # Render the given jobs and let Node write the resulting PDF directly to out_path,
+    # so the (multi-MB) bytes never pass through this Ruby process. Pass a pre-computed
+    # fonts payload to avoid re-encoding the fonts on every call. Used by the whole-
+    # yearbook export worker to keep peak memory bounded to a single student.
+    def render_yearbook_pdf_jobs_to_file(jobs, out_path, fonts_payload = nil)
+        payload = JSON.dump({
+            'jobs'  => jobs,
+            'fonts' => fonts_payload || yearbook_fonts_payload,
+            'out'   => out_path
+        })
+        run_yearbook_pdf_node(payload, "render #{jobs.size} job(s) -> #{out_path}")
+        assert(File.exist?(out_path) && File.size(out_path) > 0, "PDF wurde nicht erzeugt: #{out_path}")
+        out_path
+    end
+
+    # Stitch already-rendered PDF files (paths) into out_path via Node/pdf-lib.
+    def merge_yearbook_pdf_files(paths, out_path)
+        payload = JSON.dump({ 'mergeFiles' => paths, 'out' => out_path })
+        run_yearbook_pdf_node(payload, "merge #{paths.size} file(s) -> #{out_path}")
+        assert(File.exist?(out_path) && File.size(out_path) > 0, "Merge fehlgeschlagen: #{out_path}")
+        out_path
+    end
+
     # pdfme's generator (generate.js) resolves the value of a schema like:
     #   value = schema.readOnly ? schema.content : (input[name] || '')
     # So any schema we don't want overridden by inputs — assets, accent rectangles, or

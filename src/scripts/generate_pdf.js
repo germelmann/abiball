@@ -526,11 +526,47 @@ async function mergePdfs(pdfBufs) {
   return await out.save();
 }
 
+// Merge already-rendered PDF *files* (paths) into one. Used by the whole-yearbook
+// export worker so each student is rendered in its own low-memory pass and only the
+// finished, image-embedded PDFs are stitched together here.
+async function mergePdfFiles(paths) {
+  const out = await PDFDocument.create();
+  for (const p of paths) {
+    const bytes = fs.readFileSync(p);
+    const src = await PDFDocument.load(bytes);
+    const copied = await out.copyPages(src, src.getPageIndices());
+    for (const pg of copied) out.addPage(pg);
+  }
+  return await out.save();
+}
+
+// Write the result either to a file (payload.out, keeps it out of the parent
+// process's memory) or to stdout. Prints a tiny JSON status line to stdout when
+// writing to a file so the caller can confirm success without holding the bytes.
+function emitResult(bytes, outPath) {
+  if (outPath) {
+    fs.writeFileSync(outPath, Buffer.from(bytes));
+    process.stdout.write(JSON.stringify({ ok: true, out: outPath, bytes: bytes.length }) + '\n');
+  } else {
+    process.stdout.write(Buffer.from(bytes));
+  }
+}
+
 (async () => {
   try {
     const raw = await readStdin();
     dbg(`stdin received: ${raw.length} bytes`);
     const payload = JSON.parse(raw);
+
+    // ----- merge mode: stitch finished PDF files together -----
+    if (Array.isArray(payload.mergeFiles)) {
+      dbg(`merge mode: ${payload.mergeFiles.length} file(s) -> ${payload.out || 'stdout'}`);
+      const merged = await mergePdfFiles(payload.mergeFiles);
+      dbg(`merge done -> ${merged.length}B`);
+      emitResult(merged, payload.out);
+      return;
+    }
+
     const jobs = normalizeJobs(payload);
     dbg(`payload parsed: ${jobs.length} job(s)`);
     jobs.forEach((j, i) => dbg(summarizeJob(j, i)));
@@ -552,7 +588,7 @@ async function mergePdfs(pdfBufs) {
     }
     const merged = await mergePdfs(rendered);
     dbg(`merged ${rendered.length} PDF(s) -> ${merged.length}B; total image renders=${imageCallCount}`);
-    process.stdout.write(Buffer.from(merged));
+    emitResult(merged, payload.out);
   } catch (err) {
     const msg = 'pdfme-generate-error: ' + (err && err.stack ? err.stack : String(err));
     dbg(msg);
