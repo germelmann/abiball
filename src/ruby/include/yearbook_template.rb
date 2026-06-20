@@ -347,43 +347,144 @@ class Main < Sinatra::Base
         end
     end
 
-    # Build a single, fully-resolved pdfme template for one user: run the normal
-    # variant-based job builder, then bake each job's inputs into the schema
-    # `content` so the result is self-contained (renders with empty inputs). Pages
-    # from all jobs are concatenated into one multi-page template. This is what the
-    # per-user editor opens when no override exists yet.
+    # Build a self-contained pdfme template for one user that the per-user editor
+    # opens (when no override exists yet). Every dynamic element is resolved to a
+    # concrete value baked into `content`, so the template renders with empty inputs.
+    #
+    # Crucially, field- and comments-blocks are collapsed into a SINGLE multi-line
+    # text element each (not the per-line boxes the auto-layout uses). A single text
+    # element lays out identically in the pdfme Designer (HTML) and in the generated
+    # PDF (pdf-lib), so what the manager arranges in the editor matches the print —
+    # the per-line estimate path (estimate_text_height_mm) only approximates the PDF
+    # and drifts from the Designer's own line wrapping. Overrides are independent of
+    # the variant design, so losing the auto-fit/per-author styling here is fine; the
+    # manager has full manual control instead.
     def build_resolved_template_for_user(username, variant_set)
-        jobs = build_yearbook_jobs_for_user(username, variant_set)
-        return nil if jobs.empty?
+        variant = pick_yearbook_variant_for_user(username, variant_set)
+        return nil unless variant
 
-        base_pdf = jobs.first['template']['basePdf'] || YEARBOOK_DEFAULT_BASE_PDF
-        pages = []
-        jobs.each do |job|
-            tpl = job['template']
-            inputs_page = (job['inputs'] && job['inputs'][0]) || {}
-            (tpl['schemas'] || []).each do |page|
-                next unless page.is_a?(Array)
-                baked = page.map do |entry|
-                    next entry unless entry.is_a?(Hash)
+        user_info = neo4j_query(<<~END_OF_QUERY, {username: username}).first
+            MATCH (u:User {username: $username}) RETURN u.username AS username
+        END_OF_QUERY
+        return nil unless user_info
+
+        profile = get_yearbook_profile_data(username) || {}
+        answer_rows = neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username})-[:HAS_YEARBOOK_ENTRY]->(y:YearbookEntry)
+            RETURN y.question_id AS question_id, y.answer AS answer
+        END_OF_QUERY
+        answers = answer_rows.each_with_object({}) { |r, h| h[r['question_id']] = r['answer'] }
+        comments = yearbook_comments_for_user(username)
+
+        accent = yearbook_accent_color_for_user(username)
+        base_template = apply_accent_color_to_template(variant['template'], accent, variant['accent_placeholder_hex'])
+        recolor_marked_images!(base_template, variant['recolor_images'], variant['accent_placeholder_hex'], accent)
+        apply_background_pdf_to_template!(base_template, variant['background_pdf'])
+
+        blocks_config = variant['yearbook_blocks'] || {}
+        catalog = yearbook_template_field_catalog.each_with_object({}) { |f, h| h[f['name']] = f }
+        # Resolve the concrete value (text or image data URL) of each catalog field
+        # placed directly on the page; reuses the same logic the PDF render uses.
+        inputs_page = (build_yearbook_inputs_for_user(username, base_template) || [{}])[0] || {}
+
+        pages = base_template['schemas'] || []
+        pages = cap_yearbook_pages(pages)
+
+        resolved_pages = pages.map do |page|
+            next [] unless page.is_a?(Array)
+            page.map do |entry|
+                next entry unless entry.is_a?(Hash)
+                name = entry['name']
+                cfg = name.is_a?(String) ? blocks_config[name] : nil
+                if cfg.is_a?(Hash)
+                    content = (cfg['kind'] == 'comments') ?
+                        resolved_comments_block_text(cfg, comments) :
+                        resolved_fields_block_text(cfg, profile, answers)
+                    make_resolved_block_text_schema(entry, cfg, content)
+                else
                     e = entry.dup
-                    name = e['name']
-                    # Bake the resolved value (text or image data URL) into the element.
-                    # Bake even empty values: at render the override forces every element
-                    # readOnly, so an un-baked catalog field would otherwise show its
-                    # design-time placeholder label instead of the (empty) real value.
-                    if name.is_a?(String) && inputs_page.key?(name)
-                        e['content'] = inputs_page[name].to_s
-                    end
-                    # Make every element editable/movable in the designer. The render
-                    # path forces readOnly again so the baked content is used verbatim.
+                    e['content'] = inputs_page[name].to_s if name.is_a?(String) && inputs_page.key?(name)
+                    # Editable/movable in the designer; the render path forces readOnly
+                    # again so the baked content is used verbatim.
                     e['readOnly'] = false
                     e
                 end
-                pages << baked
             end
         end
-        pages = [[]] if pages.empty?
-        { 'basePdf' => base_pdf, 'schemas' => pages }
+        resolved_pages = [[]] if resolved_pages.empty?
+        { 'basePdf' => base_template['basePdf'] || YEARBOOK_DEFAULT_BASE_PDF, 'schemas' => resolved_pages }
+    end
+
+    # Join all visible field-block values into one multi-line string. Mirrors
+    # render_fields_block's content selection (labels, inline) but as plain lines.
+    def resolved_fields_block_text(cfg, profile, answers)
+        show_labels = cfg['show_labels'] != false
+        inline = cfg['label_inline'] == true
+        lines = []
+        (cfg['fields'] || []).each do |fid|
+            value = yearbook_block_field_value(fid, profile, answers)
+            next if value.empty?
+            label = yearbook_block_field_label(fid)
+            if show_labels && inline
+                lines << "#{label}: #{value}"
+            elsif show_labels
+                lines << "#{label}:"
+                lines << value
+            else
+                lines << value
+            end
+        end
+        lines.join("\n")
+    end
+
+    # Join all visible comments into one multi-line string (a blank line separates
+    # consecutive comments, matching the visual gap of the auto-layout closely enough
+    # while staying a single, WYSIWYG text element).
+    def resolved_comments_block_text(cfg, comments)
+        include_pending = cfg['include_pending'] == true
+        show_author = cfg['show_author'] != false
+        visible = visible_comments_for_block(comments, include_pending)
+        lines = []
+        visible.each do |c|
+            text = c['text'].to_s.strip
+            next if text.empty?
+            lines << text
+            author = c['commenter_name'].to_s.strip
+            lines << "— #{author}" if show_author && !author.empty?
+            lines << '' # blank separator line between comments
+        end
+        lines.pop while lines.last == '' && !lines.empty?
+        lines.join("\n")
+    end
+
+    # Turn a block placeholder into a single concrete text schema carrying the joined
+    # content, inheriting the block's configured font/size/colour/line-height so the
+    # editor preview and the printed PDF use identical line spacing.
+    def make_resolved_block_text_schema(placeholder, cfg, content)
+        pos = placeholder['position'] || { 'x' => 0, 'y' => 0 }
+        base_color = placeholder['fontColor'] || '#000000'
+        if cfg['kind'] == 'comments'
+            color = cfg['text_color'].to_s.empty? ? base_color : cfg['text_color'].to_s
+            font  = cfg['font_name']
+        else
+            color = cfg['value_color'].to_s.empty? ? base_color : cfg['value_color'].to_s
+            font  = cfg['value_font_name'] || cfg['font_name']
+        end
+        s = {
+            'name' => placeholder['name'],
+            'type' => 'text',
+            'position' => { 'x' => pos['x'], 'y' => pos['y'] },
+            'width' => placeholder['width'],
+            'height' => placeholder['height'],
+            'fontSize' => (cfg['font_size'] || placeholder['fontSize'] || 11).to_f,
+            'fontColor' => color,
+            'alignment' => placeholder['alignment'] || 'left',
+            'lineHeight' => (cfg['line_height'] || 1.4).to_f,
+            'content' => content.to_s,
+            'readOnly' => false
+        }
+        s['fontName'] = font if font && !font.to_s.empty?
+        s
     end
 
     # ----- per-user state stored on the User node -------------------------
