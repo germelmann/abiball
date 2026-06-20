@@ -323,12 +323,30 @@ class Main < Sinatra::Base
         File.exist?(yearbook_override_path(username))
     end
 
-    # True if the user's entry has been manually finalised (the DB flag is the
-    # authoritative source for locking; it is kept in sync with the override file).
+    # True if the user's entry is locked for editing. Two independent mechanisms can
+    # lock an entry, with the same effect on the student (data frozen, comment
+    # moderation disabled):
+    #   1. yearbook_manual_override — a manager hand-edited the entry's design and
+    #      saved it as a per-user override (kept in sync with the override file).
+    #   2. yearbook_finalized — a manager marked the entry as "done/abgeschlossen"
+    #      without touching the design. The entry keeps rendering from the variant,
+    #      and the flag can be toggled off again to re-open editing (see the
+    #      /api/yearbook/finalize routes).
     def yearbook_user_locked?(username)
         r = neo4j_query(<<~END_OF_QUERY, {username: username}).first
             MATCH (u:User {username: $username})
-            RETURN COALESCE(u.yearbook_manual_override, false) AS v
+            RETURN (COALESCE(u.yearbook_manual_override, false)
+                    OR COALESCE(u.yearbook_finalized, false)) AS v
+        END_OF_QUERY
+        r ? (r['v'] == true) : false
+    end
+
+    # True if the entry was explicitly marked as finished/abgeschlossen (as opposed
+    # to being locked via a manual design override).
+    def yearbook_user_finalized?(username)
+        r = neo4j_query(<<~END_OF_QUERY, {username: username}).first
+            MATCH (u:User {username: $username})
+            RETURN COALESCE(u.yearbook_finalized, false) AS v
         END_OF_QUERY
         r ? (r['v'] == true) : false
     end
@@ -1463,7 +1481,8 @@ class Main < Sinatra::Base
                    photo_count,
                    u.yearbook_template_variant AS variant_id,
                    u.yearbook_accent_color AS accent_color,
-                   COALESCE(u.yearbook_manual_override, false) AS manual_override
+                   COALESCE(u.yearbook_manual_override, false) AS manual_override,
+                   COALESCE(u.yearbook_finalized, false) AS finalized
             ORDER BY display_name
         END_OF_QUERY
         users = rows.map { |r| {
@@ -1472,7 +1491,8 @@ class Main < Sinatra::Base
             photo_count: r['photo_count'].to_i,
             variant_id: r['variant_id'],
             accent_color: r['accent_color'] || YEARBOOK_DEFAULT_ACCENT_COLOR,
-            manual_override: r['manual_override'] == true
+            manual_override: r['manual_override'] == true,
+            finalized: r['finalized'] == true
         } }
 
         variant_set = load_yearbook_variant_set
@@ -1776,6 +1796,53 @@ class Main < Sinatra::Base
 
         log("Manuelles Jahrbuch-Design für #{username} zurückgesetzt durch #{@session_user[:username]}")
         respond(success: true, message: "Auf automatisches Design zurückgesetzt. Der Eintrag ist wieder freigegeben.")
+    end
+
+    # ----- mark an entry as finished / abgeschlossen -----------------------
+    #
+    # Unlike the manual override, finalising leaves the design untouched (the entry
+    # keeps rendering from its variant) and only freezes the student's editing. It
+    # is meant for the common "this entry is done, lock it" workflow and is trivially
+    # reversible via /finalize/reset. The lock effect on the student is identical to
+    # a manual override (see yearbook_user_locked?).
+
+    # Mark a user's entry as finished. yearbook_manage only.
+    post '/api/yearbook/finalize/set' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        data = parse_request_data(required_keys: [:target_username])
+        username = data[:target_username].to_s.strip
+        assert(username =~ YEARBOOK_USERNAME_FORMAT, "Ungültiger Benutzername")
+
+        user_exists = neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username}) RETURN u.username AS username
+        END_OF_QUERY
+        assert(!user_exists.empty?, "Benutzer nicht gefunden")
+
+        neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username}) SET u.yearbook_finalized = true
+        END_OF_QUERY
+
+        log("Jahrbuch-Eintrag von #{username} abgeschlossen durch #{@session_user[:username]}")
+        respond(success: true, message: "Eintrag abgeschlossen. Der Eintrag ist jetzt gesperrt.")
+    end
+
+    # Re-open a finished entry → the student may edit their data again. yearbook_manage only.
+    post '/api/yearbook/finalize/reset' do
+        require_user!
+        require_user_with_permission!("yearbook_manage")
+
+        data = parse_request_data(required_keys: [:target_username])
+        username = data[:target_username].to_s.strip
+        assert(username =~ YEARBOOK_USERNAME_FORMAT, "Ungültiger Benutzername")
+
+        neo4j_query(<<~END_OF_QUERY, {username: username})
+            MATCH (u:User {username: $username}) REMOVE u.yearbook_finalized
+        END_OF_QUERY
+
+        log("Jahrbuch-Eintrag von #{username} wieder freigegeben durch #{@session_user[:username]}")
+        respond(success: true, message: "Eintrag wieder freigegeben. Der Eintrag ist wieder bearbeitbar.")
     end
 
 end

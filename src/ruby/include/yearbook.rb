@@ -348,11 +348,13 @@ class Main < Sinatra::Base
             MATCH (u:User {username: $username})-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)
             DETACH DELETE c
         END_OF_QUERY
-        # Drop any manual override (file + lock flag) so a fresh entry isn't frozen.
+        # Drop any manual override (file + lock flag) and the finalized flag so a
+        # fresh entry isn't frozen.
         override_path = yearbook_override_path(username)
         File.delete(override_path) if File.exist?(override_path)
         neo4j_query(<<~END_OF_QUERY, {username: username})
-            MATCH (u:User {username: $username}) REMOVE u.yearbook_manual_override
+            MATCH (u:User {username: $username})
+            REMOVE u.yearbook_manual_override, u.yearbook_finalized
         END_OF_QUERY
         # Note: comments received on the user's Schueler node are not deleted here;
         # the IS_SCHUELER assignment remains intact.
@@ -811,9 +813,9 @@ class Main < Sinatra::Base
         neo4j_query("MATCH (yp:YearbookProfile) DETACH DELETE yp")
         neo4j_query("MATCH (c:YearbookComment) DETACH DELETE c")
 
-        # Clear all manual overrides (files + lock flags).
+        # Clear all manual overrides (files + lock flags) and finalized flags.
         FileUtils.rm_rf(YEARBOOK_OVERRIDE_DIR)
-        neo4j_query("MATCH (u:User) REMOVE u.yearbook_manual_override")
+        neo4j_query("MATCH (u:User) REMOVE u.yearbook_manual_override, u.yearbook_finalized")
 
         log("Alle Jahrbuch-Einträge gelöscht durch #{@session_user[:username]}")
         respond(success: true, message: "Alle Einträge gelöscht")

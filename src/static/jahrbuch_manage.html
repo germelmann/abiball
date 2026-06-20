@@ -142,7 +142,8 @@ let isManage = false;
 let canManageTemplates = false;
 let templateVariants = [];     // [{id, name, photo_count}]
 let userVariantMap = {};       // username -> pinned variant_id ("" = auto)
-let userOverrideMap = {};      // username -> bool (entry manually finalised / locked)
+let userOverrideMap = {};      // username -> bool (entry manually finalised via design override / locked)
+let userFinalizedMap = {};     // username -> bool (entry marked done/abgeschlossen, locked but design auto-generated)
 
 $(document).ready(function() {
     loadManageData();
@@ -251,6 +252,7 @@ function loadManageData() {
                             (assignData.users || []).forEach(function(u) {
                                 userVariantMap[u.username] = u.variant_id || '';
                                 userOverrideMap[u.username] = !!u.manual_override;
+                                userFinalizedMap[u.username] = !!u.finalized;
                             });
                         }
                         renderManageView();
@@ -296,6 +298,9 @@ function renderManageProfiles() {
         if (userOverrideMap[profile.username]) {
             nameCell.append(' ').append($('<span class="badge bg-secondary" title="Eintrag wurde manuell im Editor finalisiert und ist gesperrt.">')
                 .html('<i class="bi bi-lock-fill"></i> Finalisiert'));
+        } else if (userFinalizedMap[profile.username]) {
+            nameCell.append(' ').append($('<span class="badge bg-success" title="Eintrag wurde abgeschlossen und ist gesperrt. Kann jederzeit wieder freigegeben werden.">')
+                .html('<i class="bi bi-check2-circle"></i> Abgeschlossen'));
         }
         tr.append(nameCell);
         tr.append($('<td>').text(profile.username));
@@ -412,6 +417,20 @@ function renderManageProfiles() {
                     window.open('/api/yearbook/preview/' + encodeURIComponent(profile.username), '_blank');
                 });
             actions.append(previewBtn);
+
+            // Abschließen / wieder freigeben. Sperrt den Eintrag für den Nutzer
+            // (gleicher Effekt wie eine manuelle Überarbeitung), lässt sich aber
+            // jederzeit rückgängig machen. Bei einem manuellen Design-Override ist
+            // der Eintrag ohnehin gesperrt → Button dann ausblenden.
+            if (!userOverrideMap[profile.username]) {
+                const finalized = !!userFinalizedMap[profile.username];
+                const finalizeBtn = $('<button type="button" class="btn btn-sm">')
+                    .addClass(finalized ? 'btn-success' : 'btn-outline-success')
+                    .html(finalized ? '<i class="bi bi-unlock"></i>' : '<i class="bi bi-check2-circle"></i>')
+                    .attr('title', finalized ? 'Eintrag wieder freigeben (bearbeitbar machen)' : 'Eintrag abschließen (für Nutzer sperren)')
+                    .on('click', function() { toggleFinalized(profile.username); });
+                actions.append(finalizeBtn);
+            }
         }
 
         // Per-entry delete button (yearbook_manage only)
@@ -442,6 +461,20 @@ function renderManageProfiles() {
         tbody.find('tr').each(function() {
             $(this).toggle($(this).text().toLowerCase().indexOf(term) !== -1);
         });
+    });
+}
+
+function toggleFinalized(username) {
+    const makeFinalized = !userFinalizedMap[username];
+    const endpoint = makeFinalized ? '/api/yearbook/finalize/set' : '/api/yearbook/finalize/reset';
+    api_call(endpoint, { target_username: username }, function(data) {
+        if (data && data.success) {
+            userFinalizedMap[username] = makeFinalized;
+            show_success_message(data.message || (makeFinalized ? 'Eintrag abgeschlossen.' : 'Eintrag wieder freigegeben.'));
+            renderManageProfiles();
+        } else {
+            show_error_message('Fehler: ' + ((data && data.error) || 'Unbekannter Fehler'));
+        }
     });
 }
 
