@@ -395,7 +395,10 @@ class Main < Sinatra::Base
             # Per-entry manual override: the user's own Steckbrief + comment moderation
             # are frozen. Surveys are governed separately by the global switch below.
             locked: yearbook_user_locked?(@session_user[:username]),
-            surveys_locked: yearbook_surveys_locked_for_current_user?
+            surveys_locked: yearbook_surveys_locked_for_current_user?,
+            line_adjust: yearbook_line_adjust_for_user(@session_user[:username]),
+            adjustable_fields: yearbook_adjustable_fields_for_user(@session_user[:username]),
+            can_manage: user_has_permission?("yearbook_manage")
         )
     end
 
@@ -719,6 +722,25 @@ class Main < Sinatra::Base
         respond(success: true)
     end
 
+    # ----- per-field manual line-spacing nudge -----------------------------
+    # Add/remove blank lines of spacing after a specific field in the auto-generated layout,
+    # to fix an overlap or an oversized gap without opening the full editor.
+    post '/api/yearbook/line_adjust/save' do
+        require_user!
+        require_yearbook_accessible!
+
+        data = parse_request_data(required_keys: [:field_id, :extra_lines], optional_keys: [:target_username])
+        field_id = data[:field_id].to_s.strip
+        assert(field_id =~ /\A[a-zA-Z_][a-zA-Z0-9_]*\z/, "Ungültige Feld-ID")
+
+        username = resolve_target_username(data[:target_username].to_s.strip.empty? ? nil : data[:target_username])
+        can_edit = (@session_user[:username] == username) || user_has_permission?("yearbook_manage")
+        assert(can_edit, "Keine Berechtigung")
+
+        map = set_yearbook_line_adjust(username, field_id, data[:extra_lines].to_i)
+        respond(success: true, line_adjust: map)
+    end
+
     # Get uploads for a user
     post '/api/yearbook/get_uploads' do
         require_user!
@@ -866,7 +888,9 @@ class Main < Sinatra::Base
             my_sent_comment: my_sent_comment,
             # Entry manually finalised: data is frozen. Managers should use the entry
             # editor (and reset the override there) instead of editing fields here.
-            locked: yearbook_user_locked?(target_username)
+            locked: yearbook_user_locked?(target_username),
+            line_adjust: yearbook_line_adjust_for_user(target_username),
+            adjustable_fields: yearbook_adjustable_fields_for_user(target_username)
         )
     end
 
