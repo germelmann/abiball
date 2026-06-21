@@ -622,11 +622,99 @@ class Main < Sinatra::Base
 
         file_path = File.join(YEARBOOK_UPLOAD_PATH, "#{upload_id}_#{original_filename}")
         File.delete(file_path) if File.exist?(file_path)
+        clear_derived_photos(upload_id)
 
         neo4j_query(<<~END_OF_QUERY, {upload_id: upload_id})
             MATCH (up:YearbookUpload {id: $upload_id})
             DETACH DELETE up
         END_OF_QUERY
+
+        respond(success: true)
+    end
+
+    # ----- per-photo crop/zoom/rotate adjustment ---------------------------
+    # The uploaded original is never modified; the manager (or the student) saves a
+    # transform (90° rotation + zoom + pan) that is baked in at render time to fit the
+    # photo's box in the design. Only possible when a design actually places this photo.
+
+    # Return the current adjustment for a photo plus the target box from the design.
+    post '/api/yearbook/photo/get_adjust' do
+        require_user!
+        require_yearbook_accessible!
+
+        data = parse_request_data(required_keys: [:context, :field_id], optional_keys: [:target_username])
+        context = data[:context].to_s.strip
+        field_id = data[:field_id].to_s.strip
+        assert(['profile', 'answer'].include?(context), "Ungültiger Kontext")
+
+        username = resolve_target_username(data[:target_username].to_s.strip.empty? ? nil : data[:target_username])
+        can_edit = (@session_user[:username] == username) || user_has_permission?("yearbook_manage")
+        assert(can_edit, "Keine Berechtigung")
+
+        rows = neo4j_query(<<~END_OF_QUERY, {username: username, context: context, field_id: field_id})
+            MATCH (u:User {username: $username})-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload {context: $context, field_id: $field_id})
+            RETURN up.id AS id, up.mimetype AS mimetype,
+                   up.t_rotate AS t_rotate, up.t_zoom AS t_zoom, up.t_offx AS t_offx, up.t_offy AS t_offy
+            ORDER BY up.created_at DESC
+            LIMIT 1
+        END_OF_QUERY
+        assert(!rows.empty?, "Kein Bild hochgeladen")
+        row = rows.first
+        assert(row['mimetype'].to_s.start_with?('image/'), "Datei ist kein Bild")
+
+        box = yearbook_photo_box_for_field(username, field_id)
+        respond(
+            success: true,
+            available: !box.nil?,
+            upload_id: row['id'],
+            image_url: "/api/yearbook/file/#{row['id']}",
+            box: box, # { 'w', 'h' } in mm, or nil if no design places this photo
+            transform: yearbook_photo_transform_from_row(row)
+        )
+    end
+
+    # Save a photo adjustment onto the latest upload for this field.
+    post '/api/yearbook/photo/save_adjust' do
+        require_user!
+        require_yearbook_accessible!
+
+        data = parse_request_data(
+            required_keys: [:context, :field_id, :rotate, :zoom, :offx, :offy],
+            optional_keys: [:target_username]
+        )
+        context = data[:context].to_s.strip
+        field_id = data[:field_id].to_s.strip
+        assert(['profile', 'answer'].include?(context), "Ungültiger Kontext")
+
+        username = resolve_target_username(data[:target_username].to_s.strip.empty? ? nil : data[:target_username])
+        can_edit = (@session_user[:username] == username) || user_has_permission?("yearbook_manage")
+        assert(can_edit, "Keine Berechtigung")
+        if context == 'profile'
+            assert(!yearbook_user_locked?(username), "Der Eintrag wurde manuell finalisiert und ist gesperrt.")
+        else
+            assert(!yearbook_surveys_locked_for_current_user?, "Die Umfragen sind derzeit gesperrt.")
+        end
+
+        rotate = data[:rotate].to_i
+        assert([0, 90, 180, 270].include?(rotate), "Ungültige Drehung")
+        zoom = data[:zoom].to_f.clamp(1.0, 5.0)
+        offx = data[:offx].to_f.clamp(-1.0, 1.0)
+        offy = data[:offy].to_f.clamp(-1.0, 1.0)
+
+        rows = neo4j_query(<<~END_OF_QUERY, {username: username, context: context, field_id: field_id})
+            MATCH (u:User {username: $username})-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload {context: $context, field_id: $field_id})
+            RETURN up.id AS id
+            ORDER BY up.created_at DESC
+            LIMIT 1
+        END_OF_QUERY
+        assert(!rows.empty?, "Kein Bild hochgeladen")
+        upload_id = rows.first['id']
+
+        neo4j_query(<<~END_OF_QUERY, {id: upload_id, rotate: rotate, zoom: zoom, offx: offx, offy: offy})
+            MATCH (up:YearbookUpload {id: $id})
+            SET up.t_rotate = $rotate, up.t_zoom = $zoom, up.t_offx = $offx, up.t_offy = $offy
+        END_OF_QUERY
+        clear_derived_photos(upload_id)
 
         respond(success: true)
     end

@@ -314,6 +314,11 @@ class Main < Sinatra::Base
     # locking and overview queries don't have to touch the filesystem per user.
     YEARBOOK_OVERRIDE_DIR = '/raw/yearbook_overrides'
 
+    # Cache for rendered photo crops (auto-orient + per-entry zoom/pan/rotate baked in).
+    # Keyed by upload id + transform signature + target box, so re-renders are cheap and a
+    # changed adjustment produces a new file without touching the uploaded original.
+    YEARBOOK_DERIVED_DIR = '/raw/yearbook_derived'
+
     # Filesystem-safe, collision-free path for a user's override (usernames may
     # contain @ . + - which we don't want in a filename).
     def yearbook_override_path(username)
@@ -822,10 +827,31 @@ class Main < Sinatra::Base
         # height_of wraps at word boundaries using actual advances and honours "\n".
         # With zero leading the box height is lines * single, so dividing recovers the
         # line count regardless of our own lineHeight factor (applied by the caller).
-        total = doc.height_of(content, width: width_pt)
+        #
+        # Two safety biases so we never UNDER-count (which is what makes lines overlap):
+        #  - Emoji/symbols are replaced with a wide placeholder before measuring. The PDF
+        #    renderer draws them at ~1em via the fallback emoji font, but Prawn would use a
+        #    narrow .notdef glyph and under-count the wraps.
+        #  - We measure against a slightly narrower box (MEASURE_SAFETY_FACTOR) so borderline
+        #    lines wrap one word earlier here than in the PDF, trading a hair of extra spacing
+        #    for never overlapping.
+        total = doc.height_of(sanitize_for_measure(content), width: width_pt * MEASURE_SAFETY_FACTOR)
         [(total / single).round, 1].max
     rescue StandardError
         nil
+    end
+
+    # Slightly under-state the available width when measuring so we round wraps up, not down.
+    MEASURE_SAFETY_FACTOR = 0.98
+
+    # Replace characters the body font can't size correctly (emoji, dingbats, arrows,
+    # misc symbols) with a wide Latin placeholder so wrap counting isn't under-estimated,
+    # and drop zero-width joiners / variation selectors which don't advance the cursor.
+    def sanitize_for_measure(str)
+        s = str.to_s.dup
+        s.gsub!(/[\u{200D}\u{FE00}-\u{FE0F}]/, '')
+        s.gsub!(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2190}-\u{21FF}\u{2300}-\u{23FF}\u{1F1E6}-\u{1F1FF}]/, 'W')
+        s
     end
 
     # The character-width heuristic kept as a fallback for strings Prawn can't measure.
@@ -1120,11 +1146,15 @@ class Main < Sinatra::Base
     end
 
     # Look up the latest upload (if any) for a given context+field_id and return a data URL,
-    # or nil if no usable file exists.
-    def yearbook_upload_data_url(username, context, field_id)
+    # or nil if no usable file exists. When `box` ({ 'w', 'h' } in mm) is given the photo is
+    # rendered to that exact aspect ratio with EXIF orientation applied and the entry's saved
+    # zoom/pan/rotation baked in (see render_adjusted_photo). The uploaded original on disk is
+    # never modified — the crop is produced into a cache and re-derived on demand.
+    def yearbook_upload_data_url(username, context, field_id, box: nil)
         results = neo4j_query(<<~END_OF_QUERY, {username: username, context: context, field_id: field_id})
             MATCH (u:User {username: $username})-[:HAS_YEARBOOK_UPLOAD]->(up:YearbookUpload {context: $context, field_id: $field_id})
-            RETURN up.id AS id, up.original_filename AS filename, up.mimetype AS mimetype
+            RETURN up.id AS id, up.original_filename AS filename, up.mimetype AS mimetype,
+                   up.t_rotate AS t_rotate, up.t_zoom AS t_zoom, up.t_offx AS t_offx, up.t_offy AS t_offy
             ORDER BY up.created_at DESC
             LIMIT 1
         END_OF_QUERY
@@ -1138,7 +1168,135 @@ class Main < Sinatra::Base
         mime = 'image/jpeg' if mime.empty?
         return nil unless mime.start_with?('image/')
 
-        "data:#{mime};base64,#{Base64.strict_encode64(File.binread(path))}"
+        transform = yearbook_photo_transform_from_row(upload)
+        processed = render_adjusted_photo(upload['id'], path, box, transform)
+        if processed
+            "data:image/jpeg;base64,#{Base64.strict_encode64(processed)}"
+        else
+            # Could not process (no ImageMagick, unknown box, decode error): ship the original.
+            "data:#{mime};base64,#{Base64.strict_encode64(File.binread(path))}"
+        end
+    end
+
+    # Default (identity) photo transform: cover-fit, centred, no rotation.
+    def yearbook_default_photo_transform
+        { 'rotate' => 0, 'zoom' => 1.0, 'offx' => 0.0, 'offy' => 0.0 }
+    end
+
+    # Read + clamp a stored transform from a Neo4j upload row (props may be nil).
+    def yearbook_photo_transform_from_row(row)
+        rot = row['t_rotate'].to_i
+        rot = 0 unless [0, 90, 180, 270].include?(rot)
+        {
+            'rotate' => rot,
+            'zoom'   => row['t_zoom'].nil? ? 1.0 : row['t_zoom'].to_f.clamp(1.0, 5.0),
+            'offx'   => row['t_offx'].nil? ? 0.0 : row['t_offx'].to_f.clamp(-1.0, 1.0),
+            'offy'   => row['t_offy'].nil? ? 0.0 : row['t_offy'].to_f.clamp(-1.0, 1.0)
+        }
+    end
+
+    # Render one photo: EXIF auto-orient -> 90° rotation -> zoom/pan crop to the box aspect.
+    # Returns JPEG bytes, or nil if it can't be produced (caller falls back to the original).
+    # Results are cached on disk under YEARBOOK_DERIVED_DIR keyed by all inputs, so the
+    # heavy ImageMagick work runs once per (upload, transform, box) combination.
+    def render_adjusted_photo(upload_id, src_path, box, transform)
+        return nil unless box.is_a?(Hash)
+        box_w = box['w'].to_f
+        box_h = box['h'].to_f
+        return nil unless box_w > 0 && box_h > 0
+
+        t = transform || yearbook_default_photo_transform
+        sig = Digest::SHA256.hexdigest([
+            upload_id, File.mtime(src_path).to_i, t['rotate'], t['zoom'], t['offx'], t['offy'],
+            box_w.round(2), box_h.round(2)
+        ].join('|'))[0, 24]
+        cache_path = File.join(YEARBOOK_DERIVED_DIR, "#{upload_id}_#{sig}.jpg")
+        return File.binread(cache_path) if File.exist?(cache_path)
+
+        begin
+            require 'mini_magick'
+            img = MiniMagick::Image.open(src_path)
+            img.auto_orient
+            rot = t['rotate'].to_i
+            img.rotate(rot.to_s) if [90, 180, 270].include?(rot)
+
+            iw = img.width.to_f
+            ih = img.height.to_f
+            return nil unless iw > 0 && ih > 0
+
+            box_aspect = box_w / box_h
+            # Largest box-aspect rectangle that fits the (oriented) image = cover at zoom 1.
+            if iw / ih > box_aspect
+                base_h = ih
+                base_w = ih * box_aspect
+            else
+                base_w = iw
+                base_h = iw / box_aspect
+            end
+            zoom = t['zoom'].to_f.clamp(1.0, 5.0)
+            crop_w = base_w / zoom
+            crop_h = base_h / zoom
+            slack_x = iw - crop_w
+            slack_y = ih - crop_h
+            # offx/offy in [-1,1]: 0 centred, -1 hugs the left/top edge, +1 the right/bottom.
+            crop_x = (slack_x / 2.0) * (1 + t['offx'].to_f)
+            crop_y = (slack_y / 2.0) * (1 + t['offy'].to_f)
+            crop_x = crop_x.clamp(0.0, [slack_x, 0].max)
+            crop_y = crop_y.clamp(0.0, [slack_y, 0].max)
+
+            # Output resolution: box at ~300 DPI, longer side capped so files stay small.
+            out_w = box_w / 25.4 * 300.0
+            out_h = box_h / 25.4 * 300.0
+            scale = [1.0, 1600.0 / [out_w, out_h].max].min
+            out_w = (out_w * scale).round
+            out_h = (out_h * scale).round
+
+            # Crop the chosen region then scale it to the output box. JPEG output is flattened,
+            # so the crop's page-offset metadata is irrelevant — no +repage needed.
+            img.combine_options do |c|
+                c.crop "#{crop_w.round}x#{crop_h.round}+#{crop_x.round}+#{crop_y.round}"
+                c.resize "#{out_w}x#{out_h}!"
+            end
+            img.format 'jpeg'
+            img.quality '88'
+            blob = img.to_blob
+
+            FileUtils.mkdir_p(YEARBOOK_DERIVED_DIR)
+            File.binwrite(cache_path, blob)
+            blob
+        rescue => e
+            debug_error "render_adjusted_photo failed for #{upload_id}: #{e.message}"
+            nil
+        end
+    end
+
+    # Remove all cached crops for an upload (called when its transform changes or it's deleted).
+    def clear_derived_photos(upload_id)
+        return unless File.directory?(YEARBOOK_DERIVED_DIR)
+        Dir.glob(File.join(YEARBOOK_DERIVED_DIR, "#{upload_id}_*.jpg")).each { |f| File.delete(f) rescue nil }
+    end
+
+    # Find the placed image box (width/height in mm) for a photo field, from the template
+    # that will actually render for this user (manual override if present, else the matched
+    # variant). Returns { 'w', 'h' } in mm, or nil when no design places this photo — the
+    # entry editor uses nil to disable the crop tool ("only possible if a design exists").
+    def yearbook_photo_box_for_field(username, field_id)
+        tpl = load_yearbook_override(username)
+        unless tpl
+            variant = pick_yearbook_variant_for_user(username, load_yearbook_variant_set)
+            tpl = variant && variant['template']
+        end
+        return nil unless tpl.is_a?(Hash)
+        (tpl['schemas'] || []).each do |page|
+            next unless page.is_a?(Array)
+            page.each do |e|
+                next unless e.is_a?(Hash) && e['type'] == 'image' && e['name'] == field_id
+                w = e['width'].to_f
+                h = e['height'].to_f
+                return { 'w' => w, 'h' => h } if w > 0 && h > 0
+            end
+        end
+        nil
     end
 
     # Build pdfme `inputs` for one user, given the schema currently saved.
@@ -1180,12 +1338,18 @@ class Main < Sinatra::Base
             comments_text = comment_rows.map { |r| r['text'].to_s.strip }.reject(&:empty?).join(' — ')
         end
 
-        # Iterate schema pages and collect field names that are actually placed.
+        # Iterate schema pages and collect field names that are actually placed, along with
+        # the box (width/height in mm) of any image element so photos can be cropped to fit.
         used_names = []
+        image_boxes = {}
         (template['schemas'] || []).each do |page|
             next unless page.is_a?(Array)
             page.each do |entry|
-                used_names << entry['name'] if entry.is_a?(Hash) && entry['name'].is_a?(String)
+                next unless entry.is_a?(Hash) && entry['name'].is_a?(String)
+                used_names << entry['name']
+                if entry['type'] == 'image' && entry['width'].to_f > 0 && entry['height'].to_f > 0
+                    image_boxes[entry['name']] ||= { 'w' => entry['width'].to_f, 'h' => entry['height'].to_f }
+                end
             end
         end
         used_names.uniq!
@@ -1203,9 +1367,10 @@ class Main < Sinatra::Base
 
             case cat['type']
             when 'image'
+                box = image_boxes[name]
                 data_url = case cat['source']
-                           when 'profile' then yearbook_upload_data_url(username, 'profile', cat['field_id'])
-                           when 'answer'  then yearbook_upload_data_url(username, 'answer',  cat['field_id'])
+                           when 'profile' then yearbook_upload_data_url(username, 'profile', cat['field_id'], box: box)
+                           when 'answer'  then yearbook_upload_data_url(username, 'answer',  cat['field_id'], box: box)
                            else nil
                            end
                 inputs_page[name] = data_url.to_s # empty string -> pdfme renders nothing

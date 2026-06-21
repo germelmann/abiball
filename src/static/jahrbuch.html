@@ -220,7 +220,44 @@
     .comment-card.pending { border-color: var(--bs-warning); background: rgba(var(--bs-warning-rgb), 0.05); }
     .comment-card.removed { opacity: 0.6; border-color: var(--bs-danger); }
     .comment-card .comment-meta { font-size: 0.8rem; color: var(--bs-secondary-color); }
+    .yb-crop-stage { display: flex; justify-content: center; }
+    .yb-crop-frame { position: relative; overflow: hidden; background: #222;
+        border-radius: 4px; box-shadow: 0 0 0 1px var(--bs-border-color); touch-action: none; }
+    .yb-crop-frame canvas { display: block; cursor: grab; }
+    .yb-crop-frame canvas:active { cursor: grabbing; }
 </style>
+
+<!-- Foto-Ausschnitt anpassen (Zoom / Verschieben / Drehen) -->
+<div class="modal fade" id="photo_crop_modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-crop"></i> Bildausschnitt anpassen</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-body-secondary small mb-2">Ziehe das Bild, um den Ausschnitt zu verschieben (z.&nbsp;B. damit der Kopf sichtbar bleibt). Das Original wird nicht verändert.</p>
+        <div class="yb-crop-stage mb-3">
+          <div class="yb-crop-frame" id="yb_crop_frame"><canvas id="yb_crop_canvas"></canvas></div>
+        </div>
+        <div class="mb-2 d-flex align-items-center gap-2">
+          <i class="bi bi-zoom-in"></i>
+          <input type="range" class="form-range flex-grow-1" id="yb_crop_zoom" min="1" max="5" step="0.01" value="1">
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="yb_crop_rot_left"><i class="bi bi-arrow-counterclockwise"></i> 90° links</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="yb_crop_rot_right"><i class="bi bi-arrow-clockwise"></i> 90° rechts</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="yb_crop_reset"><i class="bi bi-arrow-repeat"></i> Zurücksetzen</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span class="save-indicator me-auto" id="yb_crop_status"></span>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+        <button type="button" class="btn btn-primary" id="yb_crop_save"><i class="bi bi-check-lg"></i> Speichern</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
 let yearbookQuestions = [];
@@ -588,6 +625,12 @@ function renderUploadField(fieldConfig, context) {
                 item.append('<i class="bi bi-paperclip"></i>');
             }
             item.append('<a href="/api/yearbook/file/' + encodeURIComponent(up.id) + '" target="_blank" class="upload-name">' + escapeHtml(up.filename) + '</a>');
+            if (isImage && canUpload) {
+                const cropBtn = $('<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1">')
+                    .html('<i class="bi bi-crop"></i>').attr('title', 'Bildausschnitt anpassen');
+                cropBtn.on('click', function() { openPhotoCrop(context, fieldId); });
+                item.append(cropBtn);
+            }
             if (canDelete) {
                 const delBtn = $('<button type="button" class="btn btn-sm btn-outline-danger py-0 px-1">')
                     .html('<i class="bi bi-trash"></i>').attr('title', 'Löschen');
@@ -1149,4 +1192,182 @@ function escapeHtml(text) {
     return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
 }
 function escapeAttr(text) { return escapeHtml(text); }
+
+// ─────────────────── Foto-Ausschnitt (Zoom / Pan / Drehen) ───────────────────
+// The model mirrors the server exactly: rotate in 90° steps, zoom >= 1 relative to a
+// cover-fit of the design box, and offx/offy in [-1,1] (0 = centred, -1 = left/top edge,
+// +1 = right/bottom edge). The canvas preview shows the same crop the PDF will bake in.
+const ybCrop = {
+    context: null, fieldId: null, img: null,
+    box: { w: 1, h: 1 }, rotate: 0, zoom: 1, offx: 0, offy: 0,
+    frameW: 0, frameH: 0, drag: null
+};
+
+function openPhotoCrop(context, fieldId) {
+    const params = { context: context, field_id: fieldId };
+    if (viewUsername) params.target_username = viewUsername;
+    $('#yb_crop_status').html('');
+    api_call('/api/yearbook/photo/get_adjust', params, function(data) {
+        if (!data.success) {
+            showTemplateModal('Fehler', escapeHtml(data.error || 'Bild konnte nicht geladen werden.'), 'OK', 'btn-primary', null, null, function() {});
+            return;
+        }
+        if (!data.available || !data.box) {
+            showTemplateModal('Ausschnitt nicht einstellbar',
+                'Für dieses Foto gibt es noch kein Design, das es platziert. Sobald ein Jahrbuch-Design dieses Bild verwendet, kann der Ausschnitt angepasst werden.',
+                'OK', 'btn-primary', null, null, function() {});
+            return;
+        }
+        ybCrop.context = context;
+        ybCrop.fieldId = fieldId;
+        ybCrop.box = { w: data.box.w, h: data.box.h };
+        const t = data.transform || {};
+        ybCrop.rotate = [0, 90, 180, 270].includes(t.rotate) ? t.rotate : 0;
+        ybCrop.zoom = Math.min(5, Math.max(1, t.zoom || 1));
+        ybCrop.offx = Math.min(1, Math.max(-1, t.offx || 0));
+        ybCrop.offy = Math.min(1, Math.max(-1, t.offy || 0));
+
+        const img = new Image();
+        img.onload = function() {
+            ybCrop.img = img;
+            sizeCropFrame();
+            $('#yb_crop_zoom').val(ybCrop.zoom);
+            redrawCrop();
+            $('#photo_crop_modal').modal('show');
+        };
+        img.onerror = function() {
+            showTemplateModal('Fehler', 'Bild konnte nicht geladen werden.', 'OK', 'btn-primary', null, null, function() {});
+        };
+        // Browsers auto-apply EXIF orientation when drawing, matching the server's auto_orient.
+        img.src = data.image_url + (data.image_url.indexOf('?') >= 0 ? '&' : '?') + 'v=' + Date.now();
+    }, function() {
+        showTemplateModal('Fehler', 'Netzwerkfehler.', 'OK', 'btn-primary', null, null, function() {});
+    });
+}
+
+// Pick a display size for the frame that keeps the box aspect and fits the dialog.
+function sizeCropFrame() {
+    const aspect = ybCrop.box.w / ybCrop.box.h; // w/h
+    let fw, fh;
+    const maxW = Math.min(360, Math.max(220, window.innerWidth - 80));
+    const maxH = Math.min(360, Math.max(220, window.innerHeight - 320));
+    if (aspect >= 1) { fw = maxW; fh = fw / aspect; if (fh > maxH) { fh = maxH; fw = fh * aspect; } }
+    else { fh = maxH; fw = fh * aspect; if (fw > maxW) { fw = maxW; fh = fw / aspect; } }
+    ybCrop.frameW = Math.round(fw);
+    ybCrop.frameH = Math.round(fh);
+    $('#yb_crop_frame').css({ width: ybCrop.frameW + 'px', height: ybCrop.frameH + 'px' });
+}
+
+// Rotated (oriented) image dimensions after the manual 90° rotation.
+function cropRotatedDims() {
+    const swap = (ybCrop.rotate === 90 || ybCrop.rotate === 270);
+    return {
+        rw: swap ? ybCrop.img.naturalHeight : ybCrop.img.naturalWidth,
+        rh: swap ? ybCrop.img.naturalWidth : ybCrop.img.naturalHeight
+    };
+}
+
+function redrawCrop() {
+    const cnv = document.getElementById('yb_crop_canvas');
+    if (!cnv || !ybCrop.img) return;
+    const fw = ybCrop.frameW, fh = ybCrop.frameH;
+    cnv.width = fw; cnv.height = fh;
+    const ctx = cnv.getContext('2d');
+    ctx.clearRect(0, 0, fw, fh);
+
+    const dims = cropRotatedDims();
+    const coverScale = Math.max(fw / dims.rw, fh / dims.rh);
+    const s = coverScale * ybCrop.zoom;
+    const dw = dims.rw * s, dh = dims.rh * s;
+    const sx = dw - fw, sy = dh - fh;
+    const drawX = -sx * (ybCrop.offx + 1) / 2;
+    const drawY = -sy * (ybCrop.offy + 1) / 2;
+
+    ctx.save();
+    ctx.translate(drawX + dw / 2, drawY + dh / 2);
+    ctx.rotate(ybCrop.rotate * Math.PI / 180);
+    const ow = ybCrop.img.naturalWidth * s, oh = ybCrop.img.naturalHeight * s;
+    ctx.drawImage(ybCrop.img, -ow / 2, -oh / 2, ow, oh);
+    ctx.restore();
+}
+
+function cropClampOffsets() {
+    ybCrop.offx = Math.min(1, Math.max(-1, ybCrop.offx));
+    ybCrop.offy = Math.min(1, Math.max(-1, ybCrop.offy));
+}
+
+// Drag to pan: convert the pointer delta (px) into an offset delta over the available slack.
+function cropPointerDown(ev) {
+    if (!ybCrop.img) return;
+    const p = (ev.touches && ev.touches[0]) || ev;
+    ybCrop.drag = { x: p.clientX, y: p.clientY };
+    ev.preventDefault();
+}
+function cropPointerMove(ev) {
+    if (!ybCrop.drag || !ybCrop.img) return;
+    const p = (ev.touches && ev.touches[0]) || ev;
+    const dims = cropRotatedDims();
+    const coverScale = Math.max(ybCrop.frameW / dims.rw, ybCrop.frameH / dims.rh);
+    const s = coverScale * ybCrop.zoom;
+    const sx = dims.rw * s - ybCrop.frameW;
+    const sy = dims.rh * s - ybCrop.frameH;
+    const dx = p.clientX - ybCrop.drag.x;
+    const dy = p.clientY - ybCrop.drag.y;
+    if (sx > 0) ybCrop.offx -= (2 * dx) / sx;
+    if (sy > 0) ybCrop.offy -= (2 * dy) / sy;
+    cropClampOffsets();
+    ybCrop.drag = { x: p.clientX, y: p.clientY };
+    redrawCrop();
+    ev.preventDefault();
+}
+function cropPointerUp() { ybCrop.drag = null; }
+
+$(function() {
+    const frame = document.getElementById('yb_crop_frame');
+    if (frame) {
+        frame.addEventListener('mousedown', cropPointerDown);
+        window.addEventListener('mousemove', cropPointerMove);
+        window.addEventListener('mouseup', cropPointerUp);
+        frame.addEventListener('touchstart', cropPointerDown, { passive: false });
+        frame.addEventListener('touchmove', cropPointerMove, { passive: false });
+        frame.addEventListener('touchend', cropPointerUp);
+        frame.addEventListener('wheel', function(ev) {
+            if (!ybCrop.img) return;
+            ybCrop.zoom = Math.min(5, Math.max(1, ybCrop.zoom * (ev.deltaY < 0 ? 1.08 : 1 / 1.08)));
+            $('#yb_crop_zoom').val(ybCrop.zoom);
+            cropClampOffsets();
+            redrawCrop();
+            ev.preventDefault();
+        }, { passive: false });
+    }
+    $('#yb_crop_zoom').on('input', function() {
+        ybCrop.zoom = parseFloat(this.value) || 1;
+        cropClampOffsets();
+        redrawCrop();
+    });
+    $('#yb_crop_rot_left').on('click', function() { ybCrop.rotate = (ybCrop.rotate + 270) % 360; redrawCrop(); });
+    $('#yb_crop_rot_right').on('click', function() { ybCrop.rotate = (ybCrop.rotate + 90) % 360; redrawCrop(); });
+    $('#yb_crop_reset').on('click', function() {
+        ybCrop.rotate = 0; ybCrop.zoom = 1; ybCrop.offx = 0; ybCrop.offy = 0;
+        $('#yb_crop_zoom').val(1); redrawCrop();
+    });
+    $('#yb_crop_save').on('click', function() {
+        const params = {
+            context: ybCrop.context, field_id: ybCrop.fieldId,
+            rotate: ybCrop.rotate, zoom: ybCrop.zoom, offx: ybCrop.offx, offy: ybCrop.offy
+        };
+        if (viewUsername) params.target_username = viewUsername;
+        $('#yb_crop_status').html('<span class="text-body-secondary"><i class="bi bi-arrow-repeat"></i> Speichern...</span>');
+        api_call('/api/yearbook/photo/save_adjust', params, function(resp) {
+            if (resp.success) {
+                $('#yb_crop_status').html('<span class="text-success"><i class="bi bi-check-circle"></i> Gespeichert</span>');
+                setTimeout(function() { $('#photo_crop_modal').modal('hide'); }, 600);
+            } else {
+                $('#yb_crop_status').html('<span class="text-danger">' + escapeHtml(resp.error || 'Fehler') + '</span>');
+            }
+        }, function() {
+            $('#yb_crop_status').html('<span class="text-danger">Netzwerkfehler</span>');
+        });
+    });
+});
 </script>
