@@ -318,13 +318,17 @@ function loadYearbookData() {
         if (data.success) {
             yearbookQuestions = data.questions;
             yearbookProfileFields = data.profile_fields;
-            lockProfile = !!data.locked;
+            lockProfile = !!data.locked || !!data.entries_locked;
             lockComments = !!data.locked;
             lockSurveys = !!data.surveys_locked;
             lineAdjust = data.line_adjust || {};
             adjustableFields = data.adjustable_fields || [];
             commentsAdjustable = !!data.comments_adjustable;
             sessionCanManage = !!data.can_manage;
+            // Global print-prep lock (not a per-entry finalisation): show a fitting note.
+            if (data.entries_locked && !data.locked) {
+                $('#entry_locked_banner').html('<i class="bi bi-lock-fill"></i> <strong>Die Bearbeitung ist derzeit gesperrt.</strong> Das Jahrbuch wird gerade für den Druck vorbereitet, daher können Steckbrief, Umfragen und Uploads vorübergehend nicht geändert werden.');
+            }
             $('#entry_locked_banner').toggle(lockProfile);
             $('#surveys_locked_note').toggle(lockSurveys);
             configLoaded = true;
@@ -380,6 +384,13 @@ function loadViewEntry() {
         canManage = data.can_manage || false;
         canAdminComments = data.can_admin_comments || false;
         readOnlyMode = !data.is_own && !canManage;
+
+        // Global print-prep lock only bites non-managers (entries_locked is manager-exempt
+        // server-side); a manager viewing an entry keeps full editing here.
+        if (data.entries_locked) {
+            lockProfile = true;
+            lockSurveys = true;
+        }
 
         // A manually finalised entry is frozen: disable field editing even for managers and
         // point them to the entry editor (where the override can be reset).
@@ -1005,6 +1016,29 @@ function loadSentComments() {
     });
 }
 
+// Inline editor for a comment's text (managers only). Replaces the text with a textarea
+// plus Save/Cancel; on save the comment is updated and the list reloads.
+function startEditComment(card, textDiv, c) {
+    if (card.find('.yb-comment-edit').length) return; // already editing
+    const editor = $('<div class="yb-comment-edit mb-2">');
+    const ta = $('<textarea class="form-control mb-2" rows="3" maxlength="1000">').val(c.text);
+    const saveBtn = $('<button type="button" class="btn btn-sm btn-primary me-2"><i class="bi bi-check-lg"></i> Speichern</button>');
+    const cancelBtn = $('<button type="button" class="btn btn-sm btn-secondary">Abbrechen</button>');
+    editor.append(ta).append(saveBtn).append(cancelBtn);
+    textDiv.hide().after(editor);
+    ta.trigger('focus');
+    cancelBtn.on('click', function() { editor.remove(); textDiv.show(); });
+    saveBtn.on('click', function() {
+        const newText = (ta.val() || '').trim();
+        if (!newText) { showTemplateModal('Fehler', 'Der Kommentar darf nicht leer sein.', 'OK', 'btn-primary', null, null, function() {}); return; }
+        saveBtn.prop('disabled', true);
+        api_call('/api/yearbook/edit_comment', { comment_id: c.id, text: newText }, function(resp) {
+            if (resp.success) { loadReceivedComments(); }
+            else { saveBtn.prop('disabled', false); showTemplateModal('Fehler', escapeHtml(resp.error || 'Fehler'), 'OK', 'btn-primary', null, null, function() {}); }
+        });
+    });
+}
+
 function loadReceivedComments() {
     const container = $('#received_comments_container');
     container.html('<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>');
@@ -1094,6 +1128,14 @@ function loadReceivedComments() {
                     );
                 });
                 btnRow.append(removeBtn);
+            }
+
+            // Managers may edit a comment's text directly (typo fix / shorten to avoid overflow).
+            if (!isRemoved && canAdjustLayout()) {
+                const editBtn = $('<button type="button" class="btn btn-sm btn-outline-secondary">')
+                    .html('<i class="bi bi-pencil"></i> Bearbeiten');
+                editBtn.on('click', function() { startEditComment(card, textDiv, c); });
+                btnRow.append(editBtn);
             }
 
             if (isAdminView) {

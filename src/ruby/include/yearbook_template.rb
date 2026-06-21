@@ -1081,17 +1081,20 @@ class Main < Sinatra::Base
                 break if idx > start_idx
             end
 
+            text_top = y
             out << make_block_text_schema(x, y, width, text_h, text_font, font_size, text, text_color, alignment, line_height, bold: text_bold)
             y += text_h
+            # Manager nudge (keyed by comment id): adjust the gap between the comment text and
+            # its author line. The estimated text height is occasionally a line too tall, which
+            # leaves an oversized gap before the "— Absender" line; a negative value pulls the
+            # author (and everything below it) up. Never rises above the text's first line.
+            y += ((line_adjust || {})[c['id']] || 0).to_i * line_h_mm
+            y = text_top + line_h_mm if y < text_top + line_h_mm
             if author_str
                 out << make_block_text_schema(x, y, width, author_h, author_font, font_size, author_str, author_color, alignment, line_height, bold: author_bold)
                 y += author_h
             end
             y += entry_gap
-            # Manager nudge: add/remove blank lines of spacing after this specific comment
-            # (keyed by the comment's id), to fix the odd overlap without the full editor.
-            y += ((line_adjust || {})[c['id']] || 0).to_i * line_h_mm
-            y = y_start if y < y_start
             idx += 1
         end
         [out, idx]

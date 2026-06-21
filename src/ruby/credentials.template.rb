@@ -72,6 +72,13 @@ YEARBOOK_ALLOW_DELETE_ALL = false
 # single student's Steckbrief and comment moderation).
 YEARBOOK_SURVEYS_LOCKED = false
 
+# Freeze ALL entry editing for normal users (e.g. during print preparation): Steckbrief,
+# survey answers, file uploads and photo-crop adjustments are read-only for students, but
+# yearbook_manage users can still edit everything (their own and others'). This is a global
+# switch, independent of the per-entry manual override / finalisation. Enabling it also
+# implies the survey lock above for normal users.
+YEARBOOK_ENTRIES_LOCKED = false
+
 # Accent-colour palette for yearbook pages. yearbook_manage users assign one of these
 # colours to each student; students may pick one themselves only if
 # YEARBOOK_USER_COLOR_CHOICE_ENABLED is true. Each entry must be a #RRGGBB hex string.

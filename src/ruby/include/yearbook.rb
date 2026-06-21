@@ -50,10 +50,29 @@ class Main < Sinatra::Base
         defined?(YEARBOOK_SURVEYS_LOCKED) && YEARBOOK_SURVEYS_LOCKED
     end
 
-    # True if the survey answering is locked for the current session user (i.e. the
-    # global switch is on and the user is not a yearbook manager).
+    # Global switch (credentials) that freezes ALL entry editing for normal users while
+    # leaving yearbook_manage users free to edit — e.g. during print preparation.
+    def yearbook_entries_locked?
+        defined?(YEARBOOK_ENTRIES_LOCKED) && YEARBOOK_ENTRIES_LOCKED
+    end
+
+    # True when entry editing is frozen for the current session user (global switch on and
+    # the user is not a yearbook manager).
+    def yearbook_entries_locked_for_current_user?
+        yearbook_entries_locked? && !user_has_permission?("yearbook_manage")
+    end
+
+    # True if the survey answering is locked for the current session user (i.e. either global
+    # switch is on and the user is not a yearbook manager). The broader entries lock implies
+    # the survey lock.
     def yearbook_surveys_locked_for_current_user?
-        yearbook_surveys_locked? && !user_has_permission?("yearbook_manage")
+        (yearbook_surveys_locked? || yearbook_entries_locked?) && !user_has_permission?("yearbook_manage")
+    end
+
+    # Profile/Steckbrief editing is blocked when the entry is per-user locked (override /
+    # finalised, applies to everyone) OR the global entries lock is on for this non-manager.
+    def yearbook_profile_locked_for_user?(username)
+        yearbook_user_locked?(username) || yearbook_entries_locked_for_current_user?
     end
 
     def yearbook_schueler
@@ -396,6 +415,7 @@ class Main < Sinatra::Base
             # are frozen. Surveys are governed separately by the global switch below.
             locked: yearbook_user_locked?(@session_user[:username]),
             surveys_locked: yearbook_surveys_locked_for_current_user?,
+            entries_locked: yearbook_entries_locked_for_current_user?,
             line_adjust: yearbook_line_adjust_for_user(@session_user[:username]),
             adjustable_fields: yearbook_adjustable_fields_for_user(@session_user[:username]),
             comments_adjustable: yearbook_comments_adjustable_for_user(@session_user[:username]),
@@ -482,7 +502,7 @@ class Main < Sinatra::Base
         fields = data[:fields]
         assert(fields.is_a?(Hash), "Ungültige Felder")
         username = resolve_target_username(data[:target_username])
-        assert(!yearbook_user_locked?(username), "Der Eintrag wurde manuell finalisiert und ist gesperrt.")
+        assert(!yearbook_profile_locked_for_user?(username), "Die Bearbeitung dieses Eintrags ist derzeit gesperrt.")
 
         save_yearbook_profile(username, fields)
 
@@ -507,7 +527,7 @@ class Main < Sinatra::Base
         username = resolve_target_username(raw_target.empty? ? nil : raw_target)
 
         if context == 'profile'
-            assert(!yearbook_user_locked?(username), "Der Eintrag wurde manuell finalisiert und ist gesperrt.")
+            assert(!yearbook_profile_locked_for_user?(username), "Die Bearbeitung dieses Eintrags ist derzeit gesperrt.")
         else
             assert(!yearbook_surveys_locked_for_current_user?, "Die Umfragen sind derzeit gesperrt.")
         end
@@ -616,7 +636,7 @@ class Main < Sinatra::Base
         can_delete = (@session_user[:username] == owner_username) || user_has_permission?("yearbook_manage")
         assert(can_delete, "Keine Berechtigung")
         if result.first['context'] == 'profile'
-            assert(!yearbook_user_locked?(owner_username), "Der Eintrag wurde manuell finalisiert und ist gesperrt.")
+            assert(!yearbook_profile_locked_for_user?(owner_username), "Die Bearbeitung dieses Eintrags ist derzeit gesperrt.")
         else
             assert(!yearbook_surveys_locked_for_current_user?, "Die Umfragen sind derzeit gesperrt.")
         end
@@ -694,7 +714,7 @@ class Main < Sinatra::Base
         can_edit = (@session_user[:username] == username) || user_has_permission?("yearbook_manage")
         assert(can_edit, "Keine Berechtigung")
         if context == 'profile'
-            assert(!yearbook_user_locked?(username), "Der Eintrag wurde manuell finalisiert und ist gesperrt.")
+            assert(!yearbook_profile_locked_for_user?(username), "Die Bearbeitung dieses Eintrags ist derzeit gesperrt.")
         else
             assert(!yearbook_surveys_locked_for_current_user?, "Die Umfragen sind derzeit gesperrt.")
         end
@@ -892,6 +912,7 @@ class Main < Sinatra::Base
             # Entry manually finalised: data is frozen. Managers should use the entry
             # editor (and reset the override there) instead of editing fields here.
             locked: yearbook_user_locked?(target_username),
+            entries_locked: yearbook_entries_locked_for_current_user?,
             line_adjust: yearbook_line_adjust_for_user(target_username),
             adjustable_fields: yearbook_adjustable_fields_for_user(target_username),
             comments_adjustable: yearbook_comments_adjustable_for_user(target_username)
@@ -1310,6 +1331,36 @@ class Main < Sinatra::Base
         END_OF_QUERY
 
         respond(success: true, message: "Kommentar angenommen")
+    end
+
+    # Edit a comment's text. Reserved for yearbook managers / admins so they can quickly fix
+    # typos or shorten a comment (e.g. to resolve an overflow) during print preparation.
+    post '/api/yearbook/edit_comment' do
+        require_user!
+        require_yearbook_accessible!
+        assert(admin_logged_in? || user_has_permission?("yearbook_manage"), "Keine Berechtigung")
+
+        data = parse_request_data(
+            required_keys: [:comment_id, :text],
+            max_body_length: 4096,
+            max_string_length: 2048
+        )
+        comment_id = data[:comment_id].to_s.strip
+        text = data[:text].to_s.strip[0, MAX_YEARBOOK_COMMENT_LENGTH]
+        assert(!text.empty?, "Kommentar darf nicht leer sein")
+
+        existing = neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id})
+            MATCH (c:YearbookComment {id: $comment_id})
+            RETURN c.id AS id
+        END_OF_QUERY
+        assert(!existing.empty?, "Kommentar nicht gefunden")
+
+        neo4j_query(<<~END_OF_QUERY, {comment_id: comment_id, text: text, now: yearbook_timestamp})
+            MATCH (c:YearbookComment {id: $comment_id})
+            SET c.text = $text, c.edited_at = $now
+        END_OF_QUERY
+
+        respond(success: true, message: "Kommentar gespeichert")
     end
 
     # Remove a comment from own Schueler entry (soft delete; real admins can remove any)
