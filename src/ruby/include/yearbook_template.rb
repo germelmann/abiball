@@ -786,12 +786,12 @@ class Main < Sinatra::Base
             MATCH (commenter:User)-[:WROTE_YEARBOOK_COMMENT]->(c:YearbookComment)-[:ON_YEARBOOK_ENTRY_OF]->(s:Schueler {id: $schueler_id})
             WHERE COALESCE(c.status, 'pending') <> 'removed'
             OPTIONAL MATCH (commenter)-[:IS_SCHUELER]->(commenter_s:Schueler)
-            RETURN c.text AS text,
+            RETURN c.id AS id, c.text AS text,
                    COALESCE(c.status, 'pending') AS status,
                    COALESCE(commenter_s.name, commenter.name) AS commenter_name
             ORDER BY c.created_at
         END_OF_QUERY
-        rows.map { |r| { 'text' => r['text'].to_s, 'status' => r['status'], 'commenter_name' => r['commenter_name'].to_s } }
+        rows.map { |r| { 'id' => r['id'].to_s, 'text' => r['text'].to_s, 'status' => r['status'], 'commenter_name' => r['commenter_name'].to_s } }
     end
 
     # Measure the rendered height of a text element in mm using real font metrics.
@@ -1036,7 +1036,7 @@ class Main < Sinatra::Base
     # Returns [emitted_schemas, end_idx] so the caller can decide whether to paginate.
     # Comment text and author name are emitted as separate schemas so each can carry its
     # own font name, color, and bold flag — mirroring the label/value split in render_fields_block.
-    def render_comments_block(block, config, visible_comments, start_idx = 0)
+    def render_comments_block(block, config, visible_comments, start_idx = 0, line_adjust = {})
         out = []
         pos = block['position'] || { 'x' => 0, 'y' => 0 }
         x = pos['x'].to_f
@@ -1088,6 +1088,10 @@ class Main < Sinatra::Base
                 y += author_h
             end
             y += entry_gap
+            # Manager nudge: add/remove blank lines of spacing after this specific comment
+            # (keyed by the comment's id), to fix the odd overlap without the full editor.
+            y += ((line_adjust || {})[c['id']] || 0).to_i * line_h_mm
+            y = y_start if y < y_start
             idx += 1
         end
         [out, idx]
@@ -1100,17 +1104,17 @@ class Main < Sinatra::Base
     # The font size is reduced in 0.5pt steps down to a minimum of YEARBOOK_COMMENTS_MIN_FONT_PT.
     YEARBOOK_COMMENTS_MIN_FONT_PT = 5.0
 
-    def render_comments_block_autoscale(block, config, visible_comments, start_idx = 0)
+    def render_comments_block_autoscale(block, config, visible_comments, start_idx = 0, line_adjust = {})
         base_font = (config['font_size'] || block['fontSize'] || 10).to_f
         font = base_font
         while font >= YEARBOOK_COMMENTS_MIN_FONT_PT
             scaled_config = config.merge('font_size' => font.round(1))
-            emitted, end_idx = render_comments_block(block, scaled_config, visible_comments, start_idx)
+            emitted, end_idx = render_comments_block(block, scaled_config, visible_comments, start_idx, line_adjust)
             return [emitted, end_idx] if end_idx >= visible_comments.length
             font -= 0.5
         end
         # At minimum font size accept whatever fits.
-        render_comments_block(block, config.merge('font_size' => YEARBOOK_COMMENTS_MIN_FONT_PT), visible_comments, start_idx)
+        render_comments_block(block, config.merge('font_size' => YEARBOOK_COMMENTS_MIN_FONT_PT), visible_comments, start_idx, line_adjust)
     end
 
     # Expand block placeholders on a single page. Returns [new_page_schemas, end_idx]
@@ -1131,9 +1135,9 @@ class Main < Sinatra::Base
                     new_page.concat(render_fields_block(entry, cfg, profile, answers, line_adjust))
                 when 'comments'
                     if fit_all_comments
-                        emitted, next_idx = render_comments_block_autoscale(entry, cfg, visible_comments, end_idx)
+                        emitted, next_idx = render_comments_block_autoscale(entry, cfg, visible_comments, end_idx, line_adjust)
                     else
-                        emitted, next_idx = render_comments_block(entry, cfg, visible_comments, end_idx)
+                        emitted, next_idx = render_comments_block(entry, cfg, visible_comments, end_idx, line_adjust)
                     end
                     new_page.concat(emitted)
                     end_idx = next_idx
@@ -1361,6 +1365,21 @@ class Main < Sinatra::Base
             (cfg['fields'] || []).each { |f| fids << f }
         end
         fids.uniq
+    end
+
+    # True when this user's auto-generated design actually places a comments block — only then
+    # does a per-comment line nudge have any effect, so the entry page shows the control.
+    def yearbook_comments_adjustable_for_user(username)
+        return false if yearbook_user_has_override?(username)
+        variant = pick_yearbook_variant_for_user(username, load_yearbook_variant_set)
+        return false unless variant
+        placed = []
+        (variant['template'] || {})['schemas']&.each do |page|
+            next unless page.is_a?(Array)
+            page.each { |e| placed << e['name'] if e.is_a?(Hash) && e['name'].is_a?(String) }
+        end
+        blocks = variant['yearbook_blocks'] || {}
+        blocks.any? { |name, cfg| cfg.is_a?(Hash) && cfg['kind'] == 'comments' && placed.include?(name) }
     end
 
     # Build pdfme `inputs` for one user, given the schema currently saved.

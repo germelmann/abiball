@@ -398,6 +398,7 @@ class Main < Sinatra::Base
             surveys_locked: yearbook_surveys_locked_for_current_user?,
             line_adjust: yearbook_line_adjust_for_user(@session_user[:username]),
             adjustable_fields: yearbook_adjustable_fields_for_user(@session_user[:username]),
+            comments_adjustable: yearbook_comments_adjustable_for_user(@session_user[:username]),
             can_manage: user_has_permission?("yearbook_manage")
         )
     end
@@ -730,8 +731,10 @@ class Main < Sinatra::Base
         require_yearbook_accessible!
 
         data = parse_request_data(required_keys: [:field_id, :extra_lines], optional_keys: [:target_username])
+        # A key is either a profile/answer field id (identifier-style) or a comment id
+        # (base31, may start with a digit) — both fit this character class.
         field_id = data[:field_id].to_s.strip
-        assert(field_id =~ /\A[a-zA-Z_][a-zA-Z0-9_]*\z/, "Ungültige Feld-ID")
+        assert(field_id =~ /\A[a-zA-Z0-9_]{1,64}\z/, "Ungültige Feld-ID")
 
         username = resolve_target_username(data[:target_username].to_s.strip.empty? ? nil : data[:target_username])
         can_edit = (@session_user[:username] == username) || user_has_permission?("yearbook_manage")
@@ -890,7 +893,8 @@ class Main < Sinatra::Base
             # editor (and reset the override there) instead of editing fields here.
             locked: yearbook_user_locked?(target_username),
             line_adjust: yearbook_line_adjust_for_user(target_username),
-            adjustable_fields: yearbook_adjustable_fields_for_user(target_username)
+            adjustable_fields: yearbook_adjustable_fields_for_user(target_username),
+            comments_adjustable: yearbook_comments_adjustable_for_user(target_username)
         )
     end
 

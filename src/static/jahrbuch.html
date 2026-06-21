@@ -270,6 +270,7 @@ let mySchueler = null;
 let profileSaveTimer = null;
 let lineAdjust = {};        // field_id -> extra lines of spacing after the field in print
 let adjustableFields = [];  // field_ids placed in a fields-block of this user's design
+let commentsAdjustable = false; // design places a comments block -> per-comment nudge works
 let sessionCanManage = false; // does the logged-in user hold yearbook_manage (own-mode gate)
 let answerSaveTimers = {};
 let sentCommentsCanWithdraw = false;
@@ -322,6 +323,7 @@ function loadYearbookData() {
             lockSurveys = !!data.surveys_locked;
             lineAdjust = data.line_adjust || {};
             adjustableFields = data.adjustable_fields || [];
+            commentsAdjustable = !!data.comments_adjustable;
             sessionCanManage = !!data.can_manage;
             $('#entry_locked_banner').toggle(lockProfile);
             $('#surveys_locked_note').toggle(lockSurveys);
@@ -374,6 +376,7 @@ function loadViewEntry() {
         myUploads = data.uploads || [];
         lineAdjust = data.line_adjust || {};
         adjustableFields = data.adjustable_fields || [];
+        commentsAdjustable = !!data.comments_adjustable;
         canManage = data.can_manage || false;
         canAdminComments = data.can_admin_comments || false;
         readOnlyMode = !data.is_own && !canManage;
@@ -524,10 +527,12 @@ function saveAccentColor(color) {
 // fields-block of the design are adjustable; overrides/finalised-by-editor return none.
 function canAdjustLayout() { return viewUsername ? canManage : sessionCanManage; }
 
-// Build the "+/- Zeilen" control shown next to a field label. Returns null when this field
-// isn't adjustable or the viewer may not change layout.
-function makeLineAdjustControl(fieldId) {
-    if (!canAdjustLayout() || adjustableFields.indexOf(fieldId) < 0) return null;
+// Build the "+/- Zeilen" control shown next to a field label or comment. `key` is the
+// field id or comment id; `allowed` gates whether it's adjustable. Returns null when not
+// adjustable or the viewer may not change layout.
+function makeLineAdjustControl(key, allowed) {
+    if (!allowed || !canAdjustLayout()) return null;
+    const fieldId = key;
     const wrap = $('<span class="ms-2 d-inline-flex align-items-center" style="white-space:nowrap; font-weight: normal;">');
     wrap.attr('title', 'Zeilen-Abstand nach diesem Feld im Druck. Bei Überlappung erhöhen, bei zu großer Lücke verringern.');
     const lbl = $('<small class="text-body-secondary me-1"><i class="bi bi-distribute-vertical"></i> Abstand</small>');
@@ -584,7 +589,7 @@ function renderProfileFields() {
             '  ' + inputEl +
             '</div>'
         );
-        const adj = makeLineAdjustControl(field.id);
+        const adj = makeLineAdjustControl(field.id, adjustableFields.indexOf(field.id) >= 0);
         if (adj) fieldWrap.find('label').append(adj);
         container.append(fieldWrap);
     });
@@ -613,7 +618,7 @@ function renderQuestions() {
             ? ' <span class="badge bg-secondary badge-anonymous"><i class="bi bi-incognito"></i> Anonym</span>'
             : ' <span class="badge bg-primary badge-anonymous"><i class="bi bi-person"></i> Namentlich</span>';
         const qLabel = $('<div class="question-label">' + escapeHtml(q.question) + badge + '</div>');
-        const qAdj = makeLineAdjustControl(q.id);
+        const qAdj = makeLineAdjustControl(q.id, adjustableFields.indexOf(q.id) >= 0);
         if (qAdj) qLabel.append(qAdj);
         questionDiv.append(qLabel);
 
@@ -1048,6 +1053,10 @@ function loadReceivedComments() {
             if (isRemoved) textDiv.addClass('text-decoration-line-through text-body-secondary');
             textDiv.text(c.text);
             card.append(textDiv);
+
+            // Per-comment print-spacing nudge (managers only, when the design has a comments block).
+            const cAdj = makeLineAdjustControl(c.id, commentsAdjustable && !isRemoved);
+            if (cAdj) card.append($('<div class="mb-2">').append(cAdj));
 
             // Action buttons
             const btnRow = $('<div class="d-flex gap-2 flex-wrap">');
