@@ -268,6 +268,10 @@ let myUploads = [];
 let commentableSchueler = [];
 let mySchueler = null;
 let profileSaveTimer = null;
+let lineAdjust = {};        // field_id -> extra lines of spacing after the field in print
+let adjustableFields = [];  // field_ids placed in a fields-block of this user's design
+let commentsAdjustable = false; // design places a comments block -> per-comment nudge works
+let sessionCanManage = false; // does the logged-in user hold yearbook_manage (own-mode gate)
 let answerSaveTimers = {};
 let sentCommentsCanWithdraw = false;
 
@@ -317,6 +321,10 @@ function loadYearbookData() {
             lockProfile = !!data.locked;
             lockComments = !!data.locked;
             lockSurveys = !!data.surveys_locked;
+            lineAdjust = data.line_adjust || {};
+            adjustableFields = data.adjustable_fields || [];
+            commentsAdjustable = !!data.comments_adjustable;
+            sessionCanManage = !!data.can_manage;
             $('#entry_locked_banner').toggle(lockProfile);
             $('#surveys_locked_note').toggle(lockSurveys);
             configLoaded = true;
@@ -366,6 +374,9 @@ function loadViewEntry() {
         myAnswers = data.answers || {};
         myProfile = data.profile || {};
         myUploads = data.uploads || [];
+        lineAdjust = data.line_adjust || {};
+        adjustableFields = data.adjustable_fields || [];
+        commentsAdjustable = !!data.comments_adjustable;
         canManage = data.can_manage || false;
         canAdminComments = data.can_admin_comments || false;
         readOnlyMode = !data.is_own && !canManage;
@@ -512,6 +523,47 @@ function saveAccentColor(color) {
 
 // ─────────────────── Steckbrief ───────────────────
 
+// Layout managers (and the entry owner) may adjust this field. Only fields placed in a
+// fields-block of the design are adjustable; overrides/finalised-by-editor return none.
+function canAdjustLayout() { return viewUsername ? canManage : sessionCanManage; }
+
+// Build the "+/- Zeilen" control shown next to a field label or comment. `key` is the
+// field id or comment id; `allowed` gates whether it's adjustable. Returns null when not
+// adjustable or the viewer may not change layout.
+function makeLineAdjustControl(key, allowed) {
+    if (!allowed || !canAdjustLayout()) return null;
+    const fieldId = key;
+    const wrap = $('<span class="ms-2 d-inline-flex align-items-center" style="white-space:nowrap; font-weight: normal;">');
+    wrap.attr('title', 'Zeilen-Abstand nach diesem Feld im Druck. Bei Überlappung erhöhen, bei zu großer Lücke verringern.');
+    const lbl = $('<small class="text-body-secondary me-1"><i class="bi bi-distribute-vertical"></i> Abstand</small>');
+    const minus = $('<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1">').html('<i class="bi bi-dash-lg"></i>');
+    const val = $('<span class="badge bg-secondary mx-1" style="min-width: 2.2em;">');
+    const plus = $('<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1">').html('<i class="bi bi-plus-lg"></i>');
+    function refreshVal() {
+        const c = parseInt(lineAdjust[fieldId] || 0, 10) || 0;
+        val.text((c > 0 ? '+' : '') + c);
+    }
+    refreshVal();
+    minus.on('click', function(e) { e.preventDefault(); changeLineAdjust(fieldId, -1, refreshVal); });
+    plus.on('click', function(e) { e.preventDefault(); changeLineAdjust(fieldId, +1, refreshVal); });
+    wrap.append(lbl).append(minus).append(val).append(plus);
+    return wrap;
+}
+
+function changeLineAdjust(fieldId, delta, cb) {
+    const cur = parseInt(lineAdjust[fieldId] || 0, 10) || 0;
+    let next = cur + delta;
+    if (next > 10) next = 10;
+    if (next < -10) next = -10;
+    if (next === cur) return;
+    const params = { field_id: fieldId, extra_lines: next };
+    if (viewUsername) params.target_username = viewUsername;
+    api_call('/api/yearbook/line_adjust/save', params, function(resp) {
+        if (resp.success) { lineAdjust = resp.line_adjust || {}; if (cb) cb(); }
+        else { showTemplateModal('Fehler', escapeHtml(resp.error || 'Konnte nicht gespeichert werden.'), 'OK', 'btn-primary', null, null, function() {}); }
+    });
+}
+
 function renderProfileFields() {
     const container = $('#profile_fields_container');
     container.empty();
@@ -531,12 +583,15 @@ function renderProfileFields() {
             inputEl = '<input type="text" class="form-control yearbook-profile-field" id="yb_profile_' +
                 escapeHtml(field.id) + '" value="' + escapeAttr(value) + '" maxlength="500"' + disabledAttr + '>';
         }
-        container.append(
+        const fieldWrap = $(
             '<div class="mb-3">' +
-            '  <label class="form-label fw-semibold" for="yb_profile_' + escapeHtml(field.id) + '">' + escapeHtml(field.label) + '</label>' +
+            '  <label class="form-label fw-semibold d-inline-flex align-items-center flex-wrap" for="yb_profile_' + escapeHtml(field.id) + '">' + escapeHtml(field.label) + '</label>' +
             '  ' + inputEl +
             '</div>'
         );
+        const adj = makeLineAdjustControl(field.id, adjustableFields.indexOf(field.id) >= 0);
+        if (adj) fieldWrap.find('label').append(adj);
+        container.append(fieldWrap);
     });
 
     if (!readOnlyMode && !lockProfile) {
@@ -562,7 +617,10 @@ function renderQuestions() {
         let badge = q.anonymous
             ? ' <span class="badge bg-secondary badge-anonymous"><i class="bi bi-incognito"></i> Anonym</span>'
             : ' <span class="badge bg-primary badge-anonymous"><i class="bi bi-person"></i> Namentlich</span>';
-        questionDiv.append('<div class="question-label">' + escapeHtml(q.question) + badge + '</div>');
+        const qLabel = $('<div class="question-label">' + escapeHtml(q.question) + badge + '</div>');
+        const qAdj = makeLineAdjustControl(q.id, adjustableFields.indexOf(q.id) >= 0);
+        if (qAdj) qLabel.append(qAdj);
+        questionDiv.append(qLabel);
 
         if (q.restricted_for_manager) {
             questionDiv.append('<div class="text-body-secondary"><i class="bi bi-shield-lock"></i> Anonyme Antworten anderer Nutzer kannst du nicht sehen. Wende dich im Ausnahmefall an einen Administrator.</div>');
@@ -995,6 +1053,10 @@ function loadReceivedComments() {
             if (isRemoved) textDiv.addClass('text-decoration-line-through text-body-secondary');
             textDiv.text(c.text);
             card.append(textDiv);
+
+            // Per-comment print-spacing nudge (managers only, when the design has a comments block).
+            const cAdj = makeLineAdjustControl(c.id, commentsAdjustable && !isRemoved);
+            if (cAdj) card.append($('<div class="mb-2">').append(cAdj));
 
             // Action buttons
             const btnRow = $('<div class="d-flex gap-2 flex-wrap">');
