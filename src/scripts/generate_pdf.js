@@ -18,7 +18,7 @@ const { PDFDocument } = require('pdf-lib');
 // A build marker lets us confirm at runtime that the *current* version of
 // this script is the one Ruby invoked (and not a stale copy still cached in
 // the running container). Bump the date when you touch this file.
-const BUILD_MARKER = 'yearbook-pdf-gen 2026-06-19.emoji-perglyph';
+const BUILD_MARKER = 'yearbook-pdf-gen 2026-06-22.print-size-216x303';
 const DEBUG_LOG_PATH = '/gen/log/yearbook_pdf_debug.log';
 const RUN_ID = crypto.randomBytes(4).toString('hex');
 
@@ -502,10 +502,121 @@ const emojiText = pdfmeText
     })
   : text;
 
+// ---------- print-size expansion (A4 design -> 216x303 print, with bleed) -----
+// The yearbook is printed at 216x303mm — A4 (210x297) plus a 3mm bleed on every side.
+// Designs are still authored at A4 in the pdfme Designer and stored unchanged; this is
+// the single place every generated page passes through, so we enlarge the page here at
+// render time. Goal (per the spec): keep the OLD A4 designs working untouched, let just
+// the background grow, and leave everything else exactly where it was relative to the
+// trimmed page.
+//
+// How each schema element is transformed:
+//   * text  — kept at its original size and simply recentred (shifted by the per-axis
+//             bleed). Text never bleeds off the page, so it stays put visually.
+//   * other (image / rectangle / ellipse / line) — any side that touches a page edge is
+//             extended outward to the NEW page edge, so full-page backgrounds, edge
+//             photos and decorative rules fill the bleed instead of leaving a blank
+//             strip. Sides that don't touch an edge just shift by the bleed, so the
+//             element keeps its size and relative position.
+//
+// The base page itself grows too: a blank basePdf is resized to the print size; a
+// background-PDF basePdf is stretched to fill it (a ~2-3% non-uniform enlargement of the
+// backdrop art only — the foreground keeps its exact size). Idempotent: a design already
+// at (or larger than) the print size is left untouched, so future 216x303 designs work
+// without a double-expand.
+const PRINT_W_MM = 216;
+const PRINT_H_MM = 303;
+const EDGE_EPS_MM = 0.5; // an element within 0.5mm of an edge counts as touching it
+
+async function getBasePdfSizeMm(base) {
+  if (base && typeof base === 'object' && typeof base.width === 'number' && typeof base.height === 'number') {
+    return { w: base.width, h: base.height, kind: 'blank' };
+  }
+  if (typeof base === 'string' && base.startsWith('data:')) {
+    const doc = await PDFDocument.load(dataUrlToBytes(base));
+    const p = doc.getPage(0);
+    return { w: p.getWidth() / MM_TO_PT, h: p.getHeight() / MM_TO_PT, kind: 'pdf' };
+  }
+  return null;
+}
+
+// Stretch every page of a (data-URL) background PDF to the target size and return a new
+// data URL. Only the background art is rescaled; foreground schemas are positioned by
+// pdfme on top afterwards.
+async function scalePdfDataUrlTo(base, targetWmm, targetHmm) {
+  const src = await PDFDocument.load(dataUrlToBytes(base));
+  const out = await PDFDocument.create();
+  const tw = mm2pt(targetWmm);
+  const th = mm2pt(targetHmm);
+  const count = src.getPageCount();
+  const embedded = await out.embedPdf(src, Array.from({ length: count }, (_, i) => i));
+  for (let i = 0; i < count; i++) {
+    const page = out.addPage([tw, th]);
+    page.drawPage(embedded[i], { x: 0, y: 0, width: tw, height: th });
+  }
+  const bytes = await out.save();
+  return 'data:application/pdf;base64,' + Buffer.from(bytes).toString('base64');
+}
+
+async function expandTemplateToPrintSize(template) {
+  if (!template || !Array.isArray(template.schemas)) return template;
+  const size = await getBasePdfSizeMm(template.basePdf);
+  if (!size) { dbg('print-size: basePdf size unknown — leaving template as-is'); return template; }
+
+  // Never shrink/crop: if a design is already bigger than the print size on an axis we
+  // grow the page to match it rather than clipping it.
+  const targetW = Math.max(PRINT_W_MM, size.w);
+  const targetH = Math.max(PRINT_H_MM, size.h);
+  const bleedX = (targetW - size.w) / 2;
+  const bleedY = (targetH - size.h) / 2;
+  if (bleedX <= 0 && bleedY <= 0) {
+    dbg(`print-size: base ${size.w.toFixed(1)}x${size.h.toFixed(1)}mm already >= print — no change`);
+    return template;
+  }
+
+  const baseW = size.w;
+  const baseH = size.h;
+  template.schemas.forEach((page) => {
+    if (!Array.isArray(page)) return;
+    page.forEach((entry) => {
+      if (!entry || typeof entry !== 'object' || !entry.position) return;
+      const x = Number(entry.position.x) || 0;
+      const y = Number(entry.position.y) || 0;
+      const w = Number(entry.width) || 0;
+      const h = Number(entry.height) || 0;
+      if (entry.type === 'text') {
+        // Text is never extended into the bleed — keep its box and just recentre it.
+        entry.position.x = x + bleedX;
+        entry.position.y = y + bleedY;
+        return;
+      }
+      const left   = (x <= EDGE_EPS_MM) ? 0 : x + bleedX;
+      const top    = (y <= EDGE_EPS_MM) ? 0 : y + bleedY;
+      const right  = (x + w >= baseW - EDGE_EPS_MM) ? targetW : (x + w + bleedX);
+      const bottom = (y + h >= baseH - EDGE_EPS_MM) ? targetH : (y + h + bleedY);
+      entry.position.x = left;
+      entry.position.y = top;
+      entry.width = right - left;
+      entry.height = bottom - top;
+    });
+  });
+
+  if (size.kind === 'blank') {
+    template.basePdf = Object.assign({}, template.basePdf, {
+      width: targetW, height: targetH, padding: [0, 0, 0, 0],
+    });
+  } else {
+    template.basePdf = await scalePdfDataUrlTo(template.basePdf, targetW, targetH);
+  }
+  dbg(`print-size: expanded base ${baseW.toFixed(1)}x${baseH.toFixed(1)} -> ${targetW}x${targetH}mm (bleed ${bleedX.toFixed(1)}/${bleedY.toFixed(1)}mm, ${size.kind})`);
+  return template;
+}
+
 async function generateOne(job, options) {
   if (!job.template || !Array.isArray(job.template.schemas)) {
     throw new Error('job.template.schemas missing or invalid');
   }
+  await expandTemplateToPrintSize(job.template);
   const inputs = Array.isArray(job.inputs) && job.inputs.length > 0 ? job.inputs : [{}];
   return generate({
     template: job.template,
