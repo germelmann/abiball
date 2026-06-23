@@ -130,6 +130,11 @@ skipped  = 0
 failed   = 0
 processed = 0
 
+# Content that had to be left out for lack of space, collected per user and listed at
+# the very end. build_yearbook_jobs_for_user appends a record per affected user.
+omissions = []
+name_by_username = targets.each_with_object({}) { |r, h| h[r['username']] = r['display_name'].to_s }
+
 targets.each_slice(options[:batch]).with_index do |slice, slice_idx|
   slice_jobs = []
   slice_prepared = 0
@@ -140,7 +145,7 @@ targets.each_slice(options[:batch]).with_index do |slice, slice_idx|
     name = row['display_name'].to_s
     say format('[%3d/%3d] %s (%s) … ', processed, total, name, username)
     begin
-      jobs = app.build_yearbook_jobs_for_user(username, variant_set)
+      jobs = app.build_yearbook_jobs_for_user(username, variant_set, omissions: omissions)
       if jobs.nil? || jobs.empty?
         sayln 'übersprungen (keine Vorlage/Daten)'
         skipped += 1
@@ -200,4 +205,20 @@ sayln '=' * 60
 sayln "Fertig in #{fmt_duration(Time.now - started_at)}."
 sayln "Gerendert: #{rendered}, übersprungen: #{skipped}, Fehler: #{failed}"
 sayln "Datei: #{final_out} (#{fmt_bytes(final_size)})"
+
+# Weggelassene Inhalte: was wegen Platzmangel nicht ins PDF passte, je Eintrag mit
+# Name und Benutzername (ID) sowie der konkret entfallenen Inhalte.
+if omissions.empty?
+  sayln 'Weggelassene Inhalte: keine.'
+else
+  sayln '-' * 60
+  sayln "Weggelassene Inhalte (Platzmangel): #{omissions.size} Eintrag/Einträge betroffen"
+  omissions.each do |rec|
+    username = rec['username']
+    name = name_by_username[username]
+    name = username if name.nil? || name.empty?
+    sayln "- #{name} (#{username}):"
+    (rec['items'] || []).each { |item| sayln "    • #{item}" }
+  end
+end
 sayln '(Auf dem Host liegt sie unter <DATA_PATH>/raw/' + File.basename(final_out) + ', sofern --out im /raw liegt.)'

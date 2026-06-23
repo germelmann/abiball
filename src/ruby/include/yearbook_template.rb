@@ -937,7 +937,7 @@ class Main < Sinatra::Base
         s
     end
 
-    def render_fields_block(block, config, profile, answers, line_adjust = {})
+    def render_fields_block(block, config, profile, answers, line_adjust = {}, omissions: nil)
         out = []
         pos = block['position'] || { 'x' => 0, 'y' => 0 }
         x = pos['x'].to_f
@@ -960,8 +960,10 @@ class Main < Sinatra::Base
         show_labels = config['show_labels'] != false
         inline = config['label_inline'] == true
 
+        fields = config['fields'] || []
         y = y_start
-        (config['fields'] || []).each do |fid|
+        dropped_from = nil  # index of the first field that no longer fit (rest dropped too)
+        fields.each_with_index do |fid, fidx|
             value = yearbook_block_field_value(fid, profile, answers)
             next if value.empty?
             label = yearbook_block_field_label(fid)
@@ -982,7 +984,10 @@ class Main < Sinatra::Base
                     label_with_colon = "#{label}:"
                     label_h = estimate_text_height_mm(label_with_colon, font_size, line_height, width, font_name: label_font)
                     value_h = estimate_text_height_mm(value, font_size, line_height, width, font_name: value_font)
-                    break if y + label_h + value_h > max_y + 0.5
+                    if y + label_h + value_h > max_y + 0.5
+                        dropped_from = fidx
+                        break
+                    end
                     out << make_block_text_schema(x, y, width, label_h, label_font, font_size, label_with_colon, label_color, alignment, line_height, bold: label_bold)
                     y += label_h
                     out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, value_color, alignment, line_height, bold: value_bold)
@@ -991,7 +996,10 @@ class Main < Sinatra::Base
                     value_w = width - label_w
                     row_h = [estimate_text_height_mm(label_text, font_size, line_height, label_w, font_name: label_font),
                              estimate_text_height_mm(value, font_size, line_height, value_w, font_name: value_font)].max
-                    break if y + row_h > max_y + 0.5
+                    if y + row_h > max_y + 0.5
+                        dropped_from = fidx
+                        break
+                    end
                     out << make_block_text_schema(x, y, label_w, row_h, label_font, font_size, label_text, label_color, alignment, line_height, bold: label_bold)
                     out << make_block_text_schema(x + label_w, y, value_w, row_h, value_font, font_size, value, value_color, alignment, line_height, bold: value_bold)
                     y += row_h + entry_gap
@@ -1002,14 +1010,20 @@ class Main < Sinatra::Base
                 label_with_colon = "#{label}:"
                 label_h = estimate_text_height_mm(label_with_colon, font_size, line_height, width, font_name: label_font)
                 value_h = estimate_text_height_mm(value, font_size, line_height, width, font_name: value_font)
-                break if y + label_h + value_h > max_y + 0.5
+                if y + label_h + value_h > max_y + 0.5
+                    dropped_from = fidx
+                    break
+                end
                 out << make_block_text_schema(x, y, width, label_h, label_font, font_size, label_with_colon, label_color, alignment, line_height, bold: label_bold)
                 y += label_h
                 out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, value_color, alignment, line_height, bold: value_bold)
                 y += value_h + entry_gap
             else
                 value_h = estimate_text_height_mm(value, font_size, line_height, width, font_name: value_font)
-                break if y + value_h > max_y + 0.5
+                if y + value_h > max_y + 0.5
+                    dropped_from = fidx
+                    break
+                end
                 out << make_block_text_schema(x, y, width, value_h, value_font, font_size, value, value_color, alignment, line_height, bold: value_bold)
                 y += value_h + entry_gap
             end
@@ -1019,7 +1033,23 @@ class Main < Sinatra::Base
             y += extra_mm
             y = y_start if y < y_start
         end
+
+        # Report fields that didn't fit: the field that overflowed plus every following
+        # field that has a (non-empty) value — empty ones would never have rendered anyway.
+        if omissions && dropped_from
+            fields[dropped_from..].each do |fid|
+                v = yearbook_block_field_value(fid, profile, answers)
+                next if v.empty?
+                omissions << "Feld „#{yearbook_block_field_label(fid)}“: #{yearbook_truncate_for_report(v)}"
+            end
+        end
         out
+    end
+
+    # Shorten a value for the "omitted content" report so a long answer doesn't flood the log.
+    def yearbook_truncate_for_report(str, limit = 60)
+        s = str.to_s.gsub(/\s+/, ' ').strip
+        s.length > limit ? "#{s[0, limit - 1]}…" : s
     end
 
     # Filter the raw comment list down to what this block should render (approved + optionally
@@ -1125,7 +1155,7 @@ class Main < Sinatra::Base
     # share — the page builder uses that to paginate the comments-overflow page.
     # When fit_all_comments is true the comments block auto-scales to fit all remaining
     # comments rather than stopping at the block boundary.
-    def expand_page_blocks(page_schemas, blocks_config, profile, answers, visible_comments, comments_start_idx, fit_all_comments: false, line_adjust: {})
+    def expand_page_blocks(page_schemas, blocks_config, profile, answers, visible_comments, comments_start_idx, fit_all_comments: false, line_adjust: {}, omissions: nil)
         return [page_schemas, comments_start_idx] unless blocks_config.is_a?(Hash) && !blocks_config.empty?
 
         new_page = []
@@ -1135,7 +1165,7 @@ class Main < Sinatra::Base
             if cfg.is_a?(Hash)
                 case cfg['kind']
                 when 'fields'
-                    new_page.concat(render_fields_block(entry, cfg, profile, answers, line_adjust))
+                    new_page.concat(render_fields_block(entry, cfg, profile, answers, line_adjust, omissions: omissions))
                 when 'comments'
                     if fit_all_comments
                         emitted, next_idx = render_comments_block_autoscale(entry, cfg, visible_comments, end_idx, line_adjust)
@@ -1640,7 +1670,12 @@ class Main < Sinatra::Base
     # Templates that define more than two pages are capped (see cap_yearbook_pages): the first
     # (Steckbrief) and last (comments) page are kept, the rest are dropped. If the student has
     # no comments but the last page has a comments block, the page is still rendered once.
-    def build_yearbook_jobs_for_user(username, variant_set)
+    # When an `omissions` array is given, any content this user's entry could not show
+    # because it ran out of space (overflowing field-block fields, comments that didn't
+    # fit even at the smallest font) is appended as a record
+    # { 'username' => ..., 'items' => [human-readable strings] }. The whole-yearbook export
+    # worker collects these and lists them at the end of the run.
+    def build_yearbook_jobs_for_user(username, variant_set, omissions: nil)
         # Manual override: a manager has hand-edited this user's page. Render it
         # verbatim, independent of the variant design. All schemas are forced
         # readOnly so their baked content is used (inputs are empty).
@@ -1695,13 +1730,15 @@ class Main < Sinatra::Base
         # overflow, we auto-scale the comment font so all comments fit in exactly one
         # page — enforcing the two-page-per-person (Steckbrief + Kommentare) layout.
         last_idx = pages.length - 1
+        has_comments_block = pages.any? { |p| page_has_comments_block?(p, blocks_config) }
+        field_omissions = []
         pages.each_with_index do |page_schemas, page_idx|
             is_last = (page_idx == last_idx)
             fit_all = is_last && page_has_comments_block?(page_schemas, blocks_config)
 
             expanded_page, next_comments_idx = expand_page_blocks(
                 page_schemas, blocks_config, profile, answers, visible_comments, comments_idx,
-                fit_all_comments: fit_all, line_adjust: line_adjust
+                fit_all_comments: fit_all, line_adjust: line_adjust, omissions: field_omissions
             )
             page_template = base_template.dup
             page_template['schemas'] = [expanded_page]
@@ -1710,6 +1747,22 @@ class Main < Sinatra::Base
             jobs << { 'template' => page_template, 'inputs' => inputs } if inputs
 
             comments_idx = next_comments_idx if next_comments_idx > comments_idx
+        end
+
+        # Collect everything dropped for lack of space. Comments are only "omitted" when the
+        # template actually has a comments block to show them — without one they were never
+        # meant to render and are not a space problem.
+        if omissions
+            items = field_omissions
+            if has_comments_block && comments_idx < visible_comments.length
+                leftover = visible_comments[comments_idx..]
+                authors = leftover.map { |c| c['commenter_name'].to_s.strip }.reject(&:empty?)
+                preview = authors.first(5).join(', ')
+                preview += ', …' if authors.length > 5
+                items << "#{leftover.length} Kommentar(e) ohne Platz" +
+                         (preview.empty? ? '' : " (von #{preview})")
+            end
+            omissions << { 'username' => username, 'items' => items } unless items.empty?
         end
 
         jobs
