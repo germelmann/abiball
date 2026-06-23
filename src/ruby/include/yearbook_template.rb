@@ -1046,6 +1046,30 @@ class Main < Sinatra::Base
         out
     end
 
+    # Like render_fields_block but tries progressively smaller font sizes until every field
+    # fits inside the block, mirroring render_comments_block_autoscale. Instead of silently
+    # dropping the fields that overflow, we first shrink the text (in 0.5pt steps down to
+    # YEARBOOK_FIELDS_MIN_FONT_PT) so the whole Steckbrief fits on the page. Only when even the
+    # smallest font can't make everything fit do we fall back to rendering what fits and
+    # reporting the rest via `omissions`.
+    YEARBOOK_FIELDS_MIN_FONT_PT = 5.0
+
+    def render_fields_block_autoscale(block, config, profile, answers, line_adjust = {}, omissions: nil)
+        base_font = (config['font_size'] || block['fontSize'] || 11).to_f
+        font = base_font
+        while font >= YEARBOOK_FIELDS_MIN_FONT_PT
+            scaled_config = config.merge('font_size' => font.round(1))
+            # Probe with a throwaway omissions list so we can detect "everything fit" without
+            # polluting the real report (which other blocks may already have written to).
+            probe = []
+            out = render_fields_block(block, scaled_config, profile, answers, line_adjust, omissions: probe)
+            return out if probe.empty?
+            font -= 0.5
+        end
+        # At minimum font size accept whatever fits and report the rest.
+        render_fields_block(block, config.merge('font_size' => YEARBOOK_FIELDS_MIN_FONT_PT), profile, answers, line_adjust, omissions: omissions)
+    end
+
     # Shorten a value for the "omitted content" report so a long answer doesn't flood the log.
     def yearbook_truncate_for_report(str, limit = 60)
         s = str.to_s.gsub(/\s+/, ' ').strip
@@ -1165,7 +1189,7 @@ class Main < Sinatra::Base
             if cfg.is_a?(Hash)
                 case cfg['kind']
                 when 'fields'
-                    new_page.concat(render_fields_block(entry, cfg, profile, answers, line_adjust, omissions: omissions))
+                    new_page.concat(render_fields_block_autoscale(entry, cfg, profile, answers, line_adjust, omissions: omissions))
                 when 'comments'
                     if fit_all_comments
                         emitted, next_idx = render_comments_block_autoscale(entry, cfg, visible_comments, end_idx, line_adjust)
