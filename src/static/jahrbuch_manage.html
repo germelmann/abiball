@@ -414,7 +414,10 @@ function renderManageProfiles() {
                 .html('<i class="bi bi-file-earmark-pdf"></i>')
                 .attr('title', 'PDF-Vorschau')
                 .on('click', function() {
-                    window.open('/api/yearbook/preview/' + encodeURIComponent(profile.username), '_blank');
+                    // Cache-Buster: ohne ihn liefert der Browser beim erneuten Öffnen
+                    // derselben URL die alte (gecachte) PDF, sodass Layout-Änderungen
+                    // (z. B. die Auto-Verkleinerung der Felder) nicht sichtbar werden.
+                    window.open('/api/yearbook/preview/' + encodeURIComponent(profile.username) + '?t=' + Date.now(), '_blank');
                 });
             actions.append(previewBtn);
 

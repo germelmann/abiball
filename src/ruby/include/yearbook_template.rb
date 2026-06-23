@@ -1660,6 +1660,38 @@ class Main < Sinatra::Base
         template
     end
 
+    # Smallest font pdfme may shrink a Steckbrief field to when auto-fitting its text.
+    YEARBOOK_FIELD_MIN_FONT_PT = 5.0
+
+    # Enable pdfme's native auto-shrink (dynamicFontSize) on every placed catalog TEXT field
+    # (the Steckbrieffelder + the combined bio block + the collected-comments meta field).
+    # A long value then scales down to fit its box instead of overflowing — mirroring the
+    # comments block's shrink-to-fit. The font only ever shrinks below the design size
+    # (max = the schema's configured size) and never drops past YEARBOOK_FIELD_MIN_FONT_PT,
+    # so short values keep their original size and nothing shrinks to an unreadable degree.
+    # Block-generated children (their names are not catalog fields) are left untouched — those
+    # are already sized by the Ruby autoscale. Image fields are skipped.
+    def enable_dynamic_font_for_catalog_text_fields!(template, catalog)
+        (template['schemas'] || []).each do |page|
+            next unless page.is_a?(Array)
+            page.each do |entry|
+                next unless entry.is_a?(Hash)
+                name = entry['name']
+                next unless name.is_a?(String)
+                next unless entry['type'].to_s == 'text'
+                cat = catalog[name]
+                next unless cat && cat['type'] != 'image'
+                base = (entry['fontSize'] || 11).to_f
+                entry['dynamicFontSize'] = {
+                    'min' => [YEARBOOK_FIELD_MIN_FONT_PT, base].min,
+                    'max' => base,
+                    'fit' => 'vertical'
+                }
+            end
+        end
+        template
+    end
+
     # Build a single render job for one user: pick variant, apply accent colour,
     # build inputs. Returns nil if the user doesn't exist.
     # If the variant references a background PDF that exists on disk, replace the
@@ -1734,7 +1766,8 @@ class Main < Sinatra::Base
         apply_background_pdf_to_template!(base_template, variant['background_pdf'])
 
         blocks_config = variant['yearbook_blocks'] || {}
-        catalog_names = yearbook_template_field_catalog.map { |f| f['name'] }
+        catalog = yearbook_template_field_catalog.each_with_object({}) { |f, h| h[f['name']] = f }
+        catalog_names = catalog.keys
         line_adjust = yearbook_line_adjust_for_user(username)
 
         pages = base_template['schemas'] || []
@@ -1767,6 +1800,7 @@ class Main < Sinatra::Base
             page_template = base_template.dup
             page_template['schemas'] = [expanded_page]
             force_static_schemas_readonly!(page_template, catalog_names)
+            enable_dynamic_font_for_catalog_text_fields!(page_template, catalog)
             inputs = build_yearbook_inputs_for_user(username, page_template)
             jobs << { 'template' => page_template, 'inputs' => inputs } if inputs
 
@@ -2044,6 +2078,10 @@ class Main < Sinatra::Base
         # Content-Disposition when @respond_filename is non-nil, which it isn't here).
         respond_raw_with_mimetype(pdf_bytes, 'application/pdf')
         response.headers['Content-Disposition'] = "inline; filename=\"jahrbuch_#{username}.pdf\""
+        # The preview URL is identical across requests, so browsers happily serve a stale
+        # cached PDF after a layout/data change. Forbid caching so every open re-renders.
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
     end
 
     # Bulk PDF export: every student rendered with their individually picked variant and
