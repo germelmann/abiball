@@ -755,6 +755,7 @@ function playErrorSound() {
                                 <button id="mode-toggle-btn" class="btn btn-success">
                                     <i class="bi bi-check-circle-fill"></i> Auto-Einlösung
                                 </button>
+                                #{user_has_permission?("guest_list") ? "<a href='/guest_list' id='guest-list-btn' class='btn btn-outline-primary flex-grow-0' title='Zur Gästeliste'><i class='bi bi-card-checklist'></i></a>" : ""}
                                 <button id="fullscreen-btn" class="btn btn-outline-secondary flex-grow-0" title="Vollbild">
                                     <i class="bi bi-arrows-fullscreen"></i>
                                 </button>

@@ -1,0 +1,336 @@
+#{site_for_user_with_permission!("guest_list")}
+<style>
+    /* Tablet-optimised guest list: never wider than the viewport, no sideways scroll */
+    .gl-wrap {
+        max-width: 100%;
+        padding: 0.5rem 0.5rem 4rem 0.5rem;
+        margin: 0 auto;
+    }
+
+    /* Sticky toolbar so event/search/counter stay in reach while scrolling */
+    .gl-toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: var(--bs-body-bg);
+        padding: 0.5rem 0;
+        border-bottom: 1px solid var(--bs-border-color);
+    }
+
+    .gl-toolbar .form-control,
+    .gl-toolbar .form-select {
+        font-size: 1.05rem;
+    }
+
+    .gl-counter {
+        font-size: 0.95rem;
+        white-space: nowrap;
+    }
+
+    /* The table must exactly fit the tablet width — fixed layout + hidden overflow
+       guarantees the user never has to scroll left/right. */
+    .gl-table-wrap {
+        width: 100%;
+        overflow-x: hidden;
+    }
+
+    table.gl-table {
+        width: 100%;
+        table-layout: fixed;
+        border-collapse: collapse;
+        margin: 0;
+    }
+
+    table.gl-table col.gl-col-action { width: 132px; }
+
+    table.gl-table th,
+    table.gl-table td {
+        padding: 0.55rem 0.5rem;
+        vertical-align: middle;
+        border-bottom: 1px solid var(--bs-border-color);
+    }
+
+    table.gl-table thead th {
+        background: var(--bs-tertiary-bg);
+        font-weight: 600;
+    }
+
+    .gl-name {
+        font-size: 1.1rem;
+        font-weight: 600;
+        line-height: 1.2;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .gl-sub {
+        font-size: 0.8rem;
+        color: var(--bs-secondary-color);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-top: 2px;
+    }
+
+    .gl-action-cell { text-align: right; }
+
+    /* Big, finger-friendly check-in control */
+    .gl-check-btn {
+        width: 100%;
+        min-height: 46px;
+        font-size: 0.95rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+    }
+
+    .gl-badge-unpaid {
+        display: inline-block;
+        width: 100%;
+        min-height: 46px;
+        line-height: 46px;
+        text-align: center;
+        font-size: 0.9rem;
+    }
+
+    tr.gl-row.checked td { background: rgba(25, 135, 84, 0.12); }
+
+    .gl-age {
+        font-size: 0.72rem;
+        vertical-align: middle;
+    }
+
+    @media (max-width: 480px) {
+        .gl-check-btn span.gl-check-label { display: none; }
+        table.gl-table col.gl-col-action { width: 64px; }
+    }
+</style>
+
+<div class='gl-wrap'>
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-1">
+        <h1 class="h4 mb-0"><i class="bi bi-card-checklist"></i> Gästeliste</h1>
+        #{(user_is_scanner_only? || user_has_permission?("manage_orders")) ? "<a href='/ticket_scanner' class='btn btn-outline-secondary btn-sm'><i class='bi bi-qr-code-scan'></i> Zum Scanner</a>" : ""}
+    </div>
+
+    <div class="gl-toolbar">
+        <div class="row g-2 align-items-end">
+            <div class="col-12 col-md-4">
+                <label for="gl_event" class="form-label mb-1"><i class="bi bi-calendar-event"></i> Event</label>
+                <select class="form-select" id="gl_event">
+                    <option value="">– Event wählen –</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-5">
+                <label for="gl_search" class="form-label mb-1"><i class="bi bi-search"></i> Suche</label>
+                <input type="text" class="form-control" id="gl_search" placeholder="Name suchen…" autocomplete="off">
+            </div>
+            <div class="col-8 col-md-2 d-flex align-items-center">
+                <div class="form-check form-switch mb-1">
+                    <input class="form-check-input" type="checkbox" role="switch" id="gl_only_open">
+                    <label class="form-check-label" for="gl_only_open">Nur offene</label>
+                </div>
+            </div>
+            <div class="col-4 col-md-1 text-end">
+                <span class="badge bg-success gl-counter" id="gl_counter">0 / 0</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="gl-table-wrap">
+        <table class="gl-table">
+            <colgroup>
+                <col>
+                <col class="gl-col-action">
+            </colgroup>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th class="text-end">Check-in</th>
+                </tr>
+            </thead>
+            <tbody id="gl_body">
+            </tbody>
+        </table>
+        <div id="gl_empty" class="text-center text-muted py-5" style="display:none;">
+            <i class="bi bi-people" style="font-size: 2rem;"></i>
+            <p class="mt-2 mb-0">Keine Teilnehmer gefunden</p>
+        </div>
+    </div>
+</div>
+
+<script>
+let glParticipants = [];
+
+function glAgeBadgeClass(color) {
+    switch (color) {
+        case 'danger':  return 'bg-danger';
+        case 'warning': return 'bg-warning text-dark';
+        case 'info':    return 'bg-info text-dark';
+        case 'success': return 'bg-success';
+        default:        return 'bg-secondary';
+    }
+}
+
+function glKey(p) {
+    return p.order_id + '|' + p.ticket_number;
+}
+
+function glUpdateCounter() {
+    const total = glParticipants.length;
+    const checked = glParticipants.filter(p => p.redeemed).length;
+    $('#gl_counter').text(checked + ' / ' + total);
+}
+
+function glRender() {
+    const term = ($('#gl_search').val() || '').toLowerCase().trim();
+    const onlyOpen = $('#gl_only_open').is(':checked');
+    const tokens = term.split(/\s+/).filter(t => t.length > 0);
+
+    const body = $('#gl_body');
+    body.empty();
+
+    let shown = 0;
+    for (const p of glParticipants) {
+        if (onlyOpen && p.redeemed) continue;
+        if (tokens.length > 0) {
+            const hay = (p.name || '').toLowerCase();
+            if (!tokens.every(t => hay.includes(t))) continue;
+        }
+        shown++;
+
+        const row = $('<tr class="gl-row">').attr('data-key', glKey(p));
+        if (p.redeemed) row.addClass('checked');
+
+        // Name cell with a small disambiguation subline (age / tier / reference)
+        let ageBadge = '';
+        if (p.age_category) {
+            ageBadge = '<span class="badge gl-age ' + glAgeBadgeClass(p.age_color) + ' me-1">' + p.age_category + '</span>';
+        }
+        const subParts = [];
+        if (p.tier_name) subParts.push(p.tier_name);
+        if (p.payment_reference) subParts.push('#' + p.payment_reference);
+        const sub = subParts.join(' · ');
+
+        const nameCell = $('<td>');
+        nameCell.append($('<div class="gl-name">').text(p.name || '-').attr('title', p.name || ''));
+        nameCell.append($('<div class="gl-sub">').html(ageBadge + $('<span>').text(sub).html()));
+        row.append(nameCell);
+
+        // Action cell
+        const actionCell = $('<td class="gl-action-cell">');
+        if (!p.paid) {
+            actionCell.append('<span class="badge bg-secondary gl-badge-unpaid" title="Bestellung nicht bezahlt"><i class="bi bi-exclamation-circle"></i> Unbezahlt</span>');
+        } else if (p.redeemed) {
+            const btn = $('<button type="button" class="btn btn-success gl-check-btn">')
+                .html('<i class="bi bi-check-circle-fill"></i> <span class="gl-check-label">Eingecheckt</span>');
+            btn.on('click', function() { glCheckOut(p); });
+            actionCell.append(btn);
+        } else {
+            const btn = $('<button type="button" class="btn btn-outline-success gl-check-btn">')
+                .html('<i class="bi bi-circle"></i> <span class="gl-check-label">Einchecken</span>');
+            btn.on('click', function() { glCheckIn(p); });
+            actionCell.append(btn);
+        }
+        row.append(actionCell);
+        body.append(row);
+    }
+
+    $('#gl_empty').toggle(shown === 0);
+    glUpdateCounter();
+}
+
+function glCheckIn(p) {
+    api_call('/api/guest_list_check_in', {
+        order_id: p.order_id,
+        ticket_number: p.ticket_number
+    }, function(data) {
+        if (data.success) {
+            p.redeemed = true;
+            p.redeemed_at = data.redeemed_at;
+            p.redeemed_by = data.redeemed_by;
+            glRender();
+        } else {
+            showTemplateModal('Fehler', data.error || 'Check-in fehlgeschlagen', 'OK', 'btn-danger', null, null, function() {});
+            glReload();
+        }
+    }, { no_please_wait: true });
+}
+
+function glCheckOut(p) {
+    showTemplateModal(
+        'Check-in rückgängig machen',
+        'Check-in für <strong>' + $('<span>').text(p.name || '').html() + '</strong> wirklich rückgängig machen?',
+        'Rückgängig', 'btn-warning',
+        'Abbrechen', 'btn-secondary',
+        function() {
+            api_call('/api/guest_list_check_out', {
+                order_id: p.order_id,
+                ticket_number: p.ticket_number
+            }, function(data) {
+                if (data.success) {
+                    p.redeemed = false;
+                    p.redeemed_at = null;
+                    p.redeemed_by = null;
+                    glRender();
+                } else {
+                    showTemplateModal('Fehler', data.error || 'Aktion fehlgeschlagen', 'OK', 'btn-danger', null, null, function() {});
+                    glReload();
+                }
+            }, { no_please_wait: true });
+        }
+    );
+}
+
+function glReload() {
+    const eventId = $('#gl_event').val();
+    const params = {};
+    if (eventId) params.event_id = eventId;
+    api_call('/api/guest_list_participants', params, function(data) {
+        if (!data.success) {
+            showTemplateModal('Fehler', 'Fehler beim Laden: ' + (data.error || 'Unbekannt'), 'OK', 'btn-danger', null, null, function() {});
+            return;
+        }
+        glParticipants = data.participants || [];
+        glRender();
+    }, { no_please_wait: true });
+}
+
+$(document).ready(function() {
+    // Live search / filter
+    $('#gl_search').on('input', glRender);
+    $('#gl_only_open').on('change', glRender);
+
+    // Event selection – remember choice on this device
+    $('#gl_event').on('change', function() {
+        localStorage.setItem('guestListEventId', $(this).val());
+        glReload();
+    });
+
+    api_call('/api/guest_list_events', {}, function(data) {
+        if (data.success && data.events) {
+            data.events.forEach(function(ev) {
+                $('#gl_event').append($('<option>').val(ev.id).text(ev.name || ev.id));
+            });
+        }
+
+        // Restore previously selected event (URL param wins), else pick first
+        const urlParams = new URLSearchParams(window.location.search);
+        const fromUrl = urlParams.get('event_id');
+        const saved = localStorage.getItem('guestListEventId');
+        let selected = '';
+        if (fromUrl && $('#gl_event option[value="' + fromUrl.replace(/"/g, '') + '"]').length) {
+            selected = fromUrl;
+        } else if (saved && $('#gl_event option[value="' + saved.replace(/"/g, '') + '"]').length) {
+            selected = saved;
+        } else if (data.events && data.events.length === 1) {
+            selected = data.events[0].id;
+        }
+        if (selected) {
+            $('#gl_event').val(selected);
+        }
+        glReload();
+    });
+});
+</script>

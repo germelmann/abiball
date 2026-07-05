@@ -14,6 +14,7 @@ class Main < Sinatra::Base
         { key: 'yearbook_manage', icon: 'bi-book', label: 'Jahrbucheinträge verwalten', group: 'Jahrbuch', edit: true },
         { key: 'view_logs', icon: 'bi-file-text', label: 'Logs ansehen', group: 'Admin', edit: false },
         { key: 'seat_planning', icon: 'bi-diagram-3', label: 'Sitzplanung', group: 'Veranstaltung', edit: false },
+        { key: 'guest_list', icon: 'bi-card-checklist', label: 'Gästeliste (Check-in)', group: 'Veranstaltung', edit: false },
         { key: 'admin', icon: 'bi-gear', label: 'Admin', group: 'Admin', edit: nil }
     ];
 
@@ -134,6 +135,7 @@ class Main < Sinatra::Base
             event << {label: 'Zahlungen',               icon: 'bi-cash-stack',    url: '/payments'}                if user_has_permission?("manage_orders")
             event << {label: 'Kassenprüfung',           icon: 'bi-calculator',    url: '/kassenpruefung'}          if user_has_permission?("manage_orders")
             event << {label: 'Ticket Scanner',          icon: 'bi-qr-code-scan',  url: '/ticket_scanner'}          if user_has_permission?("manage_orders")
+            event << {label: 'Gästeliste',              icon: 'bi-card-checklist',url: '/guest_list'}              if user_has_permission?("guest_list")
             event << {label: 'Sitzplanung',             icon: 'bi-diagram-3',     url: '/seat_planning'}           if user_has_permission?("seat_planning")
             groups << {label: 'Veranstaltung', icon: 'bi-calendar-event', items: event} unless event.empty?
 
@@ -449,7 +451,18 @@ class Main < Sinatra::Base
     end
     
     def redirect_scanner_only_users!
-        if user_is_scanner_only? && request.path_info != "#{WEB_ROOT}/ticket_scanner" && request.path_info != "/ticket_scanner"
+        return unless user_is_scanner_only?
+
+        # Scanner-only devices are locked to the scanner page. If such a device
+        # additionally holds the guest_list permission, it may also reach the
+        # guest list page (so staff can check in people without a ticket and
+        # then keep scanning).
+        allowed_paths = ["#{WEB_ROOT}/ticket_scanner", "/ticket_scanner"]
+        if user_has_permission?("guest_list")
+            allowed_paths += ["#{WEB_ROOT}/guest_list", "/guest_list"]
+        end
+
+        unless allowed_paths.include?(request.path_info)
             redirect "#{WEB_ROOT}/ticket_scanner"
         end
     end

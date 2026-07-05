@@ -4353,6 +4353,194 @@ class Main < Sinatra::Base
     end
 
     # ===========================================
+    # Guest list check-in (tablet-friendly manual check-in)
+    #
+    # These endpoints back the /guest_list page. They are gated by the dedicated
+    # "guest_list" permission so a device can be set up to *only* do check-in
+    # without the broader "view_users" / "manage_orders" rights. Scanner devices
+    # that also carry the permission can jump to the guest list and back.
+    # ===========================================
+
+    # Active events for the guest list event picker. Unlike /api/get_events this
+    # is not restricted to public events, since a check-in device must be able to
+    # select whichever event is currently taking place.
+    post "/api/guest_list_events" do
+        require_user_with_permission!("guest_list")
+
+        events = neo4j_query(<<~END_OF_QUERY)
+            MATCH (e:Event)
+            WHERE e.active = true
+            RETURN e.id AS id,
+                   COALESCE(e.name, e.id) AS name,
+                   e.start_datetime AS start_datetime,
+                   e.year AS year
+            ORDER BY COALESCE(e.start_datetime, '') DESC, COALESCE(e.name, '')
+        END_OF_QUERY
+
+        respond(success: true, events: events.map { |e| {
+            id: e['id'],
+            name: e['name'],
+            start_datetime: e['start_datetime'],
+            year: e['year']
+        }})
+    end
+
+    # Participants for the guest list, alphabetically by name. Includes the
+    # order/payment status so the frontend can tell which entries may be checked
+    # in and which are (still) unpaid.
+    post "/api/guest_list_participants" do
+        require_user_with_permission!("guest_list")
+        data = parse_request_data(optional_keys: [:event_id])
+
+        event_id = data[:event_id]
+        event_filter = (event_id && !event_id.to_s.empty?) ? "WHERE e.id = $event_id" : ""
+        query_params = (event_id && !event_id.to_s.empty?) ? { event_id: event_id } : {}
+
+        rows = neo4j_query(<<~END_OF_QUERY, query_params)
+            MATCH (u:User)-[:PLACED]->(o:TicketOrder)-[:FOR]->(e:Event)
+            #{event_filter}
+            MATCH (o)-[:INCLUDES]->(p:Participant)
+            WHERE p.name IS NOT NULL AND p.name <> ''
+            RETURN
+                p.name          AS name,
+                p.birthdate     AS birthdate,
+                p.ticket_number AS ticket_number,
+                COALESCE(p.redeemed, false) AS redeemed,
+                p.redeemed_at   AS redeemed_at,
+                p.redeemed_by   AS redeemed_by,
+                o.id            AS order_id,
+                o.payment_reference AS payment_reference,
+                COALESCE(o.status, '') AS order_status,
+                COALESCE(o.tier_name, '') AS tier_name,
+                e.id            AS event_id,
+                COALESCE(e.name, '') AS event_name,
+                e.start_datetime AS event_start_datetime
+            ORDER BY toLower(p.name)
+        END_OF_QUERY
+
+        participants = rows.map do |row|
+            birthdate = row['birthdate']
+            reference_date = begin
+                event_start = row['event_start_datetime']
+                (event_start && !event_start.empty?) ? DateTime.parse(event_start).to_date : Date.today
+            rescue ArgumentError
+                Date.today
+            end
+            age_status = get_age_status(birthdate, reference_date)
+            order_status = row['order_status']
+            {
+                name:              row['name'],
+                ticket_number:     row['ticket_number'],
+                order_id:          row['order_id'],
+                payment_reference: row['payment_reference'],
+                tier_name:         row['tier_name'],
+                order_status:      order_status,
+                paid:              (order_status == 'paid' || order_status == 'overpaid'),
+                age_category:      age_status ? age_status[:category] : nil,
+                age_color:         age_status ? age_status[:color]    : nil,
+                redeemed:          row['redeemed'] ? true : false,
+                redeemed_at:       row['redeemed_at'],
+                redeemed_by:       row['redeemed_by']
+            }
+        end
+
+        checked_in = participants.count { |p| p[:redeemed] }
+
+        respond(
+            success: true,
+            participants: participants,
+            statistics: {
+                total: participants.size,
+                checked_in: checked_in,
+                not_checked_in: participants.size - checked_in
+            }
+        )
+    end
+
+    # Check a participant in from the guest list (equivalent to redeeming their
+    # ticket manually). Only paid orders may be checked in.
+    post "/api/guest_list_check_in" do
+        require_user_with_permission!("guest_list")
+        data = parse_request_data(required_keys: [:order_id, :ticket_number])
+
+        order_id = data[:order_id]
+        ticket_number = data[:ticket_number]
+
+        ticket_result = neo4j_query(<<~END_OF_QUERY, {order_id: order_id, ticket_number: ticket_number})
+            MATCH (o:TicketOrder {id: $order_id})-[:INCLUDES]->(p:Participant {ticket_number: $ticket_number})
+            RETURN COALESCE(p.redeemed, false) AS redeemed, o.status AS order_status, p.name AS name
+        END_OF_QUERY
+
+        if ticket_result.empty?
+            respond(success: false, error: "Teilnehmer nicht gefunden")
+            return
+        end
+
+        ticket = ticket_result.first
+
+        unless ticket['order_status'] == 'paid' || ticket['order_status'] == 'overpaid'
+            respond(success: false, error: "Bestellung ist nicht bezahlt")
+            return
+        end
+
+        if ticket['redeemed']
+            respond(success: false, error: "Teilnehmer ist bereits eingecheckt")
+            return
+        end
+
+        redeemed_at = DateTime.now.to_s
+        neo4j_query(<<~END_OF_QUERY, {order_id: order_id, ticket_number: ticket_number, redeemed_at: redeemed_at, redeemed_by: @session_user[:email]})
+            MATCH (o:TicketOrder {id: $order_id})-[:INCLUDES]->(p:Participant {ticket_number: $ticket_number})
+            SET p.redeemed = true,
+                p.redeemed_at = $redeemed_at,
+                p.redeemed_by = $redeemed_by
+        END_OF_QUERY
+
+        log("Gästeliste Check-in: #{ticket['name']} (Bestellung #{order_id}, Ticket ##{ticket_number})")
+
+        respond(
+            success: true,
+            message: "Eingecheckt",
+            redeemed_at: redeemed_at,
+            redeemed_by: @session_user[:email]
+        )
+    end
+
+    # Undo a guest list check-in.
+    post "/api/guest_list_check_out" do
+        require_user_with_permission!("guest_list")
+        data = parse_request_data(required_keys: [:order_id, :ticket_number])
+
+        order_id = data[:order_id]
+        ticket_number = data[:ticket_number]
+
+        result = neo4j_query(<<~END_OF_QUERY, {order_id: order_id, ticket_number: ticket_number})
+            MATCH (o:TicketOrder {id: $order_id})-[:INCLUDES]->(p:Participant {ticket_number: $ticket_number})
+            RETURN COALESCE(p.redeemed, false) AS redeemed, p.name AS name
+        END_OF_QUERY
+
+        if result.empty?
+            respond(success: false, error: "Teilnehmer nicht gefunden")
+            return
+        end
+
+        unless result.first['redeemed']
+            respond(success: false, error: "Teilnehmer ist nicht eingecheckt")
+            return
+        end
+
+        neo4j_query(<<~END_OF_QUERY, {order_id: order_id, ticket_number: ticket_number})
+            MATCH (o:TicketOrder {id: $order_id})-[:INCLUDES]->(p:Participant {ticket_number: $ticket_number})
+            SET p.redeemed = false
+            REMOVE p.redeemed_at, p.redeemed_by
+        END_OF_QUERY
+
+        log("Gästeliste Check-in rückgängig gemacht: #{result.first['name']} (Bestellung #{order_id}, Ticket ##{ticket_number}) durch #{@session_user[:email]}")
+
+        respond(success: true, message: "Check-in rückgängig gemacht")
+    end
+
+    # ===========================================
     # Seat Planning - Users and their participants (flat per row, grouped by user in Ruby)
     # ===========================================
     post "/api/get_seat_planning_data" do
